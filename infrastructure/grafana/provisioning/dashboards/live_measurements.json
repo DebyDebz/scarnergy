@@ -1,0 +1,57 @@
+{
+  "title": "Scarnergy — Live Measurements",
+  "uid": "scarnergy-live",
+  "refresh": "5s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Measurements / Minute",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 0, "w": 16, "h": 8 },
+      "datasource": { "uid": "timescaledb" },
+      "targets": [{
+        "rawSql": "SELECT time_bucket('1 minute', measured_at) AS time, COUNT(*) AS measurements, SUM(is_anomaly::int) AS anomalies FROM measurements WHERE $__timeFilter(measured_at) AND NOT is_deleted GROUP BY 1 ORDER BY 1",
+        "format": "time_series"
+      }],
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "palette-classic" } },
+        "overrides": [{ "matcher": { "id": "byName", "options": "anomalies" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }] }]
+      }
+    },
+    {
+      "id": 2,
+      "title": "Anomaly Rate %",
+      "type": "gauge",
+      "gridPos": { "x": 16, "y": 0, "w": 8, "h": 8 },
+      "datasource": { "uid": "timescaledb" },
+      "targets": [{
+        "rawSql": "SELECT 100.0 * SUM(is_anomaly::int) / NULLIF(COUNT(*), 0) AS anomaly_rate FROM measurements WHERE measured_at > NOW() - INTERVAL '1 hour' AND NOT is_deleted",
+        "format": "table"
+      }],
+      "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 5 }, { "color": "red", "value": 15 }] } } }
+    },
+    {
+      "id": 3,
+      "title": "Measurements by Device",
+      "type": "barchart",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "uid": "timescaledb" },
+      "targets": [{
+        "rawSql": "SELECT d.nickname AS device, COUNT(m.*) AS count FROM measurements m JOIN ble_devices d ON d.id = m.device_id WHERE m.measured_at > NOW() - INTERVAL '1 hour' AND NOT m.is_deleted GROUP BY d.nickname ORDER BY count DESC",
+        "format": "table"
+      }]
+    },
+    {
+      "id": 4,
+      "title": "Value Distribution (mm)",
+      "type": "histogram",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "uid": "timescaledb" },
+      "targets": [{
+        "rawSql": "SELECT value_mm FROM measurements WHERE $__timeFilter(measured_at) AND NOT is_deleted AND NOT is_anomaly",
+        "format": "table"
+      }]
+    }
+  ]
+}

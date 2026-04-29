@@ -1,0 +1,250 @@
+version: "3.9"
+
+# ============================================================
+# SCARNERGY v2.0 — Local Development Stack
+# Runs the full Supabase + TimescaleDB environment locally.
+#
+# Usage:
+#   docker compose up -d          # Start all services
+#   docker compose logs -f db     # Watch database logs
+#   docker compose down -v        # Stop and remove volumes (wipes data)
+#
+# After starting, access:
+#   Supabase Studio:  http://localhost:54323
+#   PostgREST API:    http://localhost:54321
+#   DB direct:        postgresql://postgres:postgres@localhost:54322/postgres
+#   Inbucket (email): http://localhost:54324
+# ============================================================
+
+name: scarnergy
+
+x-common-env: &common-env
+  POSTGRES_HOST: db
+  POSTGRES_PORT: 5432
+  POSTGRES_DB: postgres
+  POSTGRES_USER: postgres
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+
+services:
+
+  # ─── PostgreSQL + TimescaleDB ──────────────────────────────────────────
+  db:
+    image: timescale/timescaledb:2.13.0-pg15
+    container_name: scarnergy_db
+    restart: unless-stopped
+    ports:
+      - "54322:5432"
+    environment:
+      <<: *common-env
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    volumes:
+      - db_data:/home/postgres/pgdata/data
+      - ./supabase/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ─── Supabase Auth (GoTrue) ────────────────────────────────────────────
+  auth:
+    image: supabase/gotrue:v2.151.0
+    container_name: scarnergy_auth
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "9999:9999"
+    environment:
+      GOTRUE_API_HOST: "0.0.0.0"
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: ${API_EXTERNAL_URL:-http://localhost:8000}
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: "postgres://supabase_auth_admin:${POSTGRES_PASSWORD:-postgres}@db:5432/postgres"
+      GOTRUE_SITE_URL: ${SITE_URL:-http://localhost:3000}
+      GOTRUE_URI_ALLOW_LIST: "*"
+      GOTRUE_DISABLE_SIGNUP: "false"
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_EXP: 3600
+      GOTRUE_JWT_SECRET: ${JWT_SECRET:-super-secret-jwt-token-with-at-least-32-characters-long}
+      GOTRUE_MAILER_AUTOCONFIRM: "true"   # Set false in production
+      GOTRUE_SMTP_HOST: inbucket
+      GOTRUE_SMTP_PORT: 2500
+      GOTRUE_SMTP_SENDER_NAME: Scarnergy
+      GOTRUE_MAILER_URLPATHS_INVITE: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_CONFIRMATION: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_RECOVERY: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE: /auth/v1/verify
+
+  # ─── PostgREST (auto-generated REST API) ──────────────────────────────
+  rest:
+    image: postgrest/postgrest:v12.2.0
+    container_name: scarnergy_rest
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      PGRST_DB_URI: "postgres://authenticator:${POSTGRES_PASSWORD:-postgres}@db:5432/postgres"
+      PGRST_DB_SCHEMAS: public,storage,graphql_public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${JWT_SECRET:-super-secret-jwt-token-with-at-least-32-characters-long}
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+      PGRST_APP_SETTINGS_JWT_SECRET: ${JWT_SECRET:-super-secret-jwt-token-with-at-least-32-characters-long}
+      PGRST_APP_SETTINGS_JWT_EXP: 3600
+
+  # ─── Realtime (WebSocket subscriptions) ───────────────────────────────
+  realtime:
+    image: supabase/realtime:v2.30.34
+    container_name: scarnergy_realtime
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "4000:4000"
+    environment:
+      PORT: 4000
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: supabase_admin
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      DB_NAME: postgres
+      DB_AFTER_CONNECT_QUERY: "SET search_path TO _realtime"
+      DB_ENC_KEY: supabaserealtime
+      API_JWT_SECRET: ${JWT_SECRET:-super-secret-jwt-token-with-at-least-32-characters-long}
+      FLY_ALLOC_ID: fly123
+      FLY_APP_NAME: realtime
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:-UpNVntn3cDxHJpq99YMc1T1AQgQpc8kfYTuRgBiYa15BLrx8etQoXz3gZv9y8lX0}
+      ERL_AFLAGS: -proto_dist inet_tcp
+      ENABLE_TAILSCALE: "false"
+      DNS_NODES: "''"
+
+  # ─── Supabase Studio (Admin UI) ────────────────────────────────────────
+  studio:
+    image: supabase/studio:20240101-8e4a094
+    container_name: scarnergy_studio
+    restart: unless-stopped
+    ports:
+      - "54323:3000"
+    environment:
+      STUDIO_PG_META_URL: http://meta:8080
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      DEFAULT_ORGANIZATION_NAME: Scarnergy
+      DEFAULT_PROJECT_NAME: scarnergy-local
+      SUPABASE_URL: http://kong:8000
+      SUPABASE_PUBLIC_URL: ${API_EXTERNAL_URL:-http://localhost:8000}
+      SUPABASE_ANON_KEY: ${ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRFA0NiK7ACcPjLjK9CkOs8hL32t6nO2E-pUaF5Gp3A}
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hj04zWl196z2-SBc0}
+
+  # ─── pg-meta (Supabase table editor backend) ──────────────────────────
+  meta:
+    image: supabase/postgres-meta:v0.83.2
+    container_name: scarnergy_meta
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      PG_META_PORT: 8080
+      PG_META_DB_HOST: db
+      PG_META_DB_PORT: 5432
+      PG_META_DB_NAME: postgres
+      PG_META_DB_USER: supabase
+      PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+
+  # ─── Kong API Gateway ─────────────────────────────────────────────────
+  kong:
+    image: kong:2.8.1
+    container_name: scarnergy_kong
+    restart: unless-stopped
+    ports:
+      - "54321:8000"   # Main API port (http)
+      - "54320:8443"   # HTTPS
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /home/kong/kong.yml
+      KONG_DNS_ORDER: LAST,A,CNAME
+      KONG_PLUGINS: request-transformer,cors,key-auth,acl,basic-auth
+      KONG_NGINX_PROXY_PROXY_BUFFER_SIZE: 160k
+      KONG_NGINX_PROXY_PROXY_BUFFERS: "64 160k"
+    volumes:
+      - ./kong.yml:/home/kong/kong.yml:ro
+
+  # ─── Inbucket (local email testing) ───────────────────────────────────
+  inbucket:
+    image: inbucket/inbucket:latest
+    container_name: scarnergy_inbucket
+    restart: unless-stopped
+    ports:
+      - "54324:9000"   # Web UI
+      - "2500:2500"    # SMTP
+      - "1100:1100"    # POP3
+
+  # ─── Mosquitto MQTT Broker ────────────────────────────────────────────
+  mqtt:
+    image: eclipse-mosquitto:2.0
+    container_name: scarnergy_mqtt
+    restart: unless-stopped
+    ports:
+      - "1883:1883"    # MQTT
+      - "9001:9001"    # MQTT over WebSocket
+    volumes:
+      - ./infrastructure/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mqtt_data:/mosquitto/data
+      - mqtt_logs:/mosquitto/log
+
+  # ─── Grafana (real-time dashboards) ───────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.3.1
+    container_name: scarnergy_grafana
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-scarnergy}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_INSTALL_PLUGINS: grafana-clock-panel,grafana-simple-json-datasource
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infrastructure/grafana/provisioning:/etc/grafana/provisioning:ro
+
+  # ─── Metabase (BI dashboards) ──────────────────────────────────────────
+  metabase:
+    image: metabase/metabase:v0.48.8
+    container_name: scarnergy_metabase
+    restart: unless-stopped
+    ports:
+      - "3002:3000"
+    environment:
+      MB_DB_TYPE: postgres
+      MB_DB_HOST: db
+      MB_DB_PORT: 5432
+      MB_DB_DBNAME: postgres
+      MB_DB_USER: postgres
+      MB_DB_PASS: ${POSTGRES_PASSWORD:-postgres}
+      MB_SITE_NAME: Scarnergy Analytics
+    volumes:
+      - metabase_data:/metabase.db
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  db_data:
+  mqtt_data:
+  mqtt_logs:
+  grafana_data:
+  metabase_data:
+
+networks:
+  default:
+    name: scarnergy_network
