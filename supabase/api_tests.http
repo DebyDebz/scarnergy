@@ -1,0 +1,198 @@
+### SCARNERGY v2.0 — API Test Suite
+### Use with VS Code REST Client extension
+### Set @token to your JWT after signing in
+
+@baseUrl = http://localhost:54321
+@anonKey = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRFA0NiK7ACcPjLjK9CkOs8hL32t6nO2E-pUaF5Gp3A
+@token = REPLACE_WITH_JWT_AFTER_LOGIN
+
+### ─── AUTH ──────────────────────────────────────────────────────────────
+
+### Sign up
+POST {{baseUrl}}/auth/v1/signup
+Content-Type: application/json
+apikey: {{anonKey}}
+
+{
+  "email": "inspector@krontiva.nl",
+  "password": "TestPassword123!",
+  "data": {
+    "full_name": "Jan de Vries",
+    "org_id": "00000000-0000-0000-0000-000000000001",
+    "role": "inspector"
+  }
+}
+
+###
+
+### Sign in — copy access_token to @token above
+POST {{baseUrl}}/auth/v1/token?grant_type=password
+Content-Type: application/json
+apikey: {{anonKey}}
+
+{
+  "email": "inspector@krontiva.nl",
+  "password": "TestPassword123!"
+}
+
+### ─── ORGANISATIONS ──────────────────────────────────────────────────────
+
+### Get own organisation
+GET {{baseUrl}}/rest/v1/organisations?select=*
+apikey: {{anonKey}}
+Authorization: Bearer {{token}}
+
+### ─── BUILDINGS ──────────────────────────────────────────────────────────
+
+### List all buildings in org
+GET {{baseUrl}}/rest/v1/buildings?select=*,zones(id,zone_code,name)&order=created_at.desc
+apikey: {{anonKey}}
+Authorization: Bearer {{token}}
+
+###
+
+### Get building summary view
+GET {{baseUrl}}/rest/v1/building_summary?select=*
+apikey: {{anonKey}}
+Authorization: Bearer {{token}}
+
+###
+
+### Create a new building
+POST {{baseUrl}}/rest/v1/buildings
+Content-Type: application/json
+apikey: {{anonKey}}
+Authorization: Bearer {{token}}
+Prefer: return=representation
+
+{
+  "org_id": "00000000-0000-0000-0000-000000000001",
+  "street": "Keizersgracht",
+  "house_number": "123",
+  "postal_code": "1017 DK",
+  "city": "Amsterdam",
+  "building_type": "residential_single",
+  "construction_year": 1910,
+  "gross_floor_area_m2": 85
+}
+
+### ─── ZONES ───────────────────────────────────────────────────────────────
+
+### List zones for a building
+GET {{baseUrl}}/rest/v1/zones?building_id=eq.b0000000-0000-0000-0000-000000000001&select=*,building_elements(*)
+apikey: {{anonKey}}
+Authorization: Bearer {{token}}
+
+### ─── BLE DEVICES ─────────────────────────────────────────────────────────
+
+### List devices
+GET {{baseUrl}}/rest/v1/ble_devices?select=*&order=last_connected_at.desc
+apikey: {{anonKey}}
+Authorization: Bearer {{token}}
+
+###
+
+### Register a new GLM device
+POST {{baseUrl}}/rest/v1/ble_devices
+Content-Type: application/json
+apikey: {{anonKey}}
+Authorization: Bearer {{token}}
+Prefer: return=representation
+
+{
+  "org_id": "00000000-0000-0000-0000-000000000001",
+  "device_type": "bosch_glm50c",
+  "mac_address": "AA:BB:CC:DD:EE:FF",
+  "nickname": "My GLM 50C"
+}
+
+### ─── INSPECTION SESSIONS ─────────────────────────────────────────────────
+
+### Start a new session
+POST {{baseUrl}}/rest/v1/inspection_sessions
+Content-Type: application/json
+apikey: {{anonKey}}
+Authorization: Bearer {{token}}
+Prefer: return=representation
+
+{
+  "org_id": "00000000-0000-0000-0000-000000000001",
+  "building_id": "b0000000-0000-0000-0000-000000000001",
+  "inspector_id": "REPLACE_WITH_YOUR_USER_ID"
+}
+
+###
+
+### Close a session (Edge Function)
+POST {{baseUrl}}/functions/v1/session_close
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "session_id": "REPLACE_WITH_SESSION_ID"
+}
+
+### ─── MEASUREMENTS ─────────────────────────────────────────────────────────
+
+### Insert a measurement
+POST {{baseUrl}}/rest/v1/measurements
+Content-Type: application/json
+apikey: {{anonKey}}
+Authorization: Bearer {{token}}
+Prefer: return=representation
+
+{
+  "org_id": "00000000-0000-0000-0000-000000000001",
+  "session_id": "REPLACE_WITH_SESSION_ID",
+  "device_id": "d0000000-0000-0000-0000-000000000001",
+  "inspector_id": "REPLACE_WITH_YOUR_USER_ID",
+  "element_id": "e0000000-0000-0000-0000-000000000001",
+  "value_mm": 2750,
+  "unit": "mm",
+  "measurement_type": "wall_height",
+  "ingestion_path": "mobile"
+}
+
+###
+
+### Query recent measurements
+GET {{baseUrl}}/rest/v1/recent_measurements?limit=20
+apikey: {{anonKey}}
+Authorization: Bearer {{token}}
+
+### ─── EDGE FUNCTIONS ──────────────────────────────────────────────────────
+
+### Validate measurements batch
+POST {{baseUrl}}/functions/v1/measurement_validate
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "measurements": [
+    { "id": "REPLACE", "value_mm": 2750, "measurement_type": "wall_height", "session_id": "REPLACE" },
+    { "id": "REPLACE", "value_mm": -100, "measurement_type": "wall_width", "session_id": "REPLACE" }
+  ]
+}
+
+###
+
+### Compute energy labels for a building
+POST {{baseUrl}}/functions/v1/energy_label_estimate
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "building_id": "b0000000-0000-0000-0000-000000000001"
+}
+
+### ─── RPC CALLS ────────────────────────────────────────────────────────────
+
+### Compute energy label for a zone
+POST {{baseUrl}}/rest/v1/rpc/compute_zone_energy_label
+Content-Type: application/json
+apikey: {{anonKey}}
+Authorization: Bearer {{token}}
+
+{
+  "p_zone_id": "z0000000-0000-0000-0000-000000000001"
+}
