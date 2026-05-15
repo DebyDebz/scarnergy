@@ -176,7 +176,7 @@ try:
 
     print("\nExporting to ONNX...")
     initial_type = [("float_input", FloatTensorType([None, 6]))]
-    onnx_model = convert_sklearn(iso_forest, initial_types=initial_type)
+    onnx_model = convert_sklearn(iso_forest, initial_types=initial_type, target_opset={"": 15, "ai.onnx.ml": 3})
     with open(MODELS_DIR / "anomaly_detector.onnx", "wb") as f:
         f.write(onnx_model.SerializeToString())
     print(f"  Saved: models/anomaly_detector.onnx")

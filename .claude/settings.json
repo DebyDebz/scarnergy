@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(sudo ps *)",
+      "Bash(awk '{print $1, $2, substr\\($0, index\\($0,$11\\), 60\\)}')",
+      "Bash(jobs)",
+      "Bash(chmod +x /home/deborah/projects/ScanergyV2/scarnergy-app/node_modules/.bin/expo)",
+      "Bash(curl -s http://localhost:8082/)",
+      "Bash(curl -s \"http://localhost:8082/node_modules/expo-router/entry.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app&unstable_transformProfile=hermes-stable\")",
+      "Bash(xargs ls *)",
+      "Bash(python3 -c \"import json,sys; p=json.load\\(sys.stdin\\); print\\('version:', p['version']\\); print\\('exports:', json.dumps\\(list\\(\\(p.get\\('exports'\\) or {}\\).keys\\(\\)\\)[:10], indent=2\\)\\)\")",
+      "Bash(pkill -f \"expo start --web\")",
+      "Bash(docker compose *)",
+      "Bash(chmod +x /home/deborah/projects/ScanergyV2/start-web.sh)"
+    ]
+  }
+}

@@ -7,7 +7,7 @@ services:
     routes:
       - name: auth-route
         paths:
-          - /auth
+          - /auth/v1
         strip_path: true
 
   - name: scarnergy-rest
@@ -15,15 +15,15 @@ services:
     routes:
       - name: rest-route
         paths:
-          - /rest
+          - /rest/v1
         strip_path: true
 
   - name: scarnergy-realtime
-    url: http://realtime:4000
+    url: http://realtime:4000/socket
     routes:
       - name: realtime-route
         paths:
-          - /realtime
+          - /realtime/v1
         strip_path: true
 
   - name: scarnergy-meta
@@ -32,6 +32,14 @@ services:
       - name: meta-route
         paths:
           - /meta
+        strip_path: true
+
+  - name: scarnergy-ai
+    url: http://ai_server:8001
+    routes:
+      - name: ai-route
+        paths:
+          - /ai
         strip_path: true
 
 plugins:
@@ -43,21 +51,28 @@ plugins:
         - GET
         - POST
         - PUT
+        - PATCH
         - DELETE
         - OPTIONS
       headers:
         - Accept
+        - Accept-Encoding
+        - Accept-Profile
         - Accept-Version
+        - Authorization
         - Content-Length
         - Content-MD5
+        - Content-Profile
         - Content-Type
         - Date
-        - Authorization
+        - Prefer
+        - Range
         - X-Auth-Token
-        - X-Requested-With
         - X-CSRF-Token
+        - X-Requested-With
         - apikey
         - x-client-info
+        - x-supabase-api-version
       exposed_headers:
         - X-Auth-Token
       credentials: true
@@ -79,7 +94,7 @@ plugins:
 consumers:
   - username: anon
     keyauth_credentials:
-      - key: ${ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRFA0NiK7ACcPjLjK9CkOs8hL32t6nO2E-pUaF5Gp3A}
+      - key: ${ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjIwNTEyMTg4MDB9.r0GAZmnw3PcxO23v52N13u52lmWHIUYQ4LcaqcYd4b8}
   - username: service_role
     keyauth_credentials:
-      - key: ${SERVICE_ROLE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hj04zWl196z2-SBc0}
+      - key: ${SERVICE_ROLE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MjA1MTIxODgwMH0.awrZCFEvvrU75SNxtv2Lb3AK4PO7_AQu7oWoz23Z9eM}

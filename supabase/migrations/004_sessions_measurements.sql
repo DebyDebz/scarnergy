@@ -207,7 +207,7 @@ CREATE INDEX idx_sync_queue_pending   ON sync_queue(org_id, sync_status, client_
 -- ─── AUDIT LOG (GDPR Article 30) ─────────────────────────────────────────
 
 CREATE TABLE audit_log (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id              UUID NOT NULL DEFAULT gen_random_uuid(),
   org_id          UUID REFERENCES organisations(id),
   user_id         UUID REFERENCES user_profiles(id),
 
@@ -221,7 +221,9 @@ CREATE TABLE audit_log (
   user_agent      TEXT,
   request_id      TEXT,
 
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  PRIMARY KEY (id, created_at)
 ) PARTITION BY RANGE (created_at);
 
 -- Create partitions for current and next year

@@ -59,7 +59,7 @@ CREATE POLICY "orgs: admins can update"
 
 CREATE POLICY "profiles: see own org users"
   ON user_profiles FOR SELECT
-  USING (org_id = auth.user_org_id());
+  USING (id = auth.uid() OR org_id = auth.user_org_id());
 
 CREATE POLICY "profiles: insert own profile"
   ON user_profiles FOR INSERT
@@ -258,3 +258,8 @@ GRANT USAGE ON SCHEMA public TO anon, authenticated;
 GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO authenticated;
 GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO authenticated;
 REVOKE DELETE ON organisations, user_profiles, audit_log FROM authenticated;
+
+-- PostgREST switches to anon/authenticated roles to execute queries.
+-- Those roles must be able to call auth.* helper functions used in RLS policies.
+GRANT USAGE ON SCHEMA auth TO authenticator, anon, authenticated;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA auth TO anon, authenticated;

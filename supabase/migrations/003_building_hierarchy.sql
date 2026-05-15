@@ -25,7 +25,8 @@ CREATE TABLE buildings (
   country               TEXT NOT NULL DEFAULT 'NL',
 
   -- Geolocation
-  location              GEOMETRY(POINT, 4326), -- PostGIS point (lon, lat)
+  latitude              NUMERIC(10, 7),
+  longitude             NUMERIC(10, 7),
 
   -- Classification
   building_type         building_type NOT NULL DEFAULT 'residential_single',
@@ -51,7 +52,7 @@ CREATE TABLE buildings (
 CREATE INDEX idx_buildings_org ON buildings(org_id);
 CREATE INDEX idx_buildings_postal ON buildings(postal_code);
 CREATE INDEX idx_buildings_bag ON buildings(bag_id);
-CREATE INDEX idx_buildings_location ON buildings USING GIST(location);
+CREATE INDEX idx_buildings_location ON buildings(latitude, longitude);
 CREATE INDEX idx_buildings_name ON buildings USING gin(description gin_trgm_ops);
 
 -- ─── CALCULATION ZONES (Rekenzones) ──────────────────────────────────────

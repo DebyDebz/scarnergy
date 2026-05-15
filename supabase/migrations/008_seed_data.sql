@@ -10,10 +10,40 @@ INSERT INTO organisations (id, name, kvk_number, address, city, postal_code, ema
   ('00000000-0000-0000-0000-000000000001', 'Krontiva Energie Advies BV', '12345678', 'Herengracht 182', 'Amsterdam', '1016 BR', 'info@krontiva.nl', '+31 20 123 4567'),
   ('00000000-0000-0000-0000-000000000002', 'EnergieScan Nederland', '87654321', 'Coolsingel 40', 'Rotterdam', '3011 AD', 'info@energiescan.nl', '+31 10 234 5678');
 
--- ─── NOTE: Users must be created via Supabase Auth.
--- Run this after creating test users through the dashboard or CLI.
--- Replace the UUIDs below with the actual auth.users UUIDs.
---
+-- ─── DEV BYPASS USER ─────────────────────────────────────────────────────
+-- Matches the hardcoded DEV_JWT in scarnergy-app/_layout.tsx and .env
+-- sub = 00000000-0000-0000-0000-000000000000
+-- org_id = 00000000-0000-0000-0000-000000000001  role = admin
+-- Required so session/measurement INSERTs satisfy the FK to user_profiles.
+
+INSERT INTO auth.users (
+  id, email, encrypted_password, email_confirmed_at,
+  aud, role, raw_app_meta_data, raw_user_meta_data,
+  created_at, updated_at
+)
+VALUES (
+  '00000000-0000-0000-0000-000000000000',
+  'dev@scarnergy.test',
+  '$2a$10$devbypassplaceholderpasswordhashXXXXXXXXXXXXXXXX', -- never used (bypass auth)
+  NOW(),
+  'authenticated', 'authenticated',
+  '{"provider":"email","providers":["email"]}',
+  '{"org_id":"00000000-0000-0000-0000-000000000001","full_name":"Dev User","role":"admin"}',
+  NOW(), NOW()
+)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO user_profiles (id, org_id, role, full_name, is_active)
+VALUES (
+  '00000000-0000-0000-0000-000000000000',
+  '00000000-0000-0000-0000-000000000001',
+  'admin',
+  'Dev User',
+  true
+)
+ON CONFLICT (id) DO NOTHING;
+
+-- ─── NOTE: Real users must be created via Supabase Auth.
 -- supabase auth admin create-user \
 --   --email inspector@krontiva.nl \
 --   --password TestPassword123! \
@@ -84,24 +114,24 @@ VALUES
 INSERT INTO zones (id, org_id, building_id, zone_code, name, floor_level, gross_area_m2, ceiling_height_m, is_heated)
 VALUES
   -- Amsterdam building zones
-  ('z0000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-000000000001', 'Z01', 'Begane grond',     0, 32.0, 2.80, true),
-  ('z0000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-000000000001', 'Z02', 'Eerste verdieping', 1, 32.0, 2.75, true),
-  ('z0000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-000000000001', 'Z03', 'Tweede verdieping', 2, 31.0, 2.60, true),
+  ('a0000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-000000000001', 'Z01', 'Begane grond',     0, 32.0, 2.80, true),
+  ('a0000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-000000000001', 'Z02', 'Eerste verdieping', 1, 32.0, 2.75, true),
+  ('a0000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-000000000001', 'Z03', 'Tweede verdieping', 2, 31.0, 2.60, true),
   -- Rotterdam building zones
-  ('z0000000-0000-0000-0000-000000000004', '00000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-000000000002', 'Z01', 'Appartement 1 (BG)',  0, 78.0, 2.70, true),
-  ('z0000000-0000-0000-0000-000000000005', '00000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-000000000002', 'Z02', 'Appartement 2 (1e)', 1, 78.0, 2.70, true);
+  ('a0000000-0000-0000-0000-000000000004', '00000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-000000000002', 'Z01', 'Appartement 1 (BG)',  0, 78.0, 2.70, true),
+  ('a0000000-0000-0000-0000-000000000005', '00000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-000000000002', 'Z02', 'Appartement 2 (1e)', 1, 78.0, 2.70, true);
 
 -- ─── BUILDING ELEMENTS ────────────────────────────────────────────────────
 -- Sample walls, roof, floor for building 1 / zone 1
 
 INSERT INTO building_elements (id, org_id, zone_id, element_type, name, orientation_deg, rc_value, construction_type)
 VALUES
-  ('e0000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 'z0000000-0000-0000-0000-000000000001', 'gevel',  'Voorgevel (Noord)', 0.0,   1.5,  'Spouwmuur 1923'),
-  ('e0000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001', 'z0000000-0000-0000-0000-000000000001', 'gevel',  'Achtergevel (Zuid)', 180.0, 1.5,  'Spouwmuur 1923'),
-  ('e0000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000001', 'z0000000-0000-0000-0000-000000000001', 'gevel',  'Zijgevel (West)',    270.0, 1.5,  'Spouwmuur 1923'),
-  ('e0000000-0000-0000-0000-000000000004', '00000000-0000-0000-0000-000000000001', 'z0000000-0000-0000-0000-000000000001', 'vloer',  'Begane grond vloer', NULL,  1.2,  'Houten balken vloer'),
-  ('e0000000-0000-0000-0000-000000000005', '00000000-0000-0000-0000-000000000001', 'z0000000-0000-0000-0000-000000000003', 'dak',    'Hellend dak',        NULL,  2.8,  'Houten kap met glaswol'),
-  ('e0000000-0000-0000-0000-000000000006', '00000000-0000-0000-0000-000000000001', 'z0000000-0000-0000-0000-000000000001', 'installatie', 'CV-ketel Intergas', NULL, NULL, NULL);
+  ('e0000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001', 'gevel',  'Voorgevel (Noord)', 0.0,   1.5,  'Spouwmuur 1923'),
+  ('e0000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001', 'gevel',  'Achtergevel (Zuid)', 180.0, 1.5,  'Spouwmuur 1923'),
+  ('e0000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001', 'gevel',  'Zijgevel (West)',    270.0, 1.5,  'Spouwmuur 1923'),
+  ('e0000000-0000-0000-0000-000000000004', '00000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001', 'vloer',  'Begane grond vloer', NULL,  1.2,  'Houten balken vloer'),
+  ('e0000000-0000-0000-0000-000000000005', '00000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000003', 'dak',    'Hellend dak',        NULL,  2.8,  'Houten kap met glaswol'),
+  ('e0000000-0000-0000-0000-000000000006', '00000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001', 'installatie', 'CV-ketel Intergas', NULL, NULL, NULL);
 
 UPDATE building_elements SET
   installation_type = 'CV-ketel',
@@ -115,9 +145,9 @@ WHERE id = 'e0000000-0000-0000-0000-000000000006';
 
 INSERT INTO openings (id, org_id, element_id, opening_type, name, width_mm, height_mm, glazing_type, u_value_total)
 VALUES
-  ('o0000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 'e0000000-0000-0000-0000-000000000001', 'window', 'Voorraam links',  1200, 1400, 'HR++',  1.1),
-  ('o0000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001', 'e0000000-0000-0000-0000-000000000001', 'window', 'Voorraam rechts', 1200, 1400, 'HR++',  1.1),
-  ('o0000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000001', 'e0000000-0000-0000-0000-000000000001', 'door',   'Voordeur',        950,  2100, NULL,    2.0);
+  ('f0000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 'e0000000-0000-0000-0000-000000000001', 'window', 'Voorraam links',  1200, 1400, 'HR++',  1.1),
+  ('f0000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001', 'e0000000-0000-0000-0000-000000000001', 'window', 'Voorraam rechts', 1200, 1400, 'HR++',  1.1),
+  ('f0000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000001', 'e0000000-0000-0000-0000-000000000001', 'door',   'Voordeur',        950,  2100, NULL,    2.0);
 
 -- ─── VERIFY SEED DATA ─────────────────────────────────────────────────────
 

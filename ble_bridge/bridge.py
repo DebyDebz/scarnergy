@@ -16,6 +16,7 @@ Requirements:
 import asyncio
 import json
 import logging
+import random
 import signal
 import uuid
 from datetime import datetime, timezone
@@ -23,8 +24,6 @@ from typing import Optional
 import argparse
 import os
 
-from bleak import BleakClient, BleakScanner, BleakError
-from bleak.backends.device import BLEDevice
 import websockets
 from asyncio_mqtt import Client as MQTTClient
 from supabase import create_client, Client as SupabaseClient
@@ -48,6 +47,14 @@ MQTT_TOPIC_BASE  = "scarnergy"
 
 
 class ScarnergyBridge:
+    # Realistic distance ranges for building element measurements (mm)
+    _DEMO_RANGES = [
+        (2200, 3500),   # wall height
+        (1500, 6000),   # wall width
+        (600,  2400),   # window/door opening
+        (2000, 8000),   # floor span
+    ]
+
     def __init__(
         self,
         org_id: str,
@@ -57,26 +64,39 @@ class ScarnergyBridge:
         mqtt_port: int = 1883,
         session_id: Optional[str] = None,
         inspector_id: Optional[str] = None,
+        adapter: Optional[str] = None,
+        demo: bool = False,
     ):
         self.org_id       = org_id
         self.session_id   = session_id
         self.inspector_id = inspector_id
         self.mqtt_host    = mqtt_host
         self.mqtt_port    = mqtt_port
+        self.adapter      = adapter
+        self.demo         = demo
 
         self.supabase: SupabaseClient = create_client(supabase_url, supabase_key)
         self.ws_clients: set = set()
-        self.connected_devices: dict[str, BleakClient] = {}  # mac -> client
         self.device_info: dict[str, dict] = {}               # mac -> {device_id, nickname}
         self.measurement_queue: asyncio.Queue = asyncio.Queue()
         self._running = True
+        if not demo:
+            from bleak import BleakClient, BleakScanner, BleakError
+            self._BleakClient = BleakClient
+            self._BleakError  = BleakError
+            self.connected_devices: dict = {}  # mac -> BleakClient
 
     # ─── DEVICE DISCOVERY ───────────────────────────────────────────────────
 
-    async def scan_for_glm_devices(self, timeout: float = 10.0) -> list[BLEDevice]:
+    async def scan_for_glm_devices(self, timeout: float = 10.0):
         """Scan for nearby Bosch GLM 50C devices."""
-        logger.info(f"Scanning for GLM devices ({timeout}s)...")
-        devices = await BleakScanner.discover(timeout=timeout)
+        from bleak import BleakScanner
+        adapter_info = f" via {self.adapter}" if self.adapter else ""
+        logger.info(f"Scanning for GLM devices ({timeout}s){adapter_info}...")
+        kwargs = {"timeout": timeout}
+        if self.adapter:
+            kwargs["adapter"] = self.adapter
+        devices = await BleakScanner.discover(**kwargs)
         glm_devices = [
             d for d in devices
             if d.name and ("GLM" in d.name or "Bosch" in d.name)
@@ -88,6 +108,7 @@ class ScarnergyBridge:
 
     async def connect_device(self, mac_address: str, device_id: str, nickname: str = "GLM"):
         """Connect to a GLM device with exponential backoff reconnection."""
+        from bleak import BleakClient, BleakError
         delay = RECONNECT_BASE
         attempt = 0
 
@@ -95,18 +116,19 @@ class ScarnergyBridge:
             attempt += 1
             try:
                 logger.info(f"[{nickname}] Connecting to {mac_address} (attempt {attempt})...")
-                async with BleakClient(mac_address, timeout=20.0) as client:
+                client_kwargs = {"timeout": 20.0}
+                if self.adapter:
+                    client_kwargs["adapter"] = self.adapter
+                async with BleakClient(mac_address, **client_kwargs) as client:
                     logger.info(f"[{nickname}] Connected ✓ (RSSI: {client.rssi})")
                     self.connected_devices[mac_address] = client
                     self.device_info[mac_address] = {"device_id": device_id, "nickname": nickname}
-                    delay = RECONNECT_BASE  # reset on successful connection
+                    delay = RECONNECT_BASE
 
-                    # Activate device and set unit to mm
                     await client.write_gatt_char(CHAR_WRITE_UUID, CMD_ACTIVATE)
                     await asyncio.sleep(0.2)
                     await client.write_gatt_char(CHAR_WRITE_UUID, CMD_UNIT_MM)
 
-                    # Subscribe to notifications
                     await client.start_notify(
                         CHAR_NOTIFY_UUID,
                         lambda _, data: asyncio.create_task(
@@ -114,12 +136,10 @@ class ScarnergyBridge:
                         )
                     )
 
-                    # Update device last_connected_at in DB
                     self.supabase.table("ble_devices").update({
                         "last_connected_at": datetime.now(timezone.utc).isoformat()
                     }).eq("id", device_id).execute()
 
-                    # Keep alive until disconnect
                     while self._running and client.is_connected:
                         await asyncio.sleep(1.0)
 
@@ -138,6 +158,61 @@ class ScarnergyBridge:
             logger.info(f"[{nickname}] Reconnecting in {delay:.1f}s...")
             await asyncio.sleep(delay)
             delay = min(delay * 2, RECONNECT_MAX)
+
+    # ─── DEMO WORKER ────────────────────────────────────────────────────────
+
+    async def _demo_worker(self, devices: list[dict]):
+        """Generate simulated measurements without real BLE hardware."""
+        logger.info("DEMO MODE — generating simulated GLM measurements (no Bluetooth required)")
+        for d in devices:
+            self.device_info[d["mac_address"]] = {
+                "device_id": d["device_id"],
+                "nickname":  d.get("nickname", "GLM-DEMO"),
+            }
+
+        idx = 0
+        while self._running:
+            device   = devices[idx % len(devices)]
+            mac      = device["mac_address"]
+            nickname = device.get("nickname", "GLM-DEMO")
+            info     = self.device_info[mac]
+
+            # 5 % chance of anomaly, else a realistic building measurement
+            if random.random() < 0.05:
+                value_mm = random.choice([-50.0, 0.0, 75000.0])
+                is_anomaly = True
+                reason = "simulated anomaly"
+            else:
+                lo, hi   = random.choice(self._DEMO_RANGES)
+                value_mm = round(random.uniform(lo, hi), 1)
+                is_anomaly, reason = validate_measurement(value_mm)
+                is_anomaly = not is_anomaly
+
+            payload = {
+                "id":               str(uuid.uuid4()),
+                "measured_at":      datetime.now(timezone.utc).isoformat(),
+                "org_id":           self.org_id,
+                "session_id":       self.session_id,
+                "device_id":        info["device_id"],
+                "inspector_id":     self.inspector_id,
+                "value_mm":         value_mm,
+                "unit":             "mm",
+                "ingestion_path":   "demo",
+                "is_anomaly":       is_anomaly,
+                "battery_level":    random.randint(70, 99),
+                "raw_ble_bytes":    "demo",
+                "mac_address":      mac,
+                "device_nickname":  nickname,
+            }
+            if is_anomaly:
+                payload["validation_message"] = reason
+
+            flag = "⚠" if is_anomaly else "✓"
+            logger.info(f"[{nickname}] DEMO {value_mm:.1f}mm {flag}")
+            await self.measurement_queue.put(payload)
+
+            idx += 1
+            await asyncio.sleep(random.uniform(3.0, 8.0))
 
     # ─── MEASUREMENT HANDLING ────────────────────────────────────────────────
 
@@ -176,21 +251,34 @@ class ScarnergyBridge:
         await self.measurement_queue.put(payload)
 
     async def _broadcast_worker(self):
-        """Drain the queue and fan out to all 3 channels simultaneously."""
-        async with MQTTClient(self.mqtt_host, self.mqtt_port) as mqtt:
+        """Drain the queue and fan-out to WebSocket + Supabase (always) and MQTT (optional)."""
+        mqtt = None
+        try:
+            mqtt = MQTTClient(self.mqtt_host, self.mqtt_port)
+            await mqtt.__aenter__()
             logger.info(f"MQTT connected to {self.mqtt_host}:{self.mqtt_port}")
+        except Exception as e:
+            logger.warning(f"MQTT not available ({e}) — continuing without MQTT")
+            mqtt = None
+
+        try:
             while self._running:
                 try:
                     payload = await asyncio.wait_for(self.measurement_queue.get(), timeout=1.0)
                 except asyncio.TimeoutError:
                     continue
 
-                await asyncio.gather(
+                coros = [
                     self._publish_websocket(payload),
-                    self._publish_mqtt(mqtt, payload),
                     self._write_supabase(payload),
-                    return_exceptions=True,
-                )
+                ]
+                if mqtt:
+                    coros.append(self._publish_mqtt(mqtt, payload))
+
+                await asyncio.gather(*coros, return_exceptions=True)
+        finally:
+            if mqtt:
+                await mqtt.__aexit__(None, None, None)
 
     async def _publish_websocket(self, payload: dict):
         """Broadcast to all connected WebSocket clients."""
@@ -254,21 +342,23 @@ class ScarnergyBridge:
         if len(devices) > MAX_DEVICES:
             raise ValueError(f"Maximum {MAX_DEVICES} devices supported")
 
-        logger.info(f"Starting Scarnergy BLE Bridge — {len(devices)} device(s)")
+        mode = "DEMO" if self.demo else "BLE"
+        logger.info(f"Starting Scarnergy BLE Bridge [{mode}] — {len(devices)} device(s)")
 
-        # WebSocket server
         ws_server = await websockets.serve(self._ws_handler, "0.0.0.0", WS_PORT)
         logger.info(f"WebSocket server listening on ws://0.0.0.0:{WS_PORT}")
 
-        tasks = [
-            asyncio.create_task(self._broadcast_worker()),
-            *[
+        if self.demo:
+            device_tasks = [asyncio.create_task(self._demo_worker(devices))]
+        else:
+            device_tasks = [
                 asyncio.create_task(
                     self.connect_device(d["mac_address"], d["device_id"], d.get("nickname", "GLM"))
                 )
                 for d in devices
             ]
-        ]
+
+        tasks = [asyncio.create_task(self._broadcast_worker()), *device_tasks]
 
         def _stop(sig, _):
             logger.info(f"Signal {sig.name} received — shutting down...")
@@ -297,6 +387,7 @@ async def main():
     parser.add_argument("--inspector-id", default=None,   help="Inspector user UUID")
     parser.add_argument("--mqtt-host",    default="localhost")
     parser.add_argument("--mqtt-port",    default=1883, type=int)
+    parser.add_argument("--adapter",      default=None, help="Bluetooth adapter (e.g. hci0, hci1)")
     parser.add_argument("--scan",         action="store_true", help="Scan for devices and exit")
     args = parser.parse_args()
 
@@ -311,6 +402,7 @@ async def main():
         mqtt_port=args.mqtt_port,
         session_id=args.session_id,
         inspector_id=args.inspector_id,
+        adapter=args.adapter,
     )
 
     if args.scan:
