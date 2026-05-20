@@ -18,11 +18,14 @@ export function useBLEDevice() {
     state: "idle" as BleState,
     lastMeasurement: null,
     deviceName: null,
+    deviceId: null,
     batteryLevel: null,
     errorMessage: "Bluetooth is not available on web.",
+    rawPacketCount: 0,
     isConnected: false,
     scan: noop,
     disconnect: noop,
     setOnMeasurement: noopCb,
+    requestMeasurement: noop,
   };
 }

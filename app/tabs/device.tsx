@@ -7,7 +7,7 @@ const STATE_COLOR: Record<string, string> = {
 };
 
 export default function DeviceScreen() {
-  const { state, lastMeasurement, deviceName, batteryLevel, errorMessage, scan, disconnect, isConnected } = useBLE();
+  const { state, lastMeasurement, deviceName, deviceId, batteryLevel, errorMessage, rawPacketCount, scan, disconnect, isConnected } = useBLE();
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -24,6 +24,11 @@ export default function DeviceScreen() {
            : state === "error"       ? `Error: ${errorMessage}`
            : "Tap scan to connect"}
           </Text>
+          {isConnected && (
+            <Text style={[styles.regBadge, { color: deviceId ? "#1E8449" : "#E67E22" }]}>
+              {deviceId ? "Registered" : "Registering…"}
+            </Text>
+          )}
         </View>
         {batteryLevel !== null && (
           <View style={styles.battery}>
@@ -48,6 +53,14 @@ export default function DeviceScreen() {
         <TouchableOpacity style={[styles.btn, styles.btnDanger]} onPress={disconnect}>
           <Text style={styles.btnText}>Disconnect</Text>
         </TouchableOpacity>
+      )}
+
+      {/* BLE packet counter — shows whether button presses trigger notifications */}
+      {isConnected && (
+        <View style={styles.debugRow}>
+          <Text style={styles.debugLabel}>BLE packets received</Text>
+          <Text style={styles.debugValue}>{rawPacketCount}</Text>
+        </View>
       )}
 
       {/* Last measurement */}
@@ -100,4 +113,8 @@ const styles = StyleSheet.create({
   instructions:       { backgroundColor: "#FFF", borderRadius: 16, padding: 20 },
   instructionsTitle:  { fontSize: 15, fontWeight: "700", color: "#1E3A5F", marginBottom: 12 },
   instructionsText:   { fontSize: 14, color: "#444", lineHeight: 22 },
+  regBadge:           { fontSize: 11, fontWeight: "700", marginTop: 4, textTransform: "uppercase", letterSpacing: 0.5 },
+  debugRow:           { backgroundColor: "#FFF", borderRadius: 12, padding: 14, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  debugLabel:         { fontSize: 13, color: "#888" },
+  debugValue:         { fontSize: 16, fontWeight: "700", color: "#1E3A5F" },
 });

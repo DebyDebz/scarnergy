@@ -1,5 +1,5 @@
 import { Tabs } from "expo-router";
-import { Text } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 
 export default function TabLayout() {
   return (
@@ -11,10 +11,10 @@ export default function TabLayout() {
       headerTintColor: "#FFFFFF",
       headerTitleStyle: { fontWeight: "700" },
     }}>
-      <Tabs.Screen name="index"    options={{ title: "Dashboard", tabBarIcon: ({ color }) => <Text style={{ color, fontSize: 20 }}>🏠</Text> }} />
-      <Tabs.Screen name="buildings" options={{ title: "Buildings",  tabBarIcon: ({ color }) => <Text style={{ color, fontSize: 20 }}>🏗</Text> }} />
-      <Tabs.Screen name="sessions"  options={{ title: "Sessions",   tabBarIcon: ({ color }) => <Text style={{ color, fontSize: 20 }}>📋</Text> }} />
-      <Tabs.Screen name="device"    options={{ title: "GLM Device", tabBarIcon: ({ color }) => <Text style={{ color, fontSize: 20 }}>📡</Text> }} />
+      <Tabs.Screen name="index"     options={{ title: "Dashboard", tabBarIcon: ({ color, size }) => <Ionicons name="home-outline"      size={size} color={color} /> }} />
+      <Tabs.Screen name="buildings" options={{ title: "Buildings",  tabBarIcon: ({ color, size }) => <Ionicons name="business-outline"  size={size} color={color} /> }} />
+      <Tabs.Screen name="sessions"  options={{ title: "Sessions",   tabBarIcon: ({ color, size }) => <Ionicons name="albums-outline"    size={size} color={color} /> }} />
+      <Tabs.Screen name="device"    options={{ title: "GLM Device", tabBarIcon: ({ color, size }) => <Ionicons name="bluetooth-outline" size={size} color={color} /> }} />
     </Tabs>
   );
 }

@@ -37,6 +37,12 @@ export const supabase = createClient(
   }
 );
 
+// WebSocket (Realtime) doesn't go through devFetch — set the token directly
+// so RLS sees the correct identity for postgres_changes subscriptions.
+if (DEV_JWT) {
+  supabase.realtime.setAuth(DEV_JWT);
+}
+
 export type Database = {
   public: {
     Tables: {
@@ -79,8 +85,15 @@ export interface Zone {
 }
 export interface BuildingElement {
   id: string; zone_id: string; element_type: string; name: string;
+  description: string | null;
   length_mm: number | null; width_mm: number | null; height_mm: number | null;
-  rc_value: number | null; u_value: number | null; is_complete: boolean;
+  area_m2: number | null;
+  orientation_deg: number | null;
+  rc_value: number | null; u_value: number | null;
+  construction_type: string | null; insulation_type: string | null;
+  photo_urls: string[];
+  is_complete: boolean; is_active: boolean; sort_order: number;
+  notes: string | null;
 }
 export interface Opening {
   id: string; element_id: string; opening_type: string;
@@ -92,7 +105,7 @@ export interface InspectionSession {
   total_measurements: number; anomaly_count: number; sync_status: string;
 }
 export interface Measurement {
-  id: string; session_id: string; device_id: string; value_mm: number;
+  id: string; session_id: string; device_id: string | null; value_mm: number;
   unit: string; measurement_type: string | null; is_anomaly: boolean; measured_at: string;
 }
 export interface BuildingSummary extends Building {

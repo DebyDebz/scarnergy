@@ -1,13 +1,16 @@
 import { useEffect, useState } from "react";
 import { View, Text, ScrollView, StyleSheet, RefreshControl, TouchableOpacity } from "react-native";
 import { useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
 import { useAuthStore } from "../../store/authStore";
 import { useSyncQueue } from "../../hooks/useSyncQueue";
+import { useBLE } from "../../lib/BLEContext";
 
 export default function Dashboard() {
   const { profile }    = useAuthStore();
   const { pendingCount, drain } = useSyncQueue();
+  const { isConnected, state: bleState, deviceName, batteryLevel } = useBLE();
   const router         = useRouter();
   const [stats, setStats] = useState({ activeSessions: 0, buildings: 0, measurements: 0 });
   const [recentSessions, setRecentSessions] = useState<any[]>([]);
@@ -60,14 +63,92 @@ export default function Dashboard() {
       {/* Quick actions */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Quick Actions</Text>
-        <View style={styles.actionRow}>
-          <TouchableOpacity style={styles.actionBtn} onPress={() => router.push("/tabs/buildings")}>
-            <Text style={styles.actionIcon}>🏗</Text>
-            <Text style={styles.actionLabel}>New Inspection</Text>
+        <View style={styles.actionGrid}>
+          {/* New Inspection */}
+          <TouchableOpacity
+            style={[styles.actionCard, { backgroundColor: "#EBF5FB", borderTopColor: "#2E86C1" }]}
+            onPress={() => router.push("/tabs/buildings")}
+            activeOpacity={0.75}
+          >
+            <View style={styles.actionCardTop}>
+              <Ionicons name="clipboard-outline" size={26} color="#2E86C1" />
+              {stats.activeSessions > 0 && (
+                <View style={[styles.actionBadge, { backgroundColor: "#2E86C1" }]}>
+                  <Text style={styles.actionBadgeText}>{stats.activeSessions}</Text>
+                </View>
+              )}
+            </View>
+            <Text style={[styles.actionCardTitle, { color: "#1A5276" }]}>New Inspection</Text>
+            <Text style={styles.actionCardSub}>
+              {stats.activeSessions > 0
+                ? `${stats.activeSessions} active session${stats.activeSessions > 1 ? "s" : ""}`
+                : "Select a building to begin"}
+            </Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.actionBtn} onPress={() => router.push("/tabs/device")}>
-            <Text style={styles.actionIcon}>📡</Text>
-            <Text style={styles.actionLabel}>Connect GLM</Text>
+
+          {/* Connect GLM */}
+          <TouchableOpacity
+            style={[styles.actionCard, { backgroundColor: isConnected ? "#EAFAF1" : "#FDFEFE", borderTopColor: isConnected ? "#27AE60" : "#CCC" }]}
+            onPress={() => router.push("/tabs/device")}
+            activeOpacity={0.75}
+          >
+            <View style={styles.actionCardTop}>
+              <Ionicons name="bluetooth-outline" size={26} color={isConnected ? "#27AE60" : "#1E3A5F"} />
+              <View style={[styles.statusDot, {
+                backgroundColor: isConnected ? "#27AE60" : bleState === "scanning" ? "#F39C12" : "#CCC",
+              }]} />
+            </View>
+            <Text style={[styles.actionCardTitle, { color: isConnected ? "#1E8449" : "#1E3A5F" }]}>
+              {isConnected ? "GLM Connected" : "Connect GLM"}
+            </Text>
+            <Text style={styles.actionCardSub}>
+              {isConnected
+                ? `${deviceName ?? "GLM 50C"}${batteryLevel != null ? ` · ${batteryLevel}%` : ""}`
+                : bleState === "scanning"
+                ? "Scanning for device…"
+                : "Tap to pair device"}
+            </Text>
+          </TouchableOpacity>
+
+          {/* Sessions */}
+          <TouchableOpacity
+            style={[styles.actionCard, { backgroundColor: "#F5EEF8", borderTopColor: "#6C3483" }]}
+            onPress={() => router.push("/tabs/sessions")}
+            activeOpacity={0.75}
+          >
+            <View style={styles.actionCardTop}>
+              <Ionicons name="albums-outline" size={26} color="#6C3483" />
+            </View>
+            <Text style={[styles.actionCardTitle, { color: "#6C3483" }]}>My Sessions</Text>
+            <Text style={styles.actionCardSub}>
+              {stats.measurements > 0 ? `${stats.measurements} measurements` : "View all sessions"}
+            </Text>
+          </TouchableOpacity>
+
+          {/* Sync */}
+          <TouchableOpacity
+            style={[styles.actionCard, { backgroundColor: pendingCount > 0 ? "#FEF9E7" : "#F2F3F4", borderTopColor: pendingCount > 0 ? "#E67E22" : "#888" }]}
+            onPress={drain}
+            activeOpacity={0.75}
+          >
+            <View style={styles.actionCardTop}>
+              <Ionicons
+                name={pendingCount > 0 ? "cloud-upload-outline" : "cloud-done-outline"}
+                size={26}
+                color={pendingCount > 0 ? "#E67E22" : "#555"}
+              />
+              {pendingCount > 0 && (
+                <View style={[styles.actionBadge, { backgroundColor: "#E67E22" }]}>
+                  <Text style={styles.actionBadgeText}>{pendingCount}</Text>
+                </View>
+              )}
+            </View>
+            <Text style={[styles.actionCardTitle, { color: pendingCount > 0 ? "#9A6A00" : "#555" }]}>
+              {pendingCount > 0 ? "Sync Now" : "All Synced"}
+            </Text>
+            <Text style={styles.actionCardSub}>
+              {pendingCount > 0 ? `${pendingCount} item${pendingCount > 1 ? "s" : ""} pending` : "Data is up to date"}
+            </Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -111,10 +192,14 @@ const styles = StyleSheet.create({
   statLabel:      { fontSize: 11, color: "#888", marginTop: 2 },
   section:        { marginHorizontal: 16, marginBottom: 16 },
   sectionTitle:   { fontSize: 16, fontWeight: "700", color: "#1E3A5F", marginBottom: 12 },
-  actionRow:      { flexDirection: "row", gap: 12 },
-  actionBtn:      { flex: 1, backgroundColor: "#FFF", borderRadius: 12, padding: 20, alignItems: "center", elevation: 2, shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 4 },
-  actionIcon:     { fontSize: 28, marginBottom: 8 },
-  actionLabel:    { fontSize: 13, fontWeight: "600", color: "#1E3A5F", textAlign: "center" },
+  actionGrid:       { flexDirection: "row", flexWrap: "wrap", gap: 12 },
+  actionCard:       { width: "47%", borderRadius: 16, padding: 16, borderTopWidth: 3, elevation: 2, shadowColor: "#000", shadowOpacity: 0.06, shadowRadius: 6 },
+  actionCardTop:    { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
+  actionBadge:      { borderRadius: 10, minWidth: 20, height: 20, paddingHorizontal: 6, alignItems: "center", justifyContent: "center" },
+  actionBadgeText:  { fontSize: 11, fontWeight: "700", color: "#FFF" },
+  statusDot:        { width: 10, height: 10, borderRadius: 5 },
+  actionCardTitle:  { fontSize: 14, fontWeight: "700", marginBottom: 3 },
+  actionCardSub:    { fontSize: 11, color: "#777", lineHeight: 15 },
   emptyText:      { color: "#AAA", fontStyle: "italic", textAlign: "center", padding: 20 },
   sessionCard:    { backgroundColor: "#FFF", borderRadius: 12, padding: 16, marginBottom: 8, flexDirection: "row", justifyContent: "space-between", alignItems: "center", elevation: 1, shadowColor: "#000", shadowOpacity: 0.04, shadowRadius: 3 },
   sessionLeft:    { flex: 1 },

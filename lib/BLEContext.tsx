@@ -8,10 +8,12 @@ interface BLEContextValue {
   deviceId: string | null;
   batteryLevel: number | null;
   errorMessage: string | null;
+  rawPacketCount: number;
   isConnected: boolean;
   scan: () => Promise<void>;
   disconnect: () => Promise<void>;
   setOnMeasurement: (cb: (m: GLMMeasurement) => void) => void;
+  requestMeasurement: () => Promise<void>;
 }
 
 const BLEContext = createContext<BLEContextValue | null>(null);

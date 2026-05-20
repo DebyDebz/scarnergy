@@ -1,4 +1,4 @@
-import { useEffect, Component, ReactNode } from "react";
+import { useEffect, useState, Component, ReactNode } from "react";
 import { Slot, useRouter, useSegments } from "expo-router";
 import { Platform, Text, View, LogBox } from "react-native";
 
@@ -50,8 +50,10 @@ export default function RootLayout() {
   const { session, loading, loadProfile } = useAuthStore();
   const router   = useRouter();
   const segments = useSegments();
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
     if (DEV_BYPASS_AUTH) {
       useAuthStore.setState({ profile: DEV_PROFILE, loading: false });
       return;
@@ -60,6 +62,7 @@ export default function RootLayout() {
   }, []);
 
   useEffect(() => {
+    if (!mounted) return;
     if (loading) return;
     if (DEV_BYPASS_AUTH) {
       if (segments[0] !== "tabs") router.replace("/tabs");
@@ -68,7 +71,7 @@ export default function RootLayout() {
     const inAuth = segments[0] === "auth";
     if (!session && !inAuth)  router.replace("/auth/sign-in");
     if (session  &&  inAuth)  router.replace("/tabs");
-  }, [session, loading, segments]);
+  }, [mounted, session, loading, segments]);
 
   return (
     <ErrorBoundary>
