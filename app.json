@@ -1,0 +1,44 @@
+{
+  "expo": {
+    "name": "scarnergy-app",
+    "slug": "scarnergy-app",
+    "version": "2.0.0",
+    "extra": {
+      "eas": {
+        "projectId": "e41c9a9f-d0c2-4076-9392-3e36e42169c0"
+      }
+    },
+    "ios": {
+      "bundleIdentifier": "com.krontivaafrica.scarnergyapp",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSBluetoothAlwaysUsageDescription": "This app uses Bluetooth to connect to and communicate with your GLM device.",
+        "NSBluetoothPeripheralUsageDescription": "This app uses Bluetooth to connect to and communicate with your GLM device."
+      }
+    },
+    "android": {
+      "package": "com.krontivaafrica.scarnergyapp",
+      "permissions": [
+        "android.permission.BLUETOOTH",
+        "android.permission.BLUETOOTH_ADMIN",
+        "android.permission.BLUETOOTH_SCAN",
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ]
+    },
+    "scheme": "scarnergyapp",
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "react-native-ble-plx",
+        {
+          "isBackgroundEnabled": false,
+          "modes": [],
+          "bluetoothAlwaysPermission": "Allow $(PRODUCT_NAME) to connect to your GLM Bluetooth device."
+        }
+      ]
+    ],
+    "owner": "fabricelaba"
+  }
+}
