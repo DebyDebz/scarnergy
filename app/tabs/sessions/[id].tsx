@@ -131,7 +131,7 @@ export default function SessionDetailScreen() {
             setPausing(true);
             const { error } = await supabase
               .from("inspection_sessions")
-              .update({ status: "paused", paused_at: new Date().toISOString() })
+              .update({ status: "paused" })
               .eq("id", sessionId);
             setPausing(false);
             if (error) Alert.alert("Error", error.message);
@@ -147,7 +147,7 @@ export default function SessionDetailScreen() {
     setPausing(true);
     const { error } = await supabase
       .from("inspection_sessions")
-      .update({ status: "active", paused_at: null })
+      .update({ status: "active" })
       .eq("id", sessionId);
     setPausing(false);
     if (error) Alert.alert("Error", error.message);

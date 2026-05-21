@@ -17,11 +17,12 @@ export default function Dashboard() {
   const [refreshing, setRefreshing] = useState(false);
 
   const load = async () => {
+    if (!profile) return;
     const [sessRes, buildRes, measRes, recentRes] = await Promise.all([
-      supabase.from("inspection_sessions").select("id", { count: "exact" }).eq("status", "active"),
-      supabase.from("buildings").select("id", { count: "exact" }),
-      supabase.from("measurements").select("id", { count: "exact" }),
-      supabase.from("session_summary").select("*").order("started_at", { ascending: false }).limit(5),
+      supabase.from("inspection_sessions").select("id", { count: "exact" }).eq("org_id", profile.org_id).eq("status", "active"),
+      supabase.from("buildings").select("id", { count: "exact" }).eq("org_id", profile.org_id),
+      supabase.from("measurements").select("id", { count: "exact" }).eq("org_id", profile.org_id),
+      supabase.from("session_summary").select("*").eq("org_id", profile.org_id).order("started_at", { ascending: false }).limit(5),
     ]);
     setStats({
       activeSessions: sessRes.count ?? 0,
@@ -31,7 +32,7 @@ export default function Dashboard() {
     setRecentSessions(recentRes.data ?? []);
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [profile]);
 
   const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 

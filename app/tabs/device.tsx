@@ -7,7 +7,17 @@ const STATE_COLOR: Record<string, string> = {
 };
 
 export default function DeviceScreen() {
-  const { state, lastMeasurement, deviceName, deviceId, batteryLevel, errorMessage, rawPacketCount, scan, disconnect, isConnected } = useBLE();
+  const {
+    state, lastMeasurement, lastTriggerMeasurement,
+    deviceName, deviceId, batteryLevel, errorMessage,
+    rawPacketCount, cmdEnabled, packetLog,
+    scan, disconnect, isConnected,
+  } = useBLE();
+
+  // Primary card shows the last trigger-press (stable) if one exists,
+  // otherwise falls back to the live streaming value.
+  const displayM        = lastTriggerMeasurement ?? lastMeasurement;
+  const displayIsTrigger = !!lastTriggerMeasurement;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -57,21 +67,59 @@ export default function DeviceScreen() {
 
       {/* BLE packet counter — shows whether button presses trigger notifications */}
       {isConnected && (
-        <View style={styles.debugRow}>
-          <Text style={styles.debugLabel}>BLE packets received</Text>
-          <Text style={styles.debugValue}>{rawPacketCount}</Text>
+        <>
+          <View style={styles.debugRow}>
+            <Text style={styles.debugLabel}>BLE packets received</Text>
+            <Text style={styles.debugValue}>{rawPacketCount}</Text>
+          </View>
+          <View style={styles.debugRow}>
+            <Text style={styles.debugLabel}>Trigger-press GATT mode</Text>
+            <Text style={[styles.debugValue, { color: cmdEnabled ? "#1E8449" : "#E67E22" }]}>
+              {cmdEnabled ? "Active ✓" : "Fallback (continuous)"}
+            </Text>
+          </View>
+        </>
+      )}
+
+      {/* Primary measurement card — stable trigger-press OR live stream if no trigger yet */}
+      {displayM && (
+        <View style={[styles.measurementCard, displayIsTrigger && styles.measurementCardTrigger]}>
+          <View style={styles.measurementHeader}>
+            <Text style={[styles.measurementLabel, displayIsTrigger && styles.measurementLabelTrigger]}>
+              {displayIsTrigger ? "LAST CAPTURED" : "LIVE STREAM"}
+            </Text>
+            <View style={[styles.modeBadge, displayIsTrigger && styles.modeBadgeTrigger]}>
+              <Text style={[styles.modeBadgeText, displayIsTrigger && styles.modeBadgeTextTrigger]}>
+                {displayIsTrigger ? "✓ TRIGGER PRESS" : "● STREAMING"}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.measurementValueRow}>
+            <Text style={styles.measurementValue}>
+              {(displayM.value_mm / 1000).toFixed(3)}
+            </Text>
+            <Text style={[styles.measurementUnit, displayIsTrigger && styles.measurementUnitTrigger]}>m</Text>
+          </View>
+          <Text style={styles.measurementMeta}>
+            {displayM.value_mm.toFixed(1)} mm{"  •  "}
+            {new Date(displayM.timestamp).toLocaleTimeString("nl-NL", {
+              hour: "2-digit", minute: "2-digit", second: "2-digit",
+            })}
+            {displayM.battery_level > 0 && `  •  🔋 ${displayM.battery_level}%`}
+          </Text>
         </View>
       )}
 
-      {/* Last measurement */}
-      {lastMeasurement && (
-        <View style={styles.measurementCard}>
-          <Text style={styles.measurementLabel}>Last measurement</Text>
-          <Text style={styles.measurementValue}>{lastMeasurement.value_mm.toFixed(1)} mm</Text>
-          <Text style={styles.measurementMeta}>
-            {new Date(lastMeasurement.timestamp).toLocaleTimeString("nl-NL")}
-            {lastMeasurement.is_continuous ? "  •  continuous mode" : ""}
+      {/* Live stream strip — only shown alongside a captured value so the user can
+          see what the device currently points at while a prior measurement stays stable */}
+      {lastTriggerMeasurement && lastMeasurement?.is_continuous && (
+        <View style={styles.liveStrip}>
+          <View style={styles.liveStripDot} />
+          <Text style={styles.liveStripLabel}>Live  </Text>
+          <Text style={styles.liveStripValue}>
+            {(lastMeasurement.value_mm / 1000).toFixed(3)} m
           </Text>
+          <Text style={styles.liveStripMm}> · {lastMeasurement.value_mm.toFixed(1)} mm</Text>
         </View>
       )}
 
@@ -79,13 +127,46 @@ export default function DeviceScreen() {
       <View style={styles.instructions}>
         <Text style={styles.instructionsTitle}>How to use</Text>
         <Text style={styles.instructionsText}>
-          1. Make sure your Bosch GLM 50C is switched on{"\n"}
+          1. Make sure your Bosch GLM 50C is switched on and Bluetooth active{"\n"}
           2. Tap "Scan for GLM 50C" above{"\n"}
-          3. The app will connect automatically{"\n"}
-          4. In any inspection form, tap the 📏 icon next to a measurement field{"\n"}
-          5. Pull the trigger on your GLM — the value auto-fills
+          3. The app connects and attempts to activate trigger-press mode{"\n"}
+          {"\n"}
+          {"  "}If "Trigger-press GATT mode" shows Active:{"\n"}
+          {"  "}4a. In an inspection, tap ▶ GLM next to a field{"\n"}
+          {"  "}5a. Aim at the surface and press the GLM trigger — slot auto-fills{"\n"}
+          {"\n"}
+          {"  "}If mode shows Fallback (continuous):{"\n"}
+          {"  "}4b. Aim the GLM at the surface first{"\n"}
+          {"  "}5b. Watch the banner at the top of the inspect screen{"\n"}
+          {"  "}6b. Tap ⊙ Capture when the correct value is shown{"\n"}
+          {"\n"}
+          {"  "}Alternative — GLM as keyboard (always reliable):{"\n"}
+          {"  "}iOS: Settings → Bluetooth → pair the GLM 50C{"\n"}
+          {"  "}Then tap a measurement field, aim, press trigger — value types in metres{"\n"}
+          {"  "}The app auto-converts metres → mm on Enter
         </Text>
       </View>
+
+      {/* Raw packet log — for field diagnostics */}
+      {packetLog.length > 0 && (
+        <View style={styles.logCard}>
+          <Text style={styles.logTitle}>RAW PACKET LOG (last {packetLog.length})</Text>
+          <Text style={styles.logHint}>
+            Press the GLM trigger and watch for new entries. If only 4B packets appear
+            and "trigger" never shows, CMD_ENABLE did not activate trigger-press mode —
+            use the Capture button or pair the GLM as a keyboard.
+          </Text>
+          {packetLog.map((entry, i) => (
+            <View key={i} style={[styles.logRow, entry.decoded?.includes("trigger") && styles.logRowTrigger]}>
+              <Text style={styles.logTime}>{entry.t}</Text>
+              <Text style={styles.logHex} numberOfLines={1}>{entry.len}B  {entry.hex}</Text>
+              <Text style={[styles.logDecoded, !entry.decoded && styles.logDecodedNull]}>
+                {entry.decoded ?? "— no decode"}
+              </Text>
+            </View>
+          ))}
+        </View>
+      )}
     </ScrollView>
   );
 }
@@ -106,10 +187,28 @@ const styles = StyleSheet.create({
   btnDanger:          { backgroundColor: "#E74C3C" },
   btnDisabled:        { opacity: 0.5 },
   btnText:            { color: "#FFF", fontSize: 16, fontWeight: "700" },
-  measurementCard:    { backgroundColor: "#EBF5FB", borderRadius: 16, padding: 20, alignItems: "center", borderWidth: 1, borderColor: "#AED6F1" },
-  measurementLabel:   { fontSize: 13, color: "#2E86C1", fontWeight: "600", textTransform: "uppercase", letterSpacing: 1 },
-  measurementValue:   { fontSize: 48, fontWeight: "900", color: "#1E3A5F", marginVertical: 8 },
-  measurementMeta:    { fontSize: 12, color: "#666" },
+  measurementCard:        { backgroundColor: "#EBF5FB", borderRadius: 16, padding: 20, alignItems: "center", borderWidth: 1, borderColor: "#AED6F1" },
+  measurementCardTrigger: { backgroundColor: "#EAFAF1", borderColor: "#A9DFBF" },
+  measurementHeader:      { flexDirection: "row", alignItems: "center", justifyContent: "space-between", width: "100%", marginBottom: 4 },
+  measurementLabel:        { fontSize: 13, color: "#2E86C1", fontWeight: "600", textTransform: "uppercase", letterSpacing: 1 },
+  measurementLabelTrigger: { color: "#1E8449" },
+  measurementValueRow:    { flexDirection: "row", alignItems: "flex-end", marginVertical: 8 },
+  measurementValue:       { fontSize: 48, fontWeight: "900", color: "#1E3A5F" },
+  measurementUnit:        { fontSize: 22, fontWeight: "700", color: "#2E86C1", marginLeft: 6, marginBottom: 7 },
+  measurementUnitTrigger: { color: "#1E8449" },
+  measurementMeta:        { fontSize: 12, color: "#666" },
+  modeBadge:              { backgroundColor: "#2E86C122", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
+  modeBadgeTrigger:       { backgroundColor: "#1E844922" },
+  modeBadgeText:          { fontSize: 10, fontWeight: "700", color: "#2E86C1", letterSpacing: 0.5 },
+  modeBadgeTextTrigger:   { color: "#1E8449" },
+
+  liveStrip:      { backgroundColor: "#EBF5FB", borderRadius: 10, paddingVertical: 10,
+                    paddingHorizontal: 14, flexDirection: "row", alignItems: "center",
+                    borderWidth: 1, borderColor: "#AED6F1" },
+  liveStripDot:   { width: 8, height: 8, borderRadius: 4, backgroundColor: "#2E86C1", marginRight: 8 },
+  liveStripLabel: { fontSize: 12, color: "#2E86C1", fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.5 },
+  liveStripValue: { fontSize: 15, fontWeight: "800", color: "#1E3A5F" },
+  liveStripMm:    { fontSize: 12, color: "#888", marginLeft: 2 },
   instructions:       { backgroundColor: "#FFF", borderRadius: 16, padding: 20 },
   instructionsTitle:  { fontSize: 15, fontWeight: "700", color: "#1E3A5F", marginBottom: 12 },
   instructionsText:   { fontSize: 14, color: "#444", lineHeight: 22 },
@@ -117,4 +216,14 @@ const styles = StyleSheet.create({
   debugRow:           { backgroundColor: "#FFF", borderRadius: 12, padding: 14, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   debugLabel:         { fontSize: 13, color: "#888" },
   debugValue:         { fontSize: 16, fontWeight: "700", color: "#1E3A5F" },
+
+  logCard:            { backgroundColor: "#1A1A2E", borderRadius: 12, padding: 14, gap: 6 },
+  logTitle:           { fontSize: 10, fontWeight: "800", color: "#7FB3D3", letterSpacing: 1.2, marginBottom: 4 },
+  logHint:            { fontSize: 11, color: "#7A8FAF", lineHeight: 16, marginBottom: 6 },
+  logRow:             { borderLeftWidth: 2, borderLeftColor: "#2E4A6B", paddingLeft: 8, marginBottom: 4 },
+  logRowTrigger:      { borderLeftColor: "#1E8449" },
+  logTime:            { fontSize: 10, color: "#556080", marginBottom: 1 },
+  logHex:             { fontSize: 11, fontFamily: "monospace" as any, color: "#A9C4E4", letterSpacing: 0.3 },
+  logDecoded:         { fontSize: 12, fontWeight: "700", color: "#5DADE2", marginTop: 2 },
+  logDecodedNull:     { color: "#E74C3C", fontWeight: "400" },
 });

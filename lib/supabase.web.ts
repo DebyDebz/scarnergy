@@ -28,6 +28,12 @@ export const supabase = createClient(
   }
 );
 
+// Inject dev JWT into the Realtime WebSocket so RLS sees the correct identity.
+// Without this, postgres_changes subscriptions are rejected as anonymous on web.
+if (DEV_JWT) {
+  supabase.realtime.setAuth(DEV_JWT);
+}
+
 export type { Database, Organisation, UserProfile, BleDevice, Building, Zone,
   BuildingElement, Opening, InspectionSession, Measurement, BuildingSummary,
   SessionSummary, RecentMeasurement } from "./supabase";

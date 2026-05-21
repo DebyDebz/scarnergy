@@ -3,11 +3,27 @@
   "version": "2.0.0",
   "main": "expo-router/entry",
   "scripts": {
+    "prestart": "bash scripts/detect-dev-ip.sh",
     "start": "expo start",
+    "start:clear": "bash scripts/detect-dev-ip.sh && expo start --clear",
     "android": "expo run:android",
     "ios": "expo run:ios",
     "build:preview": "eas build --profile preview --platform all",
-    "build:production": "eas build --profile production --platform all"
+    "build:production": "eas build --profile production --platform all",
+    "test": "jest"
+  },
+  "jest": {
+    "preset": "ts-jest/presets/default",
+    "testEnvironment": "node",
+    "testMatch": ["**/__tests__/**/*.test.ts"],
+    "globals": {
+      "ts-jest": {
+        "tsconfig": {
+          "jsx": "react",
+          "esModuleInterop": true
+        }
+      }
+    }
   },
   "dependencies": {
     "@expo/cli": "^54.0.23",
@@ -35,7 +51,11 @@
   },
   "devDependencies": {
     "@babel/core": "^7.24.0",
+    "@types/jest": "^30.0.0",
     "eas-cli": "^10.0.0",
+    "jest": "^29.7.0",
+    "jest-expo": "^55.0.18",
+    "ts-jest": "^29.4.10",
     "typescript": "^5.4.5"
   }
 }

@@ -46,7 +46,7 @@ export default function BuildingsScreen() {
       .single();
 
     setStarting(null);
-    if (error) { Alert.alert("Error", error.message); return; }
+    if (error) { Alert.alert("Could not start inspection", error.message || "Server error — please try again."); return; }
     router.push(`/tabs/sessions/${data.id}`);
   }, [profile, router]);
 

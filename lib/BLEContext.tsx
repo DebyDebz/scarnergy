@@ -1,18 +1,21 @@
 import React, { createContext, useContext } from "react";
-import { useBLEDevice, BleState, GLMMeasurement } from "../hooks/useBLEDevice";
+import { useBLEDevice, BleState, GLMMeasurement, PacketLogEntry } from "../hooks/useBLEDevice";
 
 interface BLEContextValue {
-  state: BleState;
-  lastMeasurement: GLMMeasurement | null;
-  deviceName: string | null;
-  deviceId: string | null;
-  batteryLevel: number | null;
-  errorMessage: string | null;
-  rawPacketCount: number;
-  isConnected: boolean;
-  scan: () => Promise<void>;
-  disconnect: () => Promise<void>;
-  setOnMeasurement: (cb: (m: GLMMeasurement) => void) => void;
+  state:                  BleState;
+  lastMeasurement:        GLMMeasurement | null;
+  lastTriggerMeasurement: GLMMeasurement | null;
+  deviceName:             string | null;
+  deviceId:               string | null;
+  batteryLevel:           number | null;
+  errorMessage:           string | null;
+  rawPacketCount:         number;
+  cmdEnabled:             boolean;
+  packetLog:              PacketLogEntry[];
+  isConnected:            boolean;
+  scan:               () => Promise<void>;
+  disconnect:         () => Promise<void>;
+  setOnMeasurement:   (cb: (m: GLMMeasurement) => void) => void;
   requestMeasurement: () => Promise<void>;
 }
 

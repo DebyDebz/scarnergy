@@ -22,6 +22,7 @@ export function useBLEDevice() {
     batteryLevel: null,
     errorMessage: "Bluetooth is not available on web.",
     rawPacketCount: 0,
+    cmdEnabled: false,
     isConnected: false,
     scan: noop,
     disconnect: noop,

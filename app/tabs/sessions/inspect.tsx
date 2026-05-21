@@ -55,8 +55,8 @@ export default function InspectScreen() {
   const { elementId, sessionId } = useLocalSearchParams<{ elementId: string; sessionId: string }>();
   const { profile } = useAuthStore();
   const {
-    deviceId, isConnected,
-    setOnMeasurement, requestMeasurement,
+    deviceId, isConnected, cmdEnabled,
+    setOnMeasurement, requestMeasurement, lastMeasurement,
   } = useBLE();
 
   // Track latest non-null deviceId in a ref so it survives GATT drops and
@@ -72,12 +72,19 @@ export default function InspectScreen() {
   const [values,        setValues]        = useState<Partial<Record<SlotKey, string>>>({});
   const [activeSlot,    setActiveSlot]    = useState<SlotKey | null>(null);
   const [saving,        setSaving]        = useState(false);
+  // Briefly highlights the slot card that was just auto-filled by a trigger press.
+  const [flashedSlot,   setFlashedSlot]   = useState<SlotKey | null>(null);
   // Photos: local display URIs + optional uploaded storage paths
   const [photoUris,      setPhotoUris]      = useState<string[]>([]);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
   const activeSlotRef = useRef<SlotKey | null>(null);
-  useEffect(() => { activeSlotRef.current = activeSlot; }, [activeSlot]);
+  // setActiveSlotSync keeps the ref in sync IMMEDIATELY so BLE callbacks that
+  // fire in the same tick as toggleSlot always read the correct slot.
+  const setActiveSlotSync = useCallback((slot: SlotKey | null) => {
+    activeSlotRef.current = slot;
+    setActiveSlot(slot);
+  }, []);
 
   // Refs so the measurement callback always reads current values without stale closures.
   // liveValuesRef is updated SYNCHRONOUSLY in onChangeText so handleSubmitEditing
@@ -203,10 +210,11 @@ export default function InspectScreen() {
     }
   }, [element, profile]);
 
-  // Wire GLM measurement — fires when physical button is pressed
+  // Wire GLM measurement — fires when the physical trigger is pressed (GATT mode).
+  // Trigger-press packets always fill the slot; continuous heartbeats only fill when
+  // pendingMeasurementRef was armed via requestMeasurement() (fallback path).
   useEffect(() => {
     setOnMeasurement((m: GLMMeasurement) => {
-      // Use active slot, or auto-advance to the first unfilled slot
       const slot = activeSlotRef.current ?? slotsRef.current.find(s => {
         const v = parseFloat(valuesRef.current[s.key] ?? "");
         return isNaN(v) || v <= 0;
@@ -214,24 +222,42 @@ export default function InspectScreen() {
       if (!slot) return;
       console.log("[BLE] Filling slot:", slot, "→", m.value_mm.toFixed(1), "mm");
       setValues(prev => ({ ...prev, [slot]: m.value_mm.toFixed(1) }));
-      setActiveSlot(null);
+      setActiveSlotSync(null);
+      // Flash the filled slot for 1.5 s so the user gets clear visual feedback.
+      setFlashedSlot(slot);
+      setTimeout(() => setFlashedSlot(null), 1500);
     });
     return () => setOnMeasurement(() => {});
-  }, [setOnMeasurement]);
+  }, [setOnMeasurement, setActiveSlotSync]);
 
-  // GLM 50C is paired as a BLE keyboard in iOS Settings. Pressing its trigger
-  // "types" the measurement into whichever TextInput holds first-responder status.
-  // Setting activeSlot triggers the useEffect above which focuses the right field.
+  // Manually capture the current live GLM reading into the active (or first unfilled) slot.
+  // Works in continuous mode without requiring CMD_ENABLE or trigger-press indications.
+  const captureNow = useCallback((value_mm: number) => {
+    const slot = activeSlotRef.current ?? slotsRef.current.find(s => {
+      const v = parseFloat(valuesRef.current[s.key] ?? "");
+      return isNaN(v) || v <= 0;
+    })?.key ?? null;
+    if (!slot) return;
+    console.log("[BLE] Capture now:", slot, "→", value_mm.toFixed(1), "mm");
+    setValues(prev => ({ ...prev, [slot]: value_mm.toFixed(1) }));
+    setActiveSlotSync(null);
+    setFlashedSlot(slot);
+    setTimeout(() => setFlashedSlot(null), 1500);
+  }, [setActiveSlotSync]);
+
+  // GLM 50C can also be paired as a BLE keyboard in iOS Settings. Pressing its trigger
+  // "types" the measurement (in metres) into whichever TextInput has first-responder focus.
   const toggleSlot = (key: SlotKey) => {
     const wasActive = activeSlot === key;
-    setActiveSlot(wasActive ? null : key);
-    // Also send a GATT request in case this firmware supports measurement-pull
-    if (!wasActive && isConnected) requestMeasurement();
+    setActiveSlotSync(wasActive ? null : key);
+    // Only arm the pendingRef when CMD_ENABLE was confirmed by the device (GATT trigger-press
+    // mode active). In continuous-only mode arming pendingRef causes the very next 200ms
+    // heartbeat to fill the slot before the user has aimed — use Capture button instead.
+    if (!wasActive && isConnected && cmdEnabled) requestMeasurement();
   };
 
-  // Called when the user presses Enter / GLM sends Return after typing the value.
-  // GLM keyboard mode outputs in meters by default (e.g. "2.430").
-  // If the value has a decimal point and is < 100, treat as meters and convert.
+  // Called when the user presses Enter / GLM keyboard sends Return after typing.
+  // GLM keyboard mode outputs metres (e.g. "2.430") — convert to mm automatically.
   const handleSubmitEditing = (key: SlotKey) => {
     const raw = liveValuesRef.current[key] ?? values[key] ?? "";
     const num = parseFloat(raw);
@@ -240,18 +266,18 @@ export default function InspectScreen() {
     const isMaybeMeters = raw.includes(".") && num < 100;
     const mm = isMaybeMeters ? Math.round(num * 1000) : Math.round(num);
     setValues(prev => ({ ...prev, [key]: String(mm) }));
-    setActiveSlot(null);
+    setActiveSlotSync(null);
 
-    // Auto-advance to the next unfilled slot
+    // Auto-advance to the next unfilled slot (use valuesRef to avoid stale state)
     const slots = SLOT_MAP[element?.element_type ?? ""] ?? DEFAULT_SLOTS;
     const idx   = slots.findIndex(s => s.key === key);
     const next  = slots.slice(idx + 1).find(s => {
-      const v = parseFloat(values[s.key] ?? "");
+      const v = parseFloat(valuesRef.current[s.key] ?? "");
       return isNaN(v) || v <= 0;
     });
     if (next) {
-      setActiveSlot(next.key);
-      setTimeout(() => inputRefs.current[next.key]?.focus(), 100);
+      setActiveSlotSync(next.key as SlotKey);
+      setTimeout(() => inputRefs.current[next.key as SlotKey]?.focus(), 100);
     }
   };
 
@@ -321,9 +347,9 @@ export default function InspectScreen() {
             value_mm:         update[s.key] as number,
             unit:             "mm",
             is_anomaly:       false,
+            is_deleted:       false,
             measurement_type: s.key.replace("_mm", ""),
             ingestion_path:   "mobile",
-            client_timestamp: now,
           }));
         if (rows.length > 0) {
           const { error: mErr } = await supabase.from("measurements").insert(rows);
@@ -376,13 +402,38 @@ export default function InspectScreen() {
         </View>
       </View>
 
-      {/* ── GLM status banner ── */}
+      {/* ── GLM status + live reading banner ── */}
       <View style={[styles.glmBanner, isConnected && styles.glmBannerConnected]}>
-        <Text style={styles.glmBannerText}>
-          {isConnected
-            ? "📏 GLM connected — tap a field, then press the trigger"
-            : "📏 No GLM — go back and scan, or enter values manually"}
-        </Text>
+        <View style={styles.glmBannerRow}>
+          <Text style={styles.glmBannerText}>
+            {isConnected
+              ? cmdEnabled
+                ? "GLM ready — press trigger to auto-fill"
+                : "GLM streaming — tap Capture or enter manually"
+              : "No GLM — scan from the session screen, or enter manually"}
+          </Text>
+          {isConnected && lastMeasurement && (
+            <Text style={styles.glmLiveValue}>
+              {lastMeasurement.value_mm.toFixed(0)} mm
+            </Text>
+          )}
+        </View>
+        {isConnected && lastMeasurement && (() => {
+          // Find which slot will receive the next capture (active slot or first unfilled)
+          const targetSlot = activeSlotRef.current ?? (slots.find(s => {
+            const v = parseFloat(values[s.key] ?? "");
+            return isNaN(v) || v <= 0;
+          })?.key ?? null);
+          if (!targetSlot) return null;
+          const targetLabel = slots.find(s => s.key === targetSlot)?.label ?? targetSlot.replace("_mm", "");
+          return (
+            <TouchableOpacity style={styles.captureBtn} onPress={() => captureNow(lastMeasurement.value_mm)}>
+              <Text style={styles.captureBtnText}>
+                ⊙ Capture {lastMeasurement.value_mm.toFixed(0)} mm → {targetLabel}
+              </Text>
+            </TouchableOpacity>
+          );
+        })()}
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
@@ -395,14 +446,22 @@ export default function InspectScreen() {
 
         {/* ── Measurement slots ── */}
         {slots.map(slot => {
-          const raw      = values[slot.key] ?? "";
-          const isActive = activeSlot === slot.key;
-          const numVal   = parseFloat(raw);
-          const isFilled = !isNaN(numVal) && numVal > 0;
+          const raw       = values[slot.key] ?? "";
+          const isActive  = activeSlot === slot.key;
+          const isFlashed = flashedSlot === slot.key;
+          const numVal    = parseFloat(raw);
+          const isFilled  = !isNaN(numVal) && numVal > 0;
 
           return (
-            <View key={slot.key} style={[styles.slotCard, isActive && styles.slotCardActive, isFilled && !isActive && styles.slotCardFilled]}>
-
+            <View
+              key={slot.key}
+              style={[
+                styles.slotCard,
+                isActive  && styles.slotCardActive,
+                isFilled  && !isActive && !isFlashed && styles.slotCardFilled,
+                isFlashed && styles.slotCardFlash,
+              ]}
+            >
               <Text style={styles.slotLabel}>{slot.label}</Text>
 
               <View style={styles.inputRow}>
@@ -415,8 +474,8 @@ export default function InspectScreen() {
                     setValues(prev => ({ ...prev, [slot.key]: v }));
                   }}
                   onSubmitEditing={() => handleSubmitEditing(slot.key)}
-                  onFocus={() => setActiveSlot(slot.key)}
-                  onBlur={() => setActiveSlot(prev => prev === slot.key ? null : prev)}
+                  onFocus={() => setActiveSlotSync(slot.key)}
+                  onBlur={() => setActiveSlotSync(activeSlotRef.current === slot.key ? null : activeSlotRef.current)}
                   keyboardType="default"
                   placeholder="Tap or use GLM"
                   placeholderTextColor="#CCC"
@@ -433,15 +492,34 @@ export default function InspectScreen() {
                 </TouchableOpacity>
               </View>
 
+              {/* Live GLM preview while this slot is active */}
+              {isActive && isConnected && lastMeasurement && (
+                <View style={styles.livePreview}>
+                  <Text style={styles.livePreviewLabel}>Live: </Text>
+                  <Text style={styles.livePreviewValue}>{lastMeasurement.value_mm.toFixed(0)} mm</Text>
+                  <Text style={styles.livePreviewMode}>
+                    {lastMeasurement.is_continuous ? " · streaming" : " · trigger"}
+                  </Text>
+                </View>
+              )}
+
               {isActive && (
                 <View style={styles.hint}>
                   <Text style={styles.hintText}>
-                    ● Field is active — press the GLM trigger to type the measurement
+                    {cmdEnabled
+                      ? "● Slot armed — press the GLM trigger to auto-fill"
+                      : "● Slot armed — tap Capture above, or type a value manually"}
                   </Text>
-                  <Text style={styles.hintSub}>
-                    GLM outputs in metres (e.g. 2.430) — app converts to mm automatically
-                  </Text>
+                  {!cmdEnabled && (
+                    <Text style={styles.hintSub}>
+                      Manual entry: type metres (e.g. 2.430) — app converts to mm
+                    </Text>
+                  )}
                 </View>
+              )}
+
+              {isFlashed && (
+                <Text style={styles.flashLabel}>✓ Captured from GLM</Text>
               )}
             </View>
           );
@@ -515,7 +593,13 @@ const styles = StyleSheet.create({
   glmBanner:          { backgroundColor: "#F5F5F5", paddingHorizontal: 16, paddingVertical: 10,
                         borderBottomWidth: 1, borderBottomColor: "#DDD" },
   glmBannerConnected: { backgroundColor: "#EBF5FB", borderBottomColor: "#AED6F1" },
-  glmBannerText:      { fontSize: 13, color: "#2E86C1", fontWeight: "600" },
+  glmBannerRow:       { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  glmBannerText:      { fontSize: 13, color: "#2E86C1", fontWeight: "600", flex: 1 },
+  glmLiveValue:       { fontSize: 18, fontWeight: "800", color: "#1E3A5F", marginLeft: 8 },
+  captureBtn:         { marginTop: 8, backgroundColor: "#1E3A5F", borderRadius: 8,
+                        paddingVertical: 8, paddingHorizontal: 14, alignSelf: "stretch",
+                        alignItems: "center" },
+  captureBtnText:     { color: "#fff", fontWeight: "700", fontSize: 14 },
 
   scroll:         { flex: 1 },
   content:        { padding: 16, gap: 14 },
@@ -556,6 +640,15 @@ const styles = StyleSheet.create({
 
   noDeviceNote:   { fontSize: 12, color: "#E67E22", textAlign: "center",
                     paddingHorizontal: 20, lineHeight: 18, marginTop: -4 },
+
+  slotCardFlash:  { borderColor: "#1E8449", backgroundColor: "#EAFAF1" },
+  livePreview:    { flexDirection: "row", alignItems: "baseline", marginTop: 8,
+                    paddingTop: 8, borderTopWidth: 1, borderTopColor: "#AED6F1" },
+  livePreviewLabel:{ fontSize: 12, color: "#7FB3D3", fontWeight: "600" },
+  livePreviewValue:{ fontSize: 16, fontWeight: "800", color: "#1E3A5F" },
+  livePreviewMode: { fontSize: 11, color: "#AAA" },
+  flashLabel:     { fontSize: 12, color: "#1E8449", fontWeight: "700", marginTop: 6,
+                    textAlign: "center" },
 
   photoSection:   { backgroundColor: "#fff", borderRadius: 12, padding: 14,
                     elevation: 1, shadowColor: "#000", shadowOpacity: 0.04, shadowRadius: 3 },
