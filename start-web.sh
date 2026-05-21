@@ -141,13 +141,13 @@ cd "$ROOT"
 for f in "$ROOT"/supabase/migrations/0*.sql; do
   name=$(basename "$f")
   info "applying $name"
-  docker exec -i scarnergy_db psql -U postgres -d postgres < "$f"__ 2>&1 \
+  docker exec -i scarnergy_db psql -U postgres -d postgres < "$f" 2>&1 \
     | grep -v "^$" | grep -v "^NOTICE" | grep -v "already exists" || true
 done
 
 info "Reloading PostgREST schema cache..."
-cd "$INFRA" && docker compose restart rest
-ok "Migrations done"
+docker exec scarnergy_db psql -U postgres -c "NOTIFY pgrst, 'reload schema';" > /dev/null 2>&1 || true
+ok "Migrations done — PostgREST schema cache refreshed"
 
 
 # ─── STEP 5 : install dependencies ───────────────────────────────────────────
@@ -158,6 +158,12 @@ confirm
 cd "$APP"
 npm install --silent
 ok "Dependencies installed"
+
+
+# ─── STEP 5.5 : auto-detect backend IP ───────────────────────────────────────
+step "5.5" "Detecting backend IP for native device access"
+info "Updates EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_AI_SERVER_URL in scarnergy-app/.env"
+bash "$APP/scripts/detect-dev-ip.sh" || true   # non-fatal; metro will warn if wrong
 
 
 # ─── STEP 6 : start web app ───────────────────────────────────────────────────
@@ -174,4 +180,4 @@ echo    "  To stop the backend:  cd infrastructure && docker compose down"
 echo ""
 confirm
 
-npx expo start --web --port "$WEB_PORT"
+cd "$APP" && npx expo start --web --port "$WEB_PORT"

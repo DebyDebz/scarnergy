@@ -67,6 +67,14 @@ GRANT authenticated TO supabase_auth_admin;
 ALTER SCHEMA auth        OWNER TO supabase_auth_admin;
 ALTER SCHEMA extensions  OWNER TO postgres;
 ALTER SCHEMA storage     OWNER TO postgres;
+
+-- Pre-create minimal auth.users so migration 002's FK (user_profiles → auth.users)
+-- succeeds at DB init time before GoTrue starts.
+-- GoTrue uses CREATE TABLE IF NOT EXISTS then ALTER TABLE ADD COLUMN for each of its
+-- own columns — a pre-existing table with just id is safe for GoTrue v2.
+CREATE TABLE IF NOT EXISTS auth.users (
+  id UUID NOT NULL PRIMARY KEY
+);
 ALTER SCHEMA _realtime   OWNER TO supabase_realtime_admin;
 ALTER SCHEMA graphql_public OWNER TO postgres;
 
