@@ -6,7 +6,6 @@ import {
 import { useLocalSearchParams, useRouter, useNavigation } from "expo-router";
 import { supabase, SessionSummary, Zone, BuildingElement } from "../../../lib/supabase";
 import { useBLE } from "../../../lib/BLEContext";
-import { useLiveMeasurements } from "../../../hooks/useLiveMeasurements";
 
 export default function SessionDetailScreen() {
   const { id: sessionId } = useLocalSearchParams<{ id: string }>();
@@ -16,6 +15,7 @@ export default function SessionDetailScreen() {
 
   const [session,         setSession]         = useState<SessionSummary | null>(null);
   const [sessionLoading,  setSessionLoading]  = useState(true);
+  const [sessionError,    setSessionError]    = useState<string | null>(null);
   const [zones,           setZones]           = useState<Zone[]>([]);
   const [selectedZoneId,  setSelectedZoneId]  = useState<string | null>(null);
   const [elements,        setElements]        = useState<BuildingElement[]>([]);
@@ -23,9 +23,7 @@ export default function SessionDetailScreen() {
   const [closing,         setClosing]         = useState(false);
   const [pausing,         setPausing]         = useState(false);
 
-  const { measurements } = useLiveMeasurements(sessionId ?? null);
-
-  // ── Data loading ───────────────────────────────────────────────────────────
+// ── Data loading ───────────────────────────────────────────────────────────
 
   const loadSession = useCallback(() => {
     if (!sessionId) return;
@@ -34,7 +32,11 @@ export default function SessionDetailScreen() {
       .select("*")
       .eq("id", sessionId)
       .single()
-      .then(({ data }) => { setSession(data); setSessionLoading(false); });
+      .then(({ data, error }) => {
+        if (error) setSessionError(error.message);
+        else setSession(data);
+        setSessionLoading(false);
+      });
   }, [sessionId]);
 
   useEffect(() => { loadSession(); }, [loadSession]);
@@ -60,6 +62,8 @@ export default function SessionDetailScreen() {
       .from("building_elements")
       .select("*")
       .eq("zone_id", selectedZoneId)
+      .eq("is_active", true)
+      .order("sort_order", { ascending: true })
       .order("name", { ascending: true })
       .then(({ data }) => {
         setElements(data ?? []);
@@ -260,6 +264,7 @@ export default function SessionDetailScreen() {
   // ── Render ────────────────────────────────────────────────────────────────
 
   if (sessionLoading) return <ActivityIndicator style={styles.loader} color="#1E3A5F" />;
+  if (sessionError)   return <Text style={styles.error}>{sessionError}</Text>;
   if (!session)       return <Text style={styles.error}>Session not found.</Text>;
 
   const bleLabel = bleState === "scanning"   ? "Scanning..."
@@ -390,41 +395,15 @@ export default function SessionDetailScreen() {
             ListFooterComponent={
               <View style={styles.footer}>
 
-                {/* ── Live measurements feed ── */}
-                {measurements.length > 0 && (
-                  <View style={styles.measurePanel}>
-                    <Text style={styles.measurePanelTitle}>
-                      Measurements · {measurements.length}
-                    </Text>
-                    {measurements.slice(0, 15).map(m => (
-                      <View key={m.id} style={styles.measureRow}>
-                        <Text style={styles.measureValue}>
-                          {Number(m.value_mm).toFixed(0)} mm
-                        </Text>
-                        {m.measurement_type ? (
-                          <Text style={styles.measureType}>{m.measurement_type}</Text>
-                        ) : null}
-                        <Text style={styles.measureTime}>
-                          {new Date(m.measured_at).toLocaleTimeString("nl-NL", {
-                            hour: "2-digit", minute: "2-digit", second: "2-digit",
-                          })}
-                        </Text>
-                        {m.is_anomaly && <Text style={styles.measureAnomaly}>⚠</Text>}
-                      </View>
-                    ))}
+{session.status === "completed" && (
+                  <View style={styles.completedBanner}>
+                    <Text style={styles.completedBannerText}>✓  Session Completed</Text>
                   </View>
                 )}
 
-                {session.status === "completed" && (
-                  <>
-                    <View style={styles.completedBanner}>
-                      <Text style={styles.completedBannerText}>✓  Session Completed</Text>
-                    </View>
-                    <TouchableOpacity style={styles.exportBtn} onPress={exportXML}>
-                      <Text style={styles.exportBtnText}>↓  Export XML</Text>
-                    </TouchableOpacity>
-                  </>
-                )}
+                <TouchableOpacity style={styles.exportBtn} onPress={exportXML}>
+                  <Text style={styles.exportBtnText}>↓  Export XML</Text>
+                </TouchableOpacity>
 
                 {session.status === "paused" && (
                   <TouchableOpacity

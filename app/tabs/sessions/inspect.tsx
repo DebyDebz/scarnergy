@@ -123,9 +123,9 @@ export default function InspectScreen() {
           const { zones: zoneData, ...rest } = data as any;
           setElement({ ...rest, zone_name: zoneData?.name ?? null });
           setValues({
-            ...(rest.length_mm != null ? { length_mm: String(rest.length_mm) } : {}),
-            ...(rest.height_mm != null ? { height_mm: String(rest.height_mm) } : {}),
-            ...(rest.width_mm  != null ? { width_mm:  String(rest.width_mm)  } : {}),
+            ...(rest.length_mm != null ? { length_mm: (rest.length_mm / 1000).toFixed(3) } : {}),
+            ...(rest.height_mm != null ? { height_mm: (rest.height_mm / 1000).toFixed(3) } : {}),
+            ...(rest.width_mm  != null ? { width_mm:  (rest.width_mm  / 1000).toFixed(3) } : {}),
           });
           // Load existing photos: generate signed URLs for storage paths
           const existing: string[] = rest.photo_urls ?? [];
@@ -221,7 +221,7 @@ export default function InspectScreen() {
       })?.key ?? null;
       if (!slot) return;
       console.log("[BLE] Filling slot:", slot, "→", m.value_mm.toFixed(1), "mm");
-      setValues(prev => ({ ...prev, [slot]: m.value_mm.toFixed(1) }));
+      setValues(prev => ({ ...prev, [slot]: (m.value_mm / 1000).toFixed(3) }));
       setActiveSlotSync(null);
       // Flash the filled slot for 1.5 s so the user gets clear visual feedback.
       setFlashedSlot(slot);
@@ -239,7 +239,7 @@ export default function InspectScreen() {
     })?.key ?? null;
     if (!slot) return;
     console.log("[BLE] Capture now:", slot, "→", value_mm.toFixed(1), "mm");
-    setValues(prev => ({ ...prev, [slot]: value_mm.toFixed(1) }));
+    setValues(prev => ({ ...prev, [slot]: (value_mm / 1000).toFixed(3) }));
     setActiveSlotSync(null);
     setFlashedSlot(slot);
     setTimeout(() => setFlashedSlot(null), 1500);
@@ -294,9 +294,9 @@ export default function InspectScreen() {
         if (raw === undefined || raw.trim() === "") continue;
         const num = parseFloat(raw);
         if (!isNaN(num) && num > 0) {
-          // Mirror handleSubmitEditing: GLM keyboard outputs metres (e.g. "2.430") —
-          // convert to mm if the value looks like metres (has a decimal and is < 100).
-          const isMaybeMeters = raw.includes(".") && num < 100;
+          // Values are always stored in metres (e.g. "0.646") — convert to mm for DB.
+          // If user typed a large integer (e.g. "2500" without decimal) treat as mm directly.
+          const isMaybeMeters = raw.includes(".") || num < 100;
           update[s.key] = isMaybeMeters ? Math.round(num * 1000) : Math.round(num);
         }
       }
@@ -414,26 +414,10 @@ export default function InspectScreen() {
           </Text>
           {isConnected && lastMeasurement && (
             <Text style={styles.glmLiveValue}>
-              {lastMeasurement.value_mm.toFixed(0)} mm
+              {(lastMeasurement.value_mm / 1000).toFixed(3)} m
             </Text>
           )}
         </View>
-        {isConnected && lastMeasurement && (() => {
-          // Find which slot will receive the next capture (active slot or first unfilled)
-          const targetSlot = activeSlotRef.current ?? (slots.find(s => {
-            const v = parseFloat(values[s.key] ?? "");
-            return isNaN(v) || v <= 0;
-          })?.key ?? null);
-          if (!targetSlot) return null;
-          const targetLabel = slots.find(s => s.key === targetSlot)?.label ?? targetSlot.replace("_mm", "");
-          return (
-            <TouchableOpacity style={styles.captureBtn} onPress={() => captureNow(lastMeasurement.value_mm)}>
-              <Text style={styles.captureBtnText}>
-                ⊙ Capture {lastMeasurement.value_mm.toFixed(0)} mm → {targetLabel}
-              </Text>
-            </TouchableOpacity>
-          );
-        })()}
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
@@ -483,7 +467,7 @@ export default function InspectScreen() {
                   selectTextOnFocus
                   allowFontScaling={false}
                 />
-                <Text style={styles.inputUnit} allowFontScaling={false}>mm</Text>
+                <Text style={styles.inputUnit} allowFontScaling={false}>m</Text>
                 <TouchableOpacity
                   style={[styles.glmBtn, isActive && styles.glmBtnActive]}
                   onPress={() => toggleSlot(slot.key)}
@@ -496,7 +480,7 @@ export default function InspectScreen() {
               {isActive && isConnected && lastMeasurement && (
                 <View style={styles.livePreview}>
                   <Text style={styles.livePreviewLabel}>Live: </Text>
-                  <Text style={styles.livePreviewValue}>{lastMeasurement.value_mm.toFixed(0)} mm</Text>
+                  <Text style={styles.livePreviewValue}>{(lastMeasurement.value_mm / 1000).toFixed(3)} m</Text>
                   <Text style={styles.livePreviewMode}>
                     {lastMeasurement.is_continuous ? " · streaming" : " · trigger"}
                   </Text>
@@ -512,7 +496,7 @@ export default function InspectScreen() {
                   </Text>
                   {!cmdEnabled && (
                     <Text style={styles.hintSub}>
-                      Manual entry: type metres (e.g. 2.430) — app converts to mm
+                      Manual entry: type in metres (e.g. 2.430)
                     </Text>
                   )}
                 </View>

@@ -6,6 +6,7 @@ export default function SessionsLayout() {
       <Stack.Screen name="index" />
       <Stack.Screen name="[id]" />
       <Stack.Screen name="inspect" />
+      <Stack.Screen name="floorplan" />
     </Stack>
   );
 }

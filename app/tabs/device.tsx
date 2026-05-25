@@ -10,7 +10,7 @@ export default function DeviceScreen() {
   const {
     state, lastMeasurement, lastTriggerMeasurement,
     deviceName, deviceId, batteryLevel, errorMessage,
-    rawPacketCount, cmdEnabled, packetLog,
+    rawPacketCount, cmdEnabled,
     scan, disconnect, isConnected,
   } = useBLE();
 
@@ -147,26 +147,7 @@ export default function DeviceScreen() {
         </Text>
       </View>
 
-      {/* Raw packet log — for field diagnostics */}
-      {packetLog.length > 0 && (
-        <View style={styles.logCard}>
-          <Text style={styles.logTitle}>RAW PACKET LOG (last {packetLog.length})</Text>
-          <Text style={styles.logHint}>
-            Press the GLM trigger and watch for new entries. If only 4B packets appear
-            and "trigger" never shows, CMD_ENABLE did not activate trigger-press mode —
-            use the Capture button or pair the GLM as a keyboard.
-          </Text>
-          {packetLog.map((entry, i) => (
-            <View key={i} style={[styles.logRow, entry.decoded?.includes("trigger") && styles.logRowTrigger]}>
-              <Text style={styles.logTime}>{entry.t}</Text>
-              <Text style={styles.logHex} numberOfLines={1}>{entry.len}B  {entry.hex}</Text>
-              <Text style={[styles.logDecoded, !entry.decoded && styles.logDecodedNull]}>
-                {entry.decoded ?? "— no decode"}
-              </Text>
-            </View>
-          ))}
-        </View>
-      )}
+
     </ScrollView>
   );
 }
@@ -217,13 +198,4 @@ const styles = StyleSheet.create({
   debugLabel:         { fontSize: 13, color: "#888" },
   debugValue:         { fontSize: 16, fontWeight: "700", color: "#1E3A5F" },
 
-  logCard:            { backgroundColor: "#1A1A2E", borderRadius: 12, padding: 14, gap: 6 },
-  logTitle:           { fontSize: 10, fontWeight: "800", color: "#7FB3D3", letterSpacing: 1.2, marginBottom: 4 },
-  logHint:            { fontSize: 11, color: "#7A8FAF", lineHeight: 16, marginBottom: 6 },
-  logRow:             { borderLeftWidth: 2, borderLeftColor: "#2E4A6B", paddingLeft: 8, marginBottom: 4 },
-  logRowTrigger:      { borderLeftColor: "#1E8449" },
-  logTime:            { fontSize: 10, color: "#556080", marginBottom: 1 },
-  logHex:             { fontSize: 11, fontFamily: "monospace" as any, color: "#A9C4E4", letterSpacing: 0.3 },
-  logDecoded:         { fontSize: 12, fontWeight: "700", color: "#5DADE2", marginTop: 2 },
-  logDecodedNull:     { color: "#E74C3C", fontWeight: "400" },
 });

@@ -78,10 +78,12 @@ export interface Building {
   id: string; org_id: string; reference_code: string; street: string;
   house_number: string; postal_code: string; city: string;
   building_type: string; construction_year: number; gross_floor_area_m2: number;
+  is_active: boolean;
 }
 export interface Zone {
   id: string; building_id: string; zone_code: string; name: string;
   floor_level: number; gross_area_m2: number; energy_label: string | null;
+  is_active: boolean;
 }
 export interface BuildingElement {
   id: string; zone_id: string; element_type: string; name: string;
@@ -103,10 +105,13 @@ export interface InspectionSession {
   id: string; org_id: string; building_id: string; inspector_id: string;
   session_code: string; status: string; started_at: string; completed_at: string | null;
   total_measurements: number; anomaly_count: number; sync_status: string;
+  notes: string | null;
 }
 export interface Measurement {
   id: string; session_id: string; device_id: string | null; value_mm: number;
   unit: string; measurement_type: string | null; is_anomaly: boolean; measured_at: string;
+  org_id: string; inspector_id: string | null; element_id: string | null;
+  is_deleted: boolean; ingestion_path: string | null;
 }
 export interface BuildingSummary extends Building {
   full_address: string; zone_count: number; element_count: number;

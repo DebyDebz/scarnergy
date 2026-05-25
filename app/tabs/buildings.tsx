@@ -50,8 +50,15 @@ export default function BuildingsScreen() {
     router.push(`/tabs/sessions/${data.id}`);
   }, [profile, router]);
 
-  if (loading) return <ActivityIndicator style={styles.loader} color="#1E3A5F" />;
-  if (error)   return <Text style={styles.error}>{error}</Text>;
+  if (loading && buildings.length === 0) return <ActivityIndicator style={styles.loader} color="#1E3A5F" />;
+  if (error)   return (
+    <View style={styles.errorWrap}>
+      <Text style={styles.error}>{error}</Text>
+      <TouchableOpacity style={styles.retryBtn} onPress={() => { setError(null); setLoading(true); load(); }}>
+        <Text style={styles.retryBtnText}>Retry</Text>
+      </TouchableOpacity>
+    </View>
+  );
 
   return (
     <View style={styles.container}>
@@ -59,6 +66,8 @@ export default function BuildingsScreen() {
         data={buildings}
         keyExtractor={b => b.id}
         contentContainerStyle={styles.list}
+        onRefresh={load}
+        refreshing={loading}
         ListEmptyComponent={<Text style={styles.empty}>No buildings found.</Text>}
         renderItem={({ item }) => {
           const typeColor = buildingTypeColor(item.building_type);
@@ -175,7 +184,10 @@ const styles = StyleSheet.create({
   loader:          { flex: 1 },
   list:            { padding: 16, gap: 12 },
   empty:           { textAlign: "center", color: "#AAA", fontStyle: "italic", padding: 40 },
-  error:           { flex: 1, textAlign: "center", color: "#E74C3C", padding: 40, marginTop: 40 },
+  errorWrap:       { flex: 1, alignItems: "center", justifyContent: "center", padding: 32 },
+  error:           { textAlign: "center", color: "#E74C3C", marginBottom: 16, lineHeight: 20 },
+  retryBtn:        { paddingHorizontal: 24, paddingVertical: 10, borderRadius: 8, backgroundColor: "#1E3A5F" },
+  retryBtnText:    { color: "#fff", fontWeight: "700", fontSize: 14 },
 
   card:            { backgroundColor: "#FFF", borderRadius: 14,
                      borderWidth: 1, borderColor: "#EBEBEB" },

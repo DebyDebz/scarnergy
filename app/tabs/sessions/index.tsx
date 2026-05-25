@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity,
   ActivityIndicator, Modal, TextInput, Alert,
@@ -23,6 +23,9 @@ export default function SessionsScreen() {
 
   const [sessions,  setSessions]  = useState<SessionSummary[]>([]);
   const [loading,   setLoading]   = useState(true);
+  // Tracks whether we've done at least one successful load so the profile
+  // useEffect below doesn't fire a second time when the screen is already focused.
+  const didInitialLoad = useRef(false);
 
   // New-session modal
   const [showModal,          setShowModal]          = useState(false);
@@ -48,11 +51,18 @@ export default function SessionsScreen() {
     });
   }, [profile, buildingId]);
 
-  // Refresh whenever this screen comes into focus
-  useFocusEffect(useCallback(() => { loadSessions(); }, [loadSessions]));
+  // Refresh whenever this screen comes into focus; set the initial-load flag.
+  useFocusEffect(useCallback(() => {
+    loadSessions();
+    didInitialLoad.current = true;
+  }, [loadSessions]));
 
-  // Also load when profile becomes available (handles timing race on first mount)
-  useEffect(() => { if (profile) loadSessions(); }, [profile]);
+  // Also load when profile becomes available (handles the case where the screen
+  // is mounted before auth finishes — focus fires before profile exists, so we
+  // need this second trigger). Skip if useFocusEffect already ran with a profile.
+  useEffect(() => {
+    if (profile && !didInitialLoad.current) loadSessions();
+  }, [profile]);
 
   const openModal = useCallback(() => {
     if (!profile) return;
