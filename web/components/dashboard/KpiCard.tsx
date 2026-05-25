@@ -1,23 +1,33 @@
+import type { LucideIcon } from 'lucide-react';
+
 interface Props {
   label: string;
   value: number | string;
   sub?: string;
-  accent?: "default" | "warning" | "danger" | "success";
+  icon: LucideIcon;
+  color?: 'indigo' | 'emerald' | 'amber' | 'rose';
 }
 
-const ACCENT = {
-  default: "text-brand-700",
-  warning: "text-warning",
-  danger:  "text-danger",
-  success: "text-success",
+const colors = {
+  indigo: 'bg-indigo-50 text-indigo-600',
+  emerald: 'bg-emerald-50 text-emerald-600',
+  amber: 'bg-amber-50 text-amber-600',
+  rose: 'bg-rose-50 text-rose-600',
 };
 
-export function KpiCard({ label, value, sub, accent = "default" }: Props) {
+export function KpiCard({ label, value, sub, icon: Icon, color = 'indigo' }: Props) {
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm px-6 py-5">
-      <p className="text-xs font-semibold uppercase tracking-widest text-gray-400">{label}</p>
-      <p className={`mt-2 text-4xl font-bold ${ACCENT[accent]}`}>{value}</p>
-      {sub && <p className="mt-1 text-xs text-gray-400">{sub}</p>}
+    <div className="bg-white rounded-xl border border-gray-200 p-5">
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="text-sm text-gray-500 font-medium">{label}</p>
+          <p className="text-3xl font-bold text-gray-900 mt-1">{value}</p>
+          {sub && <p className="text-xs text-gray-400 mt-1">{sub}</p>}
+        </div>
+        <div className={`rounded-xl p-2.5 ${colors[color]}`}>
+          <Icon className="w-5 h-5" />
+        </div>
+      </div>
     </div>
   );
 }

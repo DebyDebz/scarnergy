@@ -1,134 +1,72 @@
-"use client";
-
-import { useEffect, useRef, useState } from "react";
-import { createClient } from "@/lib/supabase";
-import { MeasurementChart } from "./MeasurementChart";
-import { BridgeConnector } from "./BridgeConnector";
-import type { Measurement } from "@/lib/types";
+'use client';
+import { useEffect, useState } from 'react';
+import { createClient } from '@/lib/supabase';
+import type { Measurement } from '@/lib/types';
+import { Wifi } from 'lucide-react';
 
 interface Props {
   sessionId: string;
   initialMeasurements: Measurement[];
-  isActive: boolean;
 }
 
-export function LiveFeed({ sessionId, initialMeasurements, isActive }: Props) {
+export function LiveFeed({ sessionId, initialMeasurements }: Props) {
   const [measurements, setMeasurements] = useState<Measurement[]>(initialMeasurements);
-  const [lastReceived, setLastReceived] = useState<Date | null>(null);
+  const [connected, setConnected] = useState(false);
 
-  // Track seen IDs so measurements arriving via both WebSocket and Realtime
-  // are deduplicated — whichever path wins, the other is silently dropped.
-  const seenIds = useRef(new Set(initialMeasurements.map(m => m.id)));
-
-  function addMeasurement(m: Measurement) {
-    if (seenIds.current.has(m.id)) return;
-    seenIds.current.add(m.id);
-    setMeasurements(prev => [m, ...prev]);
-    setLastReceived(new Date());
-  }
-
-  // Supabase Realtime — catches measurements from mobile app, bridge, and manual entry
   useEffect(() => {
-    if (!isActive) return;
-
     const supabase = createClient();
-    const channel  = supabase
+    const channel = supabase
       .channel(`session-live:${sessionId}`)
       .on(
-        "postgres_changes",
+        'postgres_changes',
         {
-          event:  "INSERT",
-          schema: "public",
-          table:  "measurements",
+          event: 'INSERT',
+          schema: 'public',
+          table: 'measurements',
           filter: `session_id=eq.${sessionId}`,
         },
-        (payload) => addMeasurement(payload.new as Measurement)
+        payload => {
+          setMeasurements(prev => [payload.new as Measurement, ...prev.slice(0, 199)]);
+        }
       )
-      .subscribe();
+      .subscribe(status => setConnected(status === 'SUBSCRIBED'));
 
     return () => { supabase.removeChannel(channel); };
-  }, [sessionId, isActive]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const anomalyCount = measurements.filter(m => m.is_anomaly).length;
+  }, [sessionId]);
 
   return (
-    <div className="space-y-4">
-      {/* Bridge WebSocket connector — appears only on active sessions */}
-      {isActive && (
-        <div className="space-y-1">
-          <p className="text-xs text-gray-400 font-medium uppercase tracking-widest">
-            GLM Device (direct)
-          </p>
-          <BridgeConnector onMeasurement={addMeasurement} />
-          <p className="text-xs text-gray-400">
-            Run <code className="bg-gray-100 px-1 rounded font-mono">./start-bridge.sh</code> on
-            the machine with Bluetooth, then connect here. Measurements arrive via WebSocket
-            and are also saved to the database simultaneously.
-          </p>
-        </div>
-      )}
-
-      {/* Live indicator */}
-      {isActive && (
-        <div className="flex items-center gap-2">
-          <span className="relative flex h-2.5 w-2.5">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
-            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500" />
-          </span>
-          <span className="text-xs font-medium text-green-700">
-            Live · {measurements.length} measurement{measurements.length !== 1 ? "s" : ""}
-            {lastReceived && ` · last at ${lastReceived.toLocaleTimeString("nl-NL")}`}
-          </span>
-        </div>
-      )}
-
-      {/* Chart */}
-      <MeasurementChart measurements={measurements.slice(0, 200)} />
-
-      {/* Table */}
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="border-b border-gray-100">
-            <tr>
-              <th className="text-left py-2 pr-4 font-semibold text-gray-500">Time</th>
-              <th className="text-right py-2 pr-4 font-semibold text-gray-500">Value (mm)</th>
-              <th className="text-left py-2 pr-4 font-semibold text-gray-500">Path</th>
-              <th className="text-left py-2 font-semibold text-gray-500">Flag</th>
-            </tr>
-          </thead>
-          <tbody>
-            {measurements.length === 0 && (
-              <tr>
-                <td colSpan={4} className="py-8 text-center text-sm text-gray-300 italic">
-                  No measurements yet — pull the GLM trigger or add one manually
-                </td>
-              </tr>
+    <div>
+      <div className="flex items-center gap-2 mb-3">
+        <h3 className="font-semibold text-gray-900 text-sm">Live measurements</h3>
+        <span className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium ${connected ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
+          <Wifi className="w-3 h-3" />
+          {connected ? 'Live' : 'Connecting…'}
+        </span>
+      </div>
+      <div className="space-y-1 max-h-64 overflow-y-auto pr-1">
+        {measurements.slice(0, 50).map(m => (
+          <div
+            key={m.id}
+            className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${m.is_anomaly ? 'bg-amber-50 border border-amber-200' : 'bg-gray-50'}`}
+          >
+            <span className={`font-mono font-bold ${m.is_anomaly ? 'text-amber-700' : 'text-gray-900'}`}>
+              {Math.round(m.value_mm)} mm
+            </span>
+            {m.measurement_type && (
+              <span className="text-xs text-gray-400 capitalize">{m.measurement_type}</span>
             )}
-            {measurements.slice(0, 100).map(m => (
-              <tr
-                key={m.id}
-                className={`border-b border-gray-50 ${m.is_anomaly ? "bg-orange-50" : "hover:bg-gray-50"}`}
-              >
-                <td className="py-2 pr-4 text-gray-400 text-xs tabular-nums">
-                  {new Date(m.measured_at).toLocaleTimeString("nl-NL")}
-                </td>
-                <td className="py-2 pr-4 text-right font-mono font-semibold text-gray-800">
-                  {Number(m.value_mm).toFixed(1)}
-                </td>
-                <td className="py-2 pr-4 text-xs text-gray-400">{m.ingestion_path ?? "—"}</td>
-                <td className="py-2 text-xs">
-                  {m.is_anomaly && (
-                    <span className="text-orange-500 font-semibold">⚠ anomaly</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {measurements.length > 100 && (
-          <p className="text-xs text-gray-300 text-center pt-2">
-            Showing 100 of {measurements.length.toLocaleString()} measurements
-          </p>
+            {m.is_anomaly && (
+              <span className="ml-auto text-xs bg-amber-100 text-amber-600 rounded px-1.5 py-0.5 font-medium">
+                ANOMALY
+              </span>
+            )}
+            <span className="ml-auto text-xs text-gray-400">
+              {new Date(m.measured_at).toLocaleTimeString('en-GB')}
+            </span>
+          </div>
+        ))}
+        {!measurements.length && (
+          <p className="text-sm text-gray-400 text-center py-4">No measurements yet</p>
         )}
       </div>
     </div>

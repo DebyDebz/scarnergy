@@ -1,40 +1,39 @@
-"use client";
-
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+'use client';
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { createClient } from '@/lib/supabase';
+import { XCircle } from 'lucide-react';
 
 export function CloseSessionButton({ sessionId }: { sessionId: string }) {
-  const [loading, setLoading] = useState(false);
-  const [error, setError]     = useState<string | null>(null);
   const router = useRouter();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   async function handleClose() {
-    if (!confirm("Close this session? This cannot be undone.")) return;
+    if (!confirm('Close this session? This action cannot be undone.')) return;
     setLoading(true);
-    setError(null);
-
-    const res = await fetch(`/api/sessions/${sessionId}/close`, { method: "POST" });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      setError(body.error ?? "Failed to close session");
+    setError('');
+    const supabase = createClient();
+    const { error: err } = await (supabase.rpc as any)('close_inspection_session', { p_session_id: sessionId });
+    if (err) {
+      setError(err.message);
       setLoading(false);
-      return;
+    } else {
+      router.refresh();
     }
-
-    router.refresh();
   }
 
   return (
-    <div className="flex flex-col items-end gap-1">
+    <div>
       <button
         onClick={handleClose}
         disabled={loading}
-        className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-semibold
-                   hover:bg-red-700 disabled:opacity-50 transition-colors"
+        className="flex items-center gap-2 bg-red-600 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-red-700 disabled:opacity-60 transition-colors"
       >
-        {loading ? "Closing…" : "Close Session"}
+        <XCircle className="w-4 h-4" />
+        {loading ? 'Closing…' : 'Close session'}
       </button>
-      {error && <p className="text-xs text-red-500">{error}</p>}
+      {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
     </div>
   );
 }

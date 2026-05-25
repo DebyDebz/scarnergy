@@ -68,13 +68,39 @@ ALTER SCHEMA auth        OWNER TO supabase_auth_admin;
 ALTER SCHEMA extensions  OWNER TO postgres;
 ALTER SCHEMA storage     OWNER TO postgres;
 
--- Pre-create minimal auth.users so migration 002's FK (user_profiles → auth.users)
--- succeeds at DB init time before GoTrue starts.
--- GoTrue uses CREATE TABLE IF NOT EXISTS then ALTER TABLE ADD COLUMN for each of its
--- own columns — a pre-existing table with just id is safe for GoTrue v2.
+-- Storage API connects as this role
+DO $$ BEGIN
+  CREATE ROLE supabase_storage_admin NOINHERIT LOGIN PASSWORD 'ytNHPVpcpFwwaZujezJmFXKi';
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- Pre-create auth.users with ALL columns that GoTrue v2 expects so its init migration
+-- (00_init_auth_schema.up.sql) can create its indexes without error.
+-- GoTrue runs CREATE TABLE IF NOT EXISTS (skips because table exists) then immediately
+-- CREATE INDEX on instance_id/email — those indexes require the columns to be present.
 CREATE TABLE IF NOT EXISTS auth.users (
-  id UUID NOT NULL PRIMARY KEY
+  id                    UUID         NOT NULL PRIMARY KEY,
+  instance_id           UUID,
+  aud                   VARCHAR(255),
+  "role"                VARCHAR(255),
+  email                 VARCHAR(255) UNIQUE,
+  encrypted_password    VARCHAR(255),
+  confirmed_at          TIMESTAMPTZ,
+  invited_at            TIMESTAMPTZ,
+  confirmation_token    VARCHAR(255),
+  confirmation_sent_at  TIMESTAMPTZ,
+  recovery_token        VARCHAR(255),
+  recovery_sent_at      TIMESTAMPTZ,
+  email_change_token    VARCHAR(255),
+  email_change          VARCHAR(255),
+  email_change_sent_at  TIMESTAMPTZ,
+  last_sign_in_at       TIMESTAMPTZ,
+  raw_app_meta_data     JSONB,
+  raw_user_meta_data    JSONB,
+  is_super_admin        BOOL,
+  created_at            TIMESTAMPTZ,
+  updated_at            TIMESTAMPTZ
 );
+ALTER TABLE auth.users OWNER TO supabase_auth_admin;
 ALTER SCHEMA _realtime   OWNER TO supabase_realtime_admin;
 ALTER SCHEMA graphql_public OWNER TO postgres;
 
@@ -108,5 +134,13 @@ ALTER ROLE supabase_auth_admin SET search_path TO auth, public;
 
 -- ─── POSTGRES USER GRANTS ─────────────────────────────────────────────────
 
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO postgres;
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA auth   TO supabase_auth_admin;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public   TO postgres;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA auth     TO supabase_auth_admin;
+
+-- Storage admin needs full access to its schema and DB
+GRANT CONNECT, CREATE ON DATABASE postgres TO supabase_storage_admin;
+ALTER SCHEMA storage OWNER TO supabase_storage_admin;
+GRANT ALL ON SCHEMA storage TO supabase_storage_admin;
+GRANT ALL ON SCHEMA public  TO supabase_storage_admin;
+ALTER DEFAULT PRIVILEGES IN SCHEMA storage GRANT ALL ON TABLES    TO supabase_storage_admin;
+ALTER DEFAULT PRIVILEGES IN SCHEMA storage GRANT ALL ON SEQUENCES TO supabase_storage_admin;

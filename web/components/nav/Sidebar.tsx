@@ -1,67 +1,59 @@
-"use client";
+'use client';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import {
+  LayoutDashboard, Building2, ClipboardList, Users,
+  Building, Bluetooth, Zap, Ruler, ShieldCheck
+} from 'lucide-react';
+import type { Role } from '@/lib/types';
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
-import type { Role } from "@/lib/types";
-
-interface NavItem {
-  label: string;
-  href: string;
-  icon: string;
-  roles: Role[];
-}
-
-const NAV: NavItem[] = [
-  { label: "Dashboard",  href: "/dashboard",  icon: "⊞", roles: ["supervisor", "admin"] },
-  { label: "Buildings",  href: "/buildings",  icon: "🏢", roles: ["supervisor", "admin"] },
-  { label: "Sessions",   href: "/sessions",   icon: "📋", roles: ["supervisor", "admin"] },
-  { label: "Anomalies",  href: "/anomalies",  icon: "⚠", roles: ["supervisor", "admin"] },
-  { label: "Connect GLM",href: "/devices",    icon: "📡", roles: ["supervisor", "admin"] },
-  { label: "Reports",    href: "/reports",    icon: "📄", roles: ["supervisor", "admin"] },
-  { label: "Inspectors", href: "/inspectors", icon: "👷", roles: ["admin"] },
+const NAV = [
+  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['inspector', 'supervisor', 'admin'] as Role[] },
+  { href: '/buildings', label: 'Buildings', icon: Building2, roles: ['supervisor', 'admin'] as Role[] },
+  { href: '/sessions', label: 'Sessions', icon: ClipboardList, roles: ['supervisor', 'admin'] as Role[] },
+  { href: '/measurements', label: 'Measurements', icon: Ruler, roles: ['supervisor', 'admin'] as Role[] },
+  { href: '/quality', label: 'Quality', icon: ShieldCheck, roles: ['supervisor', 'admin'] as Role[] },
+  { href: '/users', label: 'Users', icon: Users, roles: ['admin'] as Role[] },
+  { href: '/organizations', label: 'Organizations', icon: Building, roles: ['admin'] as Role[] },
+  { href: '/devices', label: 'BLE Devices', icon: Bluetooth, roles: ['admin'] as Role[] },
 ];
 
-interface Props {
-  role: Role;
-}
-
-export function Sidebar({ role }: Props) {
-  const pathname = usePathname();
-
-  const visibleLinks = NAV.filter(item => item.roles.includes(role));
+export function Sidebar({ role }: { role: Role }) {
+  const path = usePathname();
+  const visible = NAV.filter(n => n.roles.includes(role));
 
   return (
-    <aside className="w-56 shrink-0 bg-brand-700 flex flex-col min-h-screen">
-      {/* Brand */}
-      <div className="px-6 py-6 border-b border-brand-800">
-        <span className="text-white font-bold text-lg tracking-tight">Scarnergy</span>
-        <span className="block text-brand-100 text-xs mt-0.5">Supervisor Dashboard</span>
+    <aside className="w-56 shrink-0 flex flex-col bg-white border-r border-gray-200 h-screen sticky top-0">
+      <div className="flex items-center gap-2 px-4 py-5 border-b border-gray-100">
+        <div className="bg-indigo-600 rounded-lg p-1.5">
+          <Zap className="w-4 h-4 text-white" />
+        </div>
+        <span className="font-bold text-gray-900">Scarnergy</span>
+        <span className="text-[10px] bg-indigo-100 text-indigo-700 rounded px-1.5 py-0.5 font-semibold ml-auto">
+          {role.toUpperCase()}
+        </span>
       </div>
-
-      {/* Nav links */}
-      <nav className="flex-1 px-3 py-4 space-y-1">
-        {visibleLinks.map(item => {
-          const active = pathname === item.href || pathname.startsWith(item.href + "/");
+      <nav className="flex-1 px-3 py-4 space-y-0.5">
+        {visible.map(({ href, label, icon: Icon }) => {
+          const active = path === href || (href !== '/dashboard' && path.startsWith(href));
           return (
             <Link
-              key={item.href}
-              href={item.href}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors
-                ${active
-                  ? "bg-brand-500 text-white"
-                  : "text-brand-100 hover:bg-brand-800 hover:text-white"
-                }`}
+              key={href}
+              href={href}
+              className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                active
+                  ? 'bg-indigo-50 text-indigo-700'
+                  : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+              }`}
             >
-              <span className="text-base">{item.icon}</span>
-              {item.label}
+              <Icon className="w-4 h-4 shrink-0" />
+              {label}
             </Link>
           );
         })}
       </nav>
-
-      {/* Role badge at bottom */}
-      <div className="px-6 py-4 border-t border-brand-800">
-        <span className="text-xs text-brand-100 uppercase tracking-widest">{role}</span>
+      <div className="px-4 py-3 border-t border-gray-100 text-xs text-gray-400">
+        v2.0 — Scarnergy Admin
       </div>
     </aside>
   );

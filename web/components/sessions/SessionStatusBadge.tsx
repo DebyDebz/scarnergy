@@ -1,12 +1,13 @@
-const STYLE: Record<string, string> = {
-  active:    "bg-blue-100 text-blue-700",
-  completed: "bg-green-100 text-green-700",
-  paused:    "bg-orange-100 text-orange-700",
+const STATUS_STYLES: Record<string, string> = {
+  active:    'bg-blue-100 text-blue-700',
+  completed: 'bg-emerald-100 text-emerald-700',
+  paused:    'bg-amber-100 text-amber-700',
+  cancelled: 'bg-gray-100 text-gray-600',
 };
 
 export function SessionStatusBadge({ status }: { status: string }) {
   return (
-    <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold ${STYLE[status] ?? "bg-gray-100 text-gray-500"}`}>
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium capitalize ${STATUS_STYLES[status] ?? 'bg-gray-100 text-gray-600'}`}>
       {status}
     </span>
   );

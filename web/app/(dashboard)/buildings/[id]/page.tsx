@@ -1,167 +1,211 @@
-import { requireProfile } from "@/lib/auth";
-import { BuildingFormModal } from "@/components/buildings/BuildingFormModal";
-import { AddZoneButton } from "@/components/buildings/AddZoneButton";
-import { AddElementButton } from "@/components/buildings/AddElementButton";
-import { ZoneEnergyLabelSelect } from "@/components/buildings/ZoneEnergyLabelSelect";
-import type { Building, Zone, BuildingElement } from "@/lib/types";
-import { notFound } from "next/navigation";
-import Link from "next/link";
+import Link from 'next/link';
+import { notFound } from 'next/navigation';
+import { createClient } from '@/lib/supabase-server';
+import { EnergyLabelBadge } from '@/components/buildings/EnergyLabelBadge';
+import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
+import { ArrowLeft, ChevronDown, TriangleAlert } from 'lucide-react';
+import type { BuildingSummary, Zone, SessionSummary, BuildingElement } from '@/lib/types';
 
-type ZoneWithElements = Zone & { building_elements: BuildingElement[] };
+interface Props {
+  params: { id: string };
+}
 
-export default async function BuildingDetailPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
-  const { id } = await params;
-  const { supabase } = await requireProfile();
+type ZoneWithCount = Zone & { building_elements: { count: number }[] };
+type ElementWithOpenings = BuildingElement & { openings: { count: number }[] };
 
-  const { data: building, error } = await supabase
-    .from("buildings")
-    .select("*")
-    .eq("id", id)
-    .single();
+export default async function BuildingDetailPage({ params }: Props) {
+  const supabase = await createClient();
 
-  if (error || !building) notFound();
+  const [buildingResult, zonesResult, sessionsResult] = await Promise.all([
+    supabase.from('building_summary').select('*').eq('id', params.id).single(),
+    supabase.from('zones').select('*, building_elements(count)').eq('building_id', params.id).order('floor_level'),
+    supabase.from('session_summary').select('*').eq('building_id', params.id).order('started_at', { ascending: false }).limit(20),
+  ]);
 
-  const { data: zones } = await supabase
-    .from("zones")
-    .select("*, building_elements(*)")
-    .eq("building_id", id)
-    .eq("is_active", true)
-    .order("floor_level")
-    .order("zone_code");
+  const building = (buildingResult as unknown as { data: BuildingSummary | null }).data;
+  const zones = (zonesResult as unknown as { data: ZoneWithCount[] | null }).data;
+  const sessions = (sessionsResult as unknown as { data: SessionSummary[] | null }).data;
 
-  const b = building as Building;
-  const zoneList = (zones ?? []) as ZoneWithElements[];
-  const totalElements = zoneList.reduce((sum, z) => sum + z.building_elements.length, 0);
+  if (!building) notFound();
+
+  const zoneIds = zones?.map(z => z.id) ?? [];
+  let elements: ElementWithOpenings[] = [];
+  if (zoneIds.length > 0) {
+    const elementsResult = await (supabase.from('building_elements') as any)
+      .select('*, openings(count)')
+      .in('zone_id', zoneIds)
+      .order('sort_order') as unknown as { data: ElementWithOpenings[] | null };
+    elements = elementsResult.data ?? [];
+  }
+
+  const elementsByZone = elements.reduce<Record<string, ElementWithOpenings[]>>((acc, el) => {
+    (acc[el.zone_id] ??= []).push(el);
+    return acc;
+  }, {});
 
   return (
-    <div>
-      {/* Breadcrumb */}
-      <nav className="flex items-center gap-2 text-sm text-gray-400 mb-4">
-        <Link href="/buildings" className="hover:text-brand-500 transition-colors">Buildings</Link>
-        <span>/</span>
-        <span className="text-gray-700 font-medium">{b.street} {b.house_number}</span>
-      </nav>
+    <div className="space-y-6 max-w-5xl">
+      <div>
+        <Link href="/buildings" className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 mb-3">
+          <ArrowLeft className="w-4 h-4" /> Buildings
+        </Link>
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">{building.full_address}</h1>
+            <p className="text-sm text-gray-500 font-mono mt-0.5">{building.reference_code}</p>
+          </div>
+          <EnergyLabelBadge label={building.latest_energy_label} />
+        </div>
+      </div>
 
-      {/* Header */}
-      <div className="flex items-start justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">
-            {b.street} {b.house_number}
-          </h1>
-          <p className="text-sm text-gray-500 mt-0.5">
-            {b.postal_code} {b.city}
-            {b.building_type && ` · ${b.building_type.replace(/_/g, " ")}`}
-            {b.construction_year && ` · Built ${b.construction_year}`}
-          </p>
-          {b.reference_code && (
-            <span className="inline-block mt-1 text-xs text-gray-400 font-mono bg-gray-100 px-2 py-0.5 rounded">
-              {b.reference_code}
-            </span>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        {[
+          { label: 'Type', value: building.building_type },
+          { label: 'Built', value: building.construction_year },
+          { label: 'Floor area', value: `${building.gross_floor_area_m2} m²` },
+          { label: 'Sessions', value: building.session_count },
+        ].map(({ label, value }) => (
+          <div key={label} className="bg-white border border-gray-200 rounded-xl p-4">
+            <p className="text-xs text-gray-500 mb-1">{label}</p>
+            <p className="font-semibold text-gray-900">{value}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="bg-white rounded-xl border border-gray-200">
+        <div className="px-5 py-4 border-b border-gray-100">
+          <h2 className="font-semibold text-gray-900">Zones &amp; elements</h2>
+        </div>
+        <div className="divide-y divide-gray-100">
+          {(zones ?? []).map(zone => {
+            const elementCount = zone.building_elements?.[0]?.count ?? 0;
+            const zoneElements = elementsByZone[zone.id] ?? [];
+            return (
+              <details key={zone.id} className="group">
+                <summary className="flex items-center gap-3 px-5 py-3.5 cursor-pointer hover:bg-gray-50 list-none">
+                  <ChevronDown className="w-4 h-4 text-gray-400 group-open:rotate-180 transition-transform" />
+                  <span className="font-medium text-gray-800">{zone.name}</span>
+                  <span className="text-xs text-gray-400 font-mono">{zone.zone_code}</span>
+                  <span className="ml-auto text-xs text-gray-500">Level {zone.floor_level}</span>
+                  <span className="text-xs text-gray-500 ml-4">{elementCount} elements</span>
+                  {zone.energy_label && (
+                    <span className="ml-2">
+                      <EnergyLabelBadge label={zone.energy_label} />
+                    </span>
+                  )}
+                </summary>
+
+                <div className="px-5 pb-4 pt-1">
+                  <p className="text-xs text-gray-500 mb-3">
+                    Area: <span className="font-medium text-gray-700">{zone.gross_area_m2} m²</span>
+                  </p>
+
+                  {zoneElements.length > 0 ? (
+                    <div className="rounded-lg border border-gray-100 overflow-hidden">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="text-left text-gray-500 bg-gray-50 border-b border-gray-100">
+                            <th className="px-4 py-2 font-medium">Name</th>
+                            <th className="px-4 py-2 font-medium">Type</th>
+                            <th className="px-4 py-2 font-medium">Dimensions</th>
+                            <th className="px-4 py-2 font-medium">Rc (m²K/W)</th>
+                            <th className="px-4 py-2 font-medium">U (W/m²K)</th>
+                            <th className="px-4 py-2 font-medium">Openings</th>
+                            <th className="px-4 py-2 font-medium">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50">
+                          {zoneElements.map(el => {
+                            const dims = [
+                              el.length_mm ? `${el.length_mm}mm` : null,
+                              el.width_mm ? `${el.width_mm}mm` : null,
+                              el.height_mm ? `${el.height_mm}mm` : null,
+                            ].filter(Boolean).join(' × ');
+                            const openingCount = el.openings?.[0]?.count ?? 0;
+                            return (
+                              <tr key={el.id} className="hover:bg-gray-50">
+                                <td className="px-4 py-2 font-medium text-gray-900">{el.name}</td>
+                                <td className="px-4 py-2 text-gray-500 capitalize">{el.element_type}</td>
+                                <td className="px-4 py-2 text-gray-500 font-mono">{dims || '—'}</td>
+                                <td className="px-4 py-2 text-gray-700">{el.rc_value ?? '—'}</td>
+                                <td className="px-4 py-2 text-gray-700">{el.u_value ?? '—'}</td>
+                                <td className="px-4 py-2 text-gray-500">{openingCount}</td>
+                                <td className="px-4 py-2">
+                                  {!el.is_complete ? (
+                                    <span className="inline-flex items-center gap-1 text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded font-medium">
+                                      <TriangleAlert className="w-3 h-3" /> incomplete
+                                    </span>
+                                  ) : (
+                                    <span className="text-emerald-600 font-medium">✓</span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-gray-400 italic">No elements defined for this zone</p>
+                  )}
+                </div>
+              </details>
+            );
+          })}
+          {!zones?.length && (
+            <p className="px-5 py-6 text-sm text-gray-400 text-center">No zones defined</p>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          <BuildingFormModal
-            building={b}
-            trigger={
-              <button className="px-3 py-1.5 rounded-lg border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 transition-colors">
-                Edit
-              </button>
-            }
-          />
-          <AddZoneButton buildingId={id} />
-        </div>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
-        <div className="bg-white rounded-xl border border-gray-200 px-5 py-4">
-          <p className="text-xs text-gray-400 uppercase tracking-widest font-semibold">Zones</p>
-          <p className="text-3xl font-bold text-brand-700 mt-1">{zoneList.length}</p>
+      <div className="bg-white rounded-xl border border-gray-200">
+        <div className="px-5 py-4 border-b border-gray-100">
+          <h2 className="font-semibold text-gray-900">Inspection sessions</h2>
         </div>
-        <div className="bg-white rounded-xl border border-gray-200 px-5 py-4">
-          <p className="text-xs text-gray-400 uppercase tracking-widest font-semibold">Elements</p>
-          <p className="text-3xl font-bold text-brand-700 mt-1">{totalElements}</p>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-200 px-5 py-4">
-          <p className="text-xs text-gray-400 uppercase tracking-widest font-semibold">Floor area</p>
-          <p className="text-3xl font-bold text-brand-700 mt-1">
-            {b.gross_floor_area_m2 ? `${b.gross_floor_area_m2}` : "—"}
-            {b.gross_floor_area_m2 && <span className="text-base font-normal text-gray-400 ml-1">m²</span>}
-          </p>
-        </div>
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-xs text-gray-500 bg-gray-50 border-b border-gray-100 text-left">
+              <th className="px-5 py-3 font-medium">Code</th>
+              <th className="px-5 py-3 font-medium">Inspector</th>
+              <th className="px-5 py-3 font-medium">Started</th>
+              <th className="px-5 py-3 font-medium">Measurements</th>
+              <th className="px-5 py-3 font-medium">Anomalies</th>
+              <th className="px-5 py-3 font-medium">Status</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-50">
+            {(sessions ?? []).map(s => (
+              <tr key={s.id} className="hover:bg-gray-50 transition-colors">
+                <td className="px-5 py-3 font-mono text-xs">
+                  <Link href={`/sessions/${s.id}`} className="text-indigo-600 hover:underline">
+                    {s.session_code}
+                  </Link>
+                </td>
+                <td className="px-5 py-3 text-gray-700">{s.inspector_name}</td>
+                <td className="px-5 py-3 text-gray-500">
+                  {new Date(s.started_at).toLocaleDateString('en-GB')}
+                </td>
+                <td className="px-5 py-3 text-gray-700">{s.total_measurements}</td>
+                <td className="px-5 py-3">
+                  {s.anomaly_count > 0 ? (
+                    <span className="text-amber-600 font-medium">{s.anomaly_count}</span>
+                  ) : (
+                    <span className="text-gray-400">0</span>
+                  )}
+                </td>
+                <td className="px-5 py-3">
+                  <SessionStatusBadge status={s.status} />
+                </td>
+              </tr>
+            ))}
+            {!sessions?.length && (
+              <tr>
+                <td colSpan={6} className="px-5 py-6 text-center text-sm text-gray-400">No sessions</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
-
-      {/* Zones */}
-      {zoneList.length === 0 ? (
-        <div className="bg-white rounded-xl border border-gray-200 py-20 text-center">
-          <p className="text-gray-400 text-sm">No zones yet. Add the first zone above.</p>
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {zoneList.map(zone => (
-            <div key={zone.id} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-              {/* Zone header */}
-              <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-                <div className="flex items-center gap-3">
-                  <ZoneEnergyLabelSelect zoneId={zone.id} current={zone.energy_label} />
-                  <div>
-                    <span className="font-semibold text-gray-900">{zone.name}</span>
-                    <span className="text-xs text-gray-400 ml-2">
-                      {zone.zone_code} · Floor {zone.floor_level}
-                    </span>
-                    {zone.gross_area_m2 && (
-                      <span className="text-xs text-gray-400 ml-2">{zone.gross_area_m2} m²</span>
-                    )}
-                  </div>
-                </div>
-                <AddElementButton zoneId={zone.id} />
-              </div>
-
-              {/* Elements table */}
-              {zone.building_elements.length === 0 ? (
-                <p className="px-5 py-4 text-sm text-gray-300 italic">No elements yet.</p>
-              ) : (
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-gray-50 border-b border-gray-100">
-                      <th className="text-left px-5 py-2 text-xs font-medium text-gray-400">Element</th>
-                      <th className="text-left px-5 py-2 text-xs font-medium text-gray-400">Type</th>
-                      <th className="text-left px-5 py-2 text-xs font-medium text-gray-400">Rc (m²K/W)</th>
-                      <th className="text-left px-5 py-2 text-xs font-medium text-gray-400">U (W/m²K)</th>
-                      <th className="text-left px-5 py-2 text-xs font-medium text-gray-400">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {zone.building_elements.map(el => (
-                      <tr key={el.id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors">
-                        <td className="px-5 py-2.5 font-medium text-gray-800">{el.name}</td>
-                        <td className="px-5 py-2.5 text-gray-500 capitalize">
-                          {el.element_type}
-                        </td>
-                        <td className="px-5 py-2.5 text-gray-500">{el.rc_value ?? "—"}</td>
-                        <td className="px-5 py-2.5 text-gray-500">{el.u_value ?? "—"}</td>
-                        <td className="px-5 py-2.5">
-                          {el.is_complete ? (
-                            <span className="inline-flex items-center gap-1 text-xs font-semibold text-success">
-                              Complete
-                            </span>
-                          ) : (
-                            <span className="text-xs text-gray-300">Pending</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
