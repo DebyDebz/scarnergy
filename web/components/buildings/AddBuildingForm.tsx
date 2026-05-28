@@ -3,7 +3,16 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Building2 } from 'lucide-react';
 
-const BUILDING_TYPES = ['residential', 'commercial', 'industrial', 'mixed'];
+const BUILDING_TYPES: { value: string; label: string }[] = [
+  { value: 'residential_single', label: 'Residential (single)' },
+  { value: 'residential_multi',  label: 'Residential (multi)' },
+  { value: 'apartment',          label: 'Apartment' },
+  { value: 'office',             label: 'Office' },
+  { value: 'retail',             label: 'Retail' },
+  { value: 'industrial',         label: 'Industrial' },
+  { value: 'mixed_use',          label: 'Mixed use' },
+  { value: 'other',              label: 'Other' },
+];
 
 export function AddBuildingForm() {
   const router = useRouter();
@@ -16,7 +25,7 @@ export function AddBuildingForm() {
     house_number: '',
     postal_code: '',
     city: '',
-    building_type: 'residential',
+    building_type: 'residential_single',
     construction_year: new Date().getFullYear(),
     gross_floor_area_m2: '',
   });
@@ -71,7 +80,7 @@ export function AddBuildingForm() {
             className={inputClass}
           >
             {BUILDING_TYPES.map(t => (
-              <option key={t} value={t} className="capitalize">{t.charAt(0).toUpperCase() + t.slice(1)}</option>
+              <option key={t.value} value={t.value}>{t.label}</option>
             ))}
           </select>
         </div>

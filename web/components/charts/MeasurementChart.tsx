@@ -39,14 +39,14 @@ export function MeasurementChart({ measurements }: Props) {
         <Line
           type="monotone"
           dataKey="value"
-          stroke="#6366f1"
+          stroke="#1E3A5F"
           strokeWidth={2}
           dot={(props) => {
             const { cx, cy, payload } = props;
             if (payload.anomaly) {
               return <circle key={payload.t} cx={cx} cy={cy} r={5} fill="#f59e0b" stroke="white" strokeWidth={2} />;
             }
-            return <circle key={payload.t} cx={cx} cy={cy} r={3} fill="#6366f1" />;
+            return <circle key={payload.t} cx={cx} cy={cy} r={3} fill="#1E3A5F" />;
           }}
         />
       </LineChart>
