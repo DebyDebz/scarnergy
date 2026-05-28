@@ -98,7 +98,7 @@ export default function SessionsScreen() {
         .single();
       if (error) throw error;
       setShowModal(false);
-      if (data?.id) router.push(`/tabs/sessions/${data.id}`);
+      if (data?.id) router.push(`/tabs/sessions/flow?id=${data.id}&buildingId=${selectedBuildingId}`);
     } catch (e: any) {
       Alert.alert("Could not create session", e.message ?? "Unknown error");
     } finally {

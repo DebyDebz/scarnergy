@@ -47,6 +47,7 @@ export default function SessionDetailScreen() {
       .from("zones")
       .select("*")
       .eq("building_id", session.building_id)
+      .eq("is_active", true)
       .order("floor_level", { ascending: true })
       .then(({ data }) => {
         const list = data ?? [];
@@ -357,11 +358,23 @@ export default function SessionDetailScreen() {
             keyExtractor={e => e.id}
             contentContainerStyle={styles.list}
             ListEmptyComponent={
-              <Text style={styles.empty}>
-                {zones.length === 0
-                  ? "No zones found for this building.\nAdd zones in the web dashboard."
-                  : "No elements in this zone.\nAdd building elements in the web dashboard."}
-              </Text>
+              <View style={styles.emptyWrap}>
+                <Text style={styles.empty}>
+                  {zones.length === 0
+                    ? "No floor plan set up yet."
+                    : "No elements in this zone yet."}
+                </Text>
+                {session.status === 'active' && (
+                  <TouchableOpacity
+                    style={styles.setupBtn}
+                    onPress={() => router.push(`/tabs/sessions/flow?id=${sessionId}&buildingId=${session.building_id}`)}
+                  >
+                    <Text style={styles.setupBtnTxt}>
+                      {zones.length === 0 ? '+ Draw Floor Plan' : '+ Place Elements'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
             }
             renderItem={({ item }) => (
               <TouchableOpacity
@@ -497,7 +510,11 @@ const styles = StyleSheet.create({
   floorPlanBtnText:    { fontSize: 16, color: "#fff", fontWeight: "700", lineHeight: 20 },
 
   list:                { padding: 16, gap: 12 },
-  empty:               { textAlign: "center", color: "#AAA", padding: 40, lineHeight: 22 },
+  emptyWrap:           { padding: 40, alignItems: 'center', gap: 16 },
+  empty:               { textAlign: "center", color: "#AAA", lineHeight: 22 },
+  setupBtn:            { backgroundColor: '#1E3A5F', borderRadius: 10,
+                         paddingHorizontal: 24, paddingVertical: 12 },
+  setupBtnTxt:         { color: '#fff', fontSize: 14, fontWeight: '700' },
 
   elementCard:         { backgroundColor: "#fff", borderRadius: 12, padding: 16,
                          elevation: 2, shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 4,

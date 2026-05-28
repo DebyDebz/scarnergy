@@ -84,6 +84,8 @@ export interface Zone {
   id: string; building_id: string; zone_code: string; name: string;
   floor_level: number; gross_area_m2: number; energy_label: string | null;
   is_active: boolean;
+  floor_plan_points: Array<{ x: number; y: number }> | null;
+  floor_plan_scale_m: number | null;
 }
 export interface BuildingElement {
   id: string; zone_id: string; element_type: string; name: string;
@@ -96,6 +98,9 @@ export interface BuildingElement {
   photo_urls: string[];
   is_complete: boolean; is_active: boolean; sort_order: number;
   notes: string | null;
+  grid_x: number | null; grid_y: number | null;
+  grid_w: number | null; grid_h: number | null;
+  grid_rotation: number | null;
 }
 export interface Opening {
   id: string; element_id: string; opening_type: string;
@@ -106,6 +111,7 @@ export interface InspectionSession {
   session_code: string; status: string; started_at: string; completed_at: string | null;
   total_measurements: number; anomaly_count: number; sync_status: string;
   notes: string | null;
+  flow_stage: number;
 }
 export interface Measurement {
   id: string; session_id: string; device_id: string | null; value_mm: number;

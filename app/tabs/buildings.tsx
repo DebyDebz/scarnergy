@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   View, Text, FlatList, StyleSheet,
   TouchableOpacity, ActivityIndicator, Alert,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase, BuildingSummary } from "../../lib/supabase";
 import { useAuthStore } from "../../store/authStore";
@@ -15,9 +15,11 @@ export default function BuildingsScreen() {
   const [loading,    setLoading]    = useState(true);
   const [error,      setError]      = useState<string | null>(null);
   const [starting,   setStarting]   = useState<string | null>(null);
+  const didInitialLoad = useRef(false);
 
   const load = useCallback(() => {
     if (!profile) { setLoading(false); return; }
+    setLoading(true);
     supabase
       .from("building_summary")
       .select("*")
@@ -30,7 +32,17 @@ export default function BuildingsScreen() {
       });
   }, [profile]);
 
-  useEffect(() => { load(); }, [load]);
+  // Refresh every time the tab comes into focus (e.g. after the inspection flow
+  // creates zones/elements and the user returns to this screen).
+  useFocusEffect(useCallback(() => {
+    load();
+    didInitialLoad.current = true;
+  }, [load]));
+
+  // Fallback: screen may mount before auth finishes; load when profile arrives.
+  useEffect(() => {
+    if (profile && !didInitialLoad.current) load();
+  }, [profile]);
 
   const startInspection = useCallback(async (building: BuildingSummary) => {
     if (!profile) return;
@@ -47,7 +59,7 @@ export default function BuildingsScreen() {
 
     setStarting(null);
     if (error) { Alert.alert("Could not start inspection", error.message || "Server error — please try again."); return; }
-    router.push(`/tabs/sessions/${data.id}`);
+    router.push(`/tabs/sessions/flow?id=${data.id}&buildingId=${building.id}`);
   }, [profile, router]);
 
   if (loading && buildings.length === 0) return <ActivityIndicator style={styles.loader} color="#1E3A5F" />;
