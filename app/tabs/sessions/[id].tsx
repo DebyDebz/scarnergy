@@ -4,8 +4,9 @@ import {
   ActivityIndicator, ScrollView, Alert, Share,
 } from "react-native";
 import { useLocalSearchParams, useRouter, useNavigation } from "expo-router";
-import { supabase, SessionSummary, Zone, BuildingElement } from "../../../lib/supabase";
+import { supabase, SessionSummary, Zone, BuildingElement, Opening } from "../../../lib/supabase";
 import { useBLE } from "../../../lib/BLEContext";
+import { buildVabiXml } from "../../../lib/vabiExport";
 
 export default function SessionDetailScreen() {
   const { id: sessionId } = useLocalSearchParams<{ id: string }>();
@@ -159,104 +160,44 @@ export default function SessionDetailScreen() {
     else loadSession();
   }, [sessionId, session, loadSession]);
 
-  // ── XML export ────────────────────────────────────────────────────────────
+  // ── VABI XML export ───────────────────────────────────────────────────────
 
   const exportXML = useCallback(async () => {
     if (!session || !sessionId) return;
     try {
-      const { data: allZones } = await supabase
-        .from("zones")
-        .select("*")
-        .eq("building_id", session.building_id)
-        .order("floor_level", { ascending: true });
+      const [zonesRes, buildingRes, orgRes] = await Promise.all([
+        supabase.from("zones").select("*").eq("building_id", session.building_id).order("floor_level"),
+        (supabase.from("buildings") as any).select("construction_year, building_type").eq("id", session.building_id).single(),
+        (supabase.from("organisations") as any).select("name").single(),
+      ]);
 
-      const zoneIds = (allZones ?? []).map((z: Zone) => z.id);
+      const allZones: Zone[] = zonesRes.data ?? [];
+      const zoneIds = allZones.map(z => z.id);
 
-      const { data: allElements } = zoneIds.length
-        ? await supabase
-            .from("building_elements")
-            .select("*")
-            .in("zone_id", zoneIds)
-            .order("name", { ascending: true })
-        : { data: [] };
+      const [elemRes, openRes] = await Promise.all([
+        zoneIds.length
+          ? supabase.from("building_elements").select("*").in("zone_id", zoneIds).eq("is_active", true).order("sort_order")
+          : Promise.resolve({ data: [] }),
+        zoneIds.length
+          ? supabase.from("openings").select("*").eq("is_active", true)
+          : Promise.resolve({ data: [] }),
+      ]);
 
-      const elementIds = (allElements ?? []).map((e: BuildingElement) => e.id);
+      const allElements: BuildingElement[] = elemRes.data ?? [];
+      const elementIds = new Set(allElements.map(e => e.id));
+      const allOpenings: Opening[] = ((openRes.data ?? []) as Opening[]).filter(o => elementIds.has((o as any).element_id));
 
-      const { data: allMeasurements } = elementIds.length
-        ? await supabase
-            .from("measurements")
-            .select("*")
-            .eq("session_id", sessionId)
-            .in("element_id", elementIds)
-            .eq("is_deleted", false)
-            .order("measured_at", { ascending: true })
-        : { data: [] };
+      const xml = buildVabiXml(
+        session,
+        { name: orgRes.data?.name ?? '' },
+        buildingRes.data ?? {},
+        allZones,
+        allElements,
+        allOpenings,
+      );
 
-      const msrByElement: Record<string, any[]> = {};
-      for (const m of allMeasurements ?? []) {
-        (msrByElement[m.element_id] ??= []).push(m);
-      }
-      const elemByZone: Record<string, BuildingElement[]> = {};
-      for (const e of allElements ?? []) {
-        (elemByZone[(e as BuildingElement).zone_id] ??= []).push(e as BuildingElement);
-      }
-
-      const esc = (v: unknown) => String(v ?? "")
-        .replace(/&/g, "&amp;").replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-
-      const zonesXml = (allZones ?? []).map((z: Zone) => {
-        const elems = elemByZone[z.id] ?? [];
-        const elemsXml = elems.map((e: BuildingElement) => {
-          const msrs    = msrByElement[e.id] ?? [];
-          const msrsXml = msrs.map((m: any) =>
-            `\n          <Measurement>` +
-            `\n            <MeasurementType>${esc(m.measurement_type)}</MeasurementType>` +
-            `\n            <ValueMM>${esc(m.value_mm)}</ValueMM>` +
-            `\n            <MeasuredAt>${esc(m.measured_at)}</MeasuredAt>` +
-            `\n          </Measurement>`
-          ).join("");
-          return (
-            `\n        <Element id="${esc(e.id)}" type="${esc(e.element_type)}">` +
-            `\n          <Name>${esc(e.name)}</Name>` +
-            (e.length_mm != null ? `\n          <LengthMM>${e.length_mm}</LengthMM>` : "") +
-            (e.height_mm != null ? `\n          <HeightMM>${e.height_mm}</HeightMM>` : "") +
-            (e.width_mm  != null ? `\n          <WidthMM>${e.width_mm}</WidthMM>`   : "") +
-            `\n          <IsComplete>${e.is_complete}</IsComplete>` +
-            (msrsXml
-              ? `\n          <Measurements>${msrsXml}\n          </Measurements>`
-              : "\n          <Measurements/>") +
-            `\n        </Element>`
-          );
-        }).join("");
-        return (
-          `\n      <Zone id="${esc(z.id)}" code="${esc(z.zone_code)}">` +
-          `\n        <Name>${esc(z.name)}</Name>` +
-          `\n        <FloorLevel>${z.floor_level}</FloorLevel>` +
-          (z.gross_area_m2 != null ? `\n        <GrossAreaM2>${z.gross_area_m2}</GrossAreaM2>` : "") +
-          (z.energy_label  ? `\n        <EnergyLabel>${esc(z.energy_label)}</EnergyLabel>` : "") +
-          (elemsXml ? `\n        <Elements>${elemsXml}\n        </Elements>` : "\n        <Elements/>") +
-          `\n      </Zone>`
-        );
-      }).join("");
-
-      const xml =
-        `<?xml version="1.0" encoding="UTF-8"?>\n` +
-        `<ScanergyExport version="1.0" generated_at="${new Date().toISOString()}">\n` +
-        `  <Session id="${esc(session.id)}">\n` +
-        `    <SessionCode>${esc(session.session_code)}</SessionCode>\n` +
-        `    <Status>${esc(session.status)}</Status>\n` +
-        `    <StartedAt>${esc(session.started_at)}</StartedAt>\n` +
-        (session.completed_at ? `    <CompletedAt>${esc(session.completed_at)}</CompletedAt>\n` : "") +
-        `    <Inspector>${esc(session.inspector_name)}</Inspector>\n` +
-        `    <Building>\n` +
-        `      <Address>${esc(session.building_address)}, ${esc(session.building_city)}</Address>\n` +
-        `    </Building>\n` +
-        `    <Zones>${zonesXml}\n    </Zones>\n` +
-        `  </Session>\n` +
-        `</ScanergyExport>`;
-
-      await Share.share({ title: `${session.session_code}.xml`, message: xml });
+      const filename = `${session.session_code}_VABI.xml`;
+      await Share.share({ title: filename, message: xml });
     } catch (e: any) {
       Alert.alert("Export failed", e.message ?? "Unknown error");
     }
@@ -367,7 +308,11 @@ export default function SessionDetailScreen() {
                 {session.status === 'active' && (
                   <TouchableOpacity
                     style={styles.setupBtn}
-                    onPress={() => router.push(`/tabs/sessions/flow?id=${sessionId}&buildingId=${session.building_id}`)}
+                    onPress={() => router.push(
+                      zones.length === 0
+                        ? `/tabs/sessions/flow?id=${sessionId}&buildingId=${session.building_id}`
+                        : `/tabs/sessions/flow?id=${sessionId}&buildingId=${session.building_id}&forceStage=5`
+                    )}
                   >
                     <Text style={styles.setupBtnTxt}>
                       {zones.length === 0 ? '+ Draw Floor Plan' : '+ Place Elements'}
@@ -429,6 +374,17 @@ export default function SessionDetailScreen() {
                     </Text>
                   </TouchableOpacity>
                 )}
+
+                {/* Gevel Foto's — always accessible */}
+                <TouchableOpacity
+                  style={styles.facadeBtn}
+                  onPress={() => router.push({
+                    pathname: '/tabs/sessions/facade-photos',
+                    params: { sessionId: sessionId!, buildingId: session.building_id },
+                  })}
+                >
+                  <Text style={styles.facadeBtnText}>📷  Gevel Foto's</Text>
+                </TouchableOpacity>
 
                 {session.status === "active" && (
                   <View style={styles.activeActions}>
@@ -537,6 +493,9 @@ const styles = StyleSheet.create({
   exportBtn:           { backgroundColor: "#2E86C1", borderRadius: 12, padding: 16, alignItems: "center" },
   exportBtnText:       { color: "#fff", fontSize: 15, fontWeight: "700" },
 
+  facadeBtn:           { backgroundColor: '#f0f9ff', borderRadius: 12, padding: 14,
+                         alignItems: 'center', borderWidth: 1.5, borderColor: '#0284c7', marginBottom: 4 },
+  facadeBtnText:       { color: '#0284c7', fontSize: 14, fontWeight: '700' },
   activeActions:       { gap: 10 },
   pauseBtn:            { backgroundColor: "#fff", borderRadius: 12, padding: 16,
                          alignItems: "center", borderWidth: 1.5, borderColor: "#E67E22" },

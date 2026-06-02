@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import {
   View, Text, TouchableOpacity, ScrollView, StyleSheet,
-  GestureResponderEvent, Alert,
+  GestureResponderEvent, Alert, TextInput, ActivityIndicator,
 } from 'react-native';
-import { supabase } from '../../lib/supabase';
+import { supabase, Zone } from '../../lib/supabase';
+import { useAuthStore } from '../../store/authStore';
 
 const CANVAS    = 300;
 const CLOSE_R   = 24;
@@ -15,9 +16,13 @@ const GRID_N    = Math.ceil(CANVAS / GRID_STEP);
 interface Point { x: number; y: number }
 
 interface Props {
-  zoneId: string;
-  zoneName: string;
-  onSaved: () => void;
+  /** Provide when redrawing an existing zone. Omit + provide buildingId to create a new zone inline. */
+  zoneId?: string;
+  zoneName?: string;
+  /** Required when zoneId is omitted — new zone will be inserted for this building. */
+  buildingId?: string;
+  /** Called after save. newZone is populated when a zone was created inline. */
+  onSaved: (newZone?: Zone) => void;
 }
 
 function LineSegment({ x1, y1, x2, y2, dashed }: { x1:number; y1:number; x2:number; y2:number; dashed?:boolean }) {
@@ -43,7 +48,10 @@ function LineSegment({ x1, y1, x2, y2, dashed }: { x1:number; y1:number; x2:numb
   );
 }
 
-export function DrawingCanvas({ zoneId, zoneName, onSaved }: Props) {
+export function DrawingCanvas({ zoneId, zoneName, buildingId, onSaved }: Props) {
+  const { profile } = useAuthStore();
+  const isNewZone = !zoneId && !!buildingId;
+  const [newZoneName, setNewZoneName] = useState('');
   const [points, setPoints] = useState<Point[]>([]);
   const [closed, setClosed] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -67,17 +75,46 @@ export function DrawingCanvas({ zoneId, zoneName, onSaved }: Props) {
 
   const save = async () => {
     if (!closed || points.length < 3) return;
+    if (isNewZone && !newZoneName.trim()) {
+      Alert.alert('Zone name required', 'Please enter a name for this zone before saving.');
+      return;
+    }
     setSaving(true);
     const normalized = points.map(p => ({
       x: parseFloat((p.x / CANVAS).toFixed(4)),
       y: parseFloat((p.y / CANVAS).toFixed(4)),
     }));
-    const { error } = await supabase.from('zones')
-      .update({ floor_plan_points: normalized })
-      .eq('id', zoneId);
-    setSaving(false);
-    if (error) { Alert.alert('Could not save floor plan', error.message); return; }
-    onSaved();
+
+    if (isNewZone) {
+      // Create zone + floor plan in two steps
+      const name = newZoneName.trim();
+      const { data: zoneData, error: zoneErr } = await supabase
+        .from('zones')
+        .insert({
+          org_id:     profile!.org_id,
+          building_id: buildingId,
+          zone_code:  'Z01',
+          name,
+          floor_level: 0,
+        })
+        .select()
+        .single();
+      if (zoneErr) { setSaving(false); Alert.alert('Could not create zone', zoneErr.message); return; }
+      const { error: planErr } = await supabase
+        .from('zones')
+        .update({ floor_plan_points: normalized })
+        .eq('id', zoneData.id);
+      setSaving(false);
+      if (planErr) { Alert.alert('Could not save floor plan', planErr.message); return; }
+      onSaved(zoneData as Zone);
+    } else {
+      const { error } = await supabase.from('zones')
+        .update({ floor_plan_points: normalized })
+        .eq('id', zoneId);
+      setSaving(false);
+      if (error) { Alert.alert('Could not save floor plan', error.message); return; }
+      onSaved();
+    }
   };
 
   const hint = closed
@@ -88,11 +125,27 @@ export function DrawingCanvas({ zoneId, zoneName, onSaved }: Props) {
     ? `${points.length} point${points.length > 1 ? 's' : ''} — add at least ${3 - points.length} more.`
     : 'Tap the first point (blue) to close the shape.';
 
+  const displayName = isNewZone ? (newZoneName.trim() || 'this zone') : (zoneName ?? 'this zone');
+
   return (
     <ScrollView contentContainerStyle={styles.wrap} keyboardShouldPersistTaps="handled">
-      <Text style={styles.label}>
-        Draw floor plan for: <Text style={styles.bold}>{zoneName}</Text>
-      </Text>
+      {isNewZone ? (
+        <>
+          <Text style={styles.label}>Name this zone</Text>
+          <TextInput
+            style={styles.nameInput}
+            placeholder="e.g. Ground Floor, Room A"
+            value={newZoneName}
+            onChangeText={setNewZoneName}
+            returnKeyType="done"
+            autoFocus={false}
+          />
+        </>
+      ) : (
+        <Text style={styles.label}>
+          Draw floor plan for: <Text style={styles.bold}>{displayName}</Text>
+        </Text>
+      )}
       <Text style={styles.hint}>{hint}</Text>
 
       <View
@@ -148,7 +201,9 @@ export function DrawingCanvas({ zoneId, zoneName, onSaved }: Props) {
         )}
         {closed && (
           <TouchableOpacity style={[styles.btnPri, saving && styles.btnDis]} onPress={save} disabled={saving}>
-            <Text style={styles.btnPriTxt}>{saving ? 'Saving…' : 'Save →'}</Text>
+            {saving
+              ? <ActivityIndicator color="#fff" size="small" />
+              : <Text style={styles.btnPriTxt}>Save →</Text>}
           </TouchableOpacity>
         )}
       </View>
@@ -161,6 +216,9 @@ const styles = StyleSheet.create({
   label:       { fontSize: 14, color: '#374151', marginBottom: 4, textAlign: 'center' },
   bold:        { fontWeight: '700', color: PRIMARY },
   hint:        { fontSize: 12, color: '#6B7280', marginBottom: 12, textAlign: 'center' },
+  nameInput:   { width: CANVAS, borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8,
+                 paddingHorizontal: 12, paddingVertical: 10, fontSize: 15,
+                 backgroundColor: '#fff', marginBottom: 10 },
   canvas:      { width: CANVAS, height: CANVAS, backgroundColor: '#ffffff',
                  borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8, overflow: 'hidden' },
   canvasClosed:{ backgroundColor: 'rgba(30,58,95,0.04)', borderColor: PRIMARY },

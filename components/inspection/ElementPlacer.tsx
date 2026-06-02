@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, Modal,
   TextInput, StyleSheet, Alert, ActivityIndicator,
@@ -6,6 +6,7 @@ import {
 } from 'react-native';
 import { supabase, Zone } from '../../lib/supabase';
 import { useAuthStore } from '../../store/authStore';
+import { isPointInPolygon } from '../../lib/geometry';
 
 const PRIMARY  = '#1E3A5F';
 const CANVAS   = 300;
@@ -14,10 +15,12 @@ const PADDING  = 12;
 const INNER    = CANVAS - PADDING * 2;
 const GRID_N   = Math.ceil(CANVAS / CELL_PX) + 1;
 
-type ElementType = 'gevel' | 'transparant_deel_door' | 'transparant_deel_window' | 'dak' | 'vloer' | 'installatie';
+type ElementType = 'gevel' | 'transparant_deel_door' | 'transparant_deel_window' | 'dak' | 'dakkapel' | 'vloer' | 'installatie';
 
 interface PlacedElement {
-  id: string; type: ElementType; label: string;
+  id: string;
+  dbId?: string;   // UUID from building_elements row, present for loaded elements
+  type: ElementType; label: string;
   x: number; y: number; w: number; h: number; rotation: number;
 }
 
@@ -28,6 +31,7 @@ const PALETTE: PaletteItem[] = [
   { type: 'transparant_deel_door',   display: 'Door',    w: 28, h: 28, color: '#bfdbfe',  border: '#2563EB' },
   { type: 'transparant_deel_window', display: 'Window',  w: 32, h: 10, color: '#bae6fd',  border: '#0284c7' },
   { type: 'dak',                     display: 'Roof',    w: 60, h: 60, color: 'rgba(30,58,95,0.08)', border: PRIMARY },
+  { type: 'dakkapel',                display: 'Dormer',  w: 26, h: 26, color: '#ccfbf1',  border: '#0d9488' },
   { type: 'vloer',                   display: 'Floor',   w: 60, h: 60, color: 'rgba(30,58,95,0.04)', border: PRIMARY },
   { type: 'installatie',             display: 'Install', w: 30, h: 30, color: '#fef3c7',  border: '#D97706' },
 ];
@@ -37,6 +41,7 @@ const DB_TYPE: Record<ElementType, string> = {
   transparant_deel_door:   'transparant_deel',
   transparant_deel_window: 'transparant_deel',
   dak:                     'dak',
+  dakkapel:                'dakkapel',
   vloer:                   'vloer',
   installatie:             'installatie',
 };
@@ -46,9 +51,27 @@ const TYPE_LABEL: Record<ElementType, string> = {
   transparant_deel_door:   'Door',
   transparant_deel_window: 'Window',
   dak:                     'Roof',
+  dakkapel:                'Dormer',
   vloer:                   'Floor',
   installatie:             'Install',
 };
+
+// Maps a DB row back to the UI ElementType.
+// transparant_deel is used for both Door and Window — distinguish by name prefix.
+function dbRowToElementType(dbType: string, name: string): ElementType {
+  if (dbType === 'transparant_deel') {
+    return name.toLowerCase().startsWith('door') ? 'transparant_deel_door' : 'transparant_deel_window';
+  }
+  if (dbType === 'dakkapel') return 'dakkapel';
+  return dbType as ElementType;
+}
+
+// Default pixel size for an element type when restoring from DB
+// (grid_w/h are already stored, but PALETTE sizes are used as fallback)
+function paletteSize(type: ElementType): { w: number; h: number } {
+  const p = PALETTE.find(x => x.type === type);
+  return p ? { w: p.w, h: p.h } : { w: 30, h: 30 };
+}
 
 const snap = (v: number) => Math.round(v / CELL_PX) * CELL_PX;
 const uid  = () => Math.random().toString(36).slice(2);
@@ -66,8 +89,24 @@ function fitLines(raw: Zone['floor_plan_points']): { x1:number; y1:number; x2:nu
   return mapped.map((p, i) => { const n = mapped[(i + 1) % mapped.length]; return { x1: p.x, y1: p.y, x2: n.x, y2: n.y }; });
 }
 
+function DoorSwingArc({ size }: { size: number }) {
+  // Render a quarter-circle "swing" arc using a bordered corner
+  const r = size * 0.72;
+  return (
+    <View pointerEvents="none" style={{
+      position: 'absolute', bottom: 0, left: 0,
+      width: r, height: r,
+      borderBottomWidth: 1.5, borderLeftWidth: 1.5,
+      borderColor: '#2563EB',
+      borderBottomLeftRadius: r,
+      opacity: 0.7,
+    }} />
+  );
+}
+
 function ElementView({ el, selected }: { el: PlacedElement; selected: boolean }) {
   const palette = PALETTE.find(p => p.type === el.type)!;
+  const isDoor  = el.type === 'transparant_deel_door';
   return (
     <View style={{
       position:        'absolute',
@@ -83,7 +122,9 @@ function ElementView({ el, selected }: { el: PlacedElement; selected: boolean })
       transform:       [{ rotate: `${el.rotation}deg` }],
       alignItems:      'center',
       justifyContent:  'center',
+      overflow:        'hidden',
     }}>
+      {isDoor && <DoorSwingArc size={Math.min(el.w, el.h)} />}
       {el.type === 'installatie' && (
         <Text style={{ fontSize: 14, color: '#D97706' }}>⚙</Text>
       )}
@@ -115,8 +156,69 @@ export function ElementPlacer({ zones, sessionId, onSaved }: Props) {
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   const [renameText, setRenameText] = useState('');
   const [saving, setSaving] = useState(false);
-  const countersRef = useRef<Record<string, number>>({});
+  const [loadingElements, setLoadingElements] = useState(true);
+  const [ghostPos, setGhostPos]       = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const [canUndo, setCanUndo]         = useState(false);
+  const countersRef  = useRef<Record<string, number>>({});
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
+  // History stack: up to 20 snapshots per zone, keyed by zoneId
+  const historyRef   = useRef<Record<string, PlacedElement[][]>>({});
+  const MAX_HISTORY  = 20;
+
+  const pushHistory = (zoneId: string, state: PlacedElement[]) => {
+    const stack = historyRef.current[zoneId] ?? [];
+    historyRef.current[zoneId] = [...stack.slice(-MAX_HISTORY + 1), [...state]];
+    setCanUndo(true);
+  };
+
+  // ─── Load existing elements from DB on mount ────────────────────────────
+  useEffect(() => {
+    if (zones.length === 0) { setLoadingElements(false); return; }
+    supabase
+      .from('building_elements')
+      .select('id, element_type, name, grid_x, grid_y, grid_w, grid_h, grid_rotation, sort_order, zone_id')
+      .in('zone_id', zones.map(z => z.id))
+      .eq('is_active', true)
+      .order('sort_order')
+      .then(({ data }) => {
+        if (!data || data.length === 0) { setLoadingElements(false); return; }
+
+        const byZone: Record<string, PlacedElement[]> = {};
+        const counters: Record<string, number> = {};
+
+        for (const row of data) {
+          const type = dbRowToElementType(row.element_type, row.name);
+          const fallback = paletteSize(type);
+          const w = row.grid_w != null ? Math.round(row.grid_w * CANVAS) : fallback.w;
+          const h = row.grid_h != null ? Math.round(row.grid_h * CANVAS) : fallback.h;
+          const el: PlacedElement = {
+            id:       uid(),
+            dbId:     row.id,
+            type,
+            label:    row.name,
+            x:        row.grid_x != null ? Math.round(row.grid_x * CANVAS) : 0,
+            y:        row.grid_y != null ? Math.round(row.grid_y * CANVAS) : 0,
+            w,
+            h,
+            rotation: row.grid_rotation ?? 0,
+          };
+          if (!byZone[row.zone_id]) byZone[row.zone_id] = [];
+          byZone[row.zone_id].push(el);
+
+          // Seed counters so new elements continue from the right number
+          // e.g. "Wall-03" → counters.gevel = max(3, current)
+          const match = row.name.match(/-(\d+)$/);
+          if (match) {
+            const n = parseInt(match[1], 10);
+            counters[row.element_type] = Math.max(counters[row.element_type] ?? 0, n);
+          }
+        }
+
+        countersRef.current = counters;
+        setElementsByZone(byZone);
+        setLoadingElements(false);
+      });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps — zones identity is stable on mount
 
   if (zones.length === 0) {
     return (
@@ -127,12 +229,31 @@ export function ElementPlacer({ zones, sessionId, onSaved }: Props) {
     );
   }
 
+  if (loadingElements) {
+    return (
+      <View style={styles.emptyWrap}>
+        <ActivityIndicator color={PRIMARY} size="large" />
+        <Text style={styles.emptySub}>Loading elements…</Text>
+      </View>
+    );
+  }
+
   const activeZone = zones[activeZoneIdx];
   const elements   = elementsByZone[activeZone.id] ?? [];
   // Floor plan outline is optional — shown when available, skipped otherwise
   const floorLines = fitLines(activeZone.floor_plan_points ?? null);
 
+  // Pixel-space polygon for the active zone (used for boundary checks)
+  const polygonPixelPts = (activeZone.floor_plan_points ?? []).length >= 3
+    ? fitLines(activeZone.floor_plan_points!).reduce<{ x: number; y: number }[]>((pts, seg, i, arr) => {
+        if (i === 0) pts.push({ x: seg.x1, y: seg.y1 });
+        pts.push({ x: seg.x2, y: seg.y2 });
+        return pts;
+      }, [])
+    : [];
+
   const addElement = (p: PaletteItem) => {
+    pushHistory(activeZone.id, elementsByZone[activeZone.id] ?? []);
     countersRef.current[p.type] = (countersRef.current[p.type] ?? 0) + 1;
     const n = countersRef.current[p.type];
     const label = `${TYPE_LABEL[p.type]}-${String(n).padStart(2, '0')}`;
@@ -155,27 +276,57 @@ export function ElementPlacer({ zones, sessionId, onSaved }: Props) {
     onPanResponderGrant: () => {
       setSelectedId(elId);
       const el = (elementsByZone[activeZone.id] ?? []).find(e => e.id === elId);
-      if (el) dragStartRef.current = { x: el.x, y: el.y };
+      if (el) {
+        dragStartRef.current = { x: el.x, y: el.y };
+        // Snapshot before the drag starts so undo restores pre-drag state
+        pushHistory(activeZone.id, elementsByZone[activeZone.id] ?? []);
+      }
     },
     onPanResponderMove: (_e, g: PanResponderGestureState) => {
-      if (!dragStartRef.current) return;
+      const start = dragStartRef.current;
+      if (!start) return;
       setElementsByZone(prev => {
         const list = [...(prev[activeZone!.id] ?? [])];
         const idx  = list.findIndex(e => e.id === elId);
         if (idx === -1) return prev;
-        list[idx] = {
-          ...list[idx],
-          x: Math.max(0, Math.min(CANVAS - list[idx].w, snap(dragStartRef.current!.x + g.dx))),
-          y: Math.max(0, Math.min(CANVAS - list[idx].h, snap(dragStartRef.current!.y + g.dy))),
-        };
+        const nx = Math.max(0, Math.min(CANVAS - list[idx].w, snap(start.x + g.dx)));
+        const ny = Math.max(0, Math.min(CANVAS - list[idx].h, snap(start.y + g.dy)));
+        list[idx] = { ...list[idx], x: nx, y: ny };
+        // Update ghost to show snap target
+        setGhostPos({ x: nx, y: ny, w: list[idx].w, h: list[idx].h });
         return { ...prev, [activeZone!.id]: list };
       });
     },
-    onPanResponderRelease: () => { dragStartRef.current = null; },
+    onPanResponderRelease: (_e, g: PanResponderGestureState) => {
+      setGhostPos(null);
+      dragStartRef.current = null;
+
+      // Boundary enforcement: if element center is outside the polygon, snap back
+      if (polygonPixelPts.length >= 3) {
+        setElementsByZone(prev => {
+          const list = [...(prev[activeZone!.id] ?? [])];
+          const idx  = list.findIndex(e => e.id === elId);
+          if (idx === -1) return prev;
+          const el  = list[idx];
+          const cx  = el.x + el.w / 2;
+          const cy  = el.y + el.h / 2;
+          if (!isPointInPolygon(cx, cy, polygonPixelPts)) {
+            // Restore the snapshot taken at grant time
+            const stack = historyRef.current[activeZone!.id] ?? [];
+            if (stack.length > 0) {
+              Alert.alert('Outside boundary', 'Element moved back inside the floor plan.');
+              return { ...prev, [activeZone!.id]: stack[stack.length - 1] };
+            }
+          }
+          return prev;
+        });
+      }
+    },
   });
 
   const rotateSelected = () => {
     if (!selectedId || !activeZone) return;
+    pushHistory(activeZone.id, elementsByZone[activeZone.id] ?? []);
     setElementsByZone(prev => {
       const list = [...(prev[activeZone.id] ?? [])];
       const idx  = list.findIndex(e => e.id === selectedId);
@@ -187,11 +338,24 @@ export function ElementPlacer({ zones, sessionId, onSaved }: Props) {
 
   const deleteSelected = () => {
     if (!selectedId || !activeZone) return;
+    pushHistory(activeZone.id, elementsByZone[activeZone.id] ?? []);
     setElementsByZone(prev => ({
       ...prev,
       [activeZone.id]: (prev[activeZone.id] ?? []).filter(e => e.id !== selectedId),
     }));
     setSelectedId(null);
+  };
+
+  const undoLast = () => {
+    if (!activeZone) return;
+    const stack = historyRef.current[activeZone.id];
+    if (!stack || stack.length === 0) return;
+    const prev = stack[stack.length - 1];
+    const remaining = stack.slice(0, -1);
+    historyRef.current[activeZone.id] = remaining;
+    setElementsByZone(s => ({ ...s, [activeZone.id]: prev }));
+    setSelectedId(null);
+    setCanUndo(remaining.length > 0);
   };
 
   const openRename = () => {
@@ -216,8 +380,21 @@ export function ElementPlacer({ zones, sessionId, onSaved }: Props) {
     if (!profile || totalPlaced === 0) return;
     setSaving(true);
 
-    // Build all rows first, then send as a single bulk insert so the operation
-    // is atomic — a partial failure won't leave orphan rows in the DB.
+    // Zones that have at least one element on the canvas
+    const dirtyZoneIds = zones
+      .filter(z => (elementsByZone[z.id]?.length ?? 0) > 0)
+      .map(z => z.id);
+
+    // Step 1: soft-delete all currently active elements for those zones.
+    // Using is_active=false (not hard-delete) so any existing measurements
+    // referencing old element IDs stay intact in the audit trail.
+    const { error: delErr } = await supabase
+      .from('building_elements')
+      .update({ is_active: false })
+      .in('zone_id', dirtyZoneIds);
+    if (delErr) { setSaving(false); Alert.alert('Could not update elements', delErr.message); return; }
+
+    // Step 2: bulk-insert the current canvas state for all zones.
     const rows = zones.flatMap(zone =>
       (elementsByZone[zone.id] ?? []).map((el, idx) => ({
         org_id:          profile.org_id,
@@ -234,8 +411,30 @@ export function ElementPlacer({ zones, sessionId, onSaved }: Props) {
       }))
     );
 
-    const { error } = await supabase.from('building_elements').insert(rows);
-    if (error) { setSaving(false); Alert.alert('Could not save elements', error.message); return; }
+    const { error: insErr } = await supabase.from('building_elements').insert(rows);
+    if (insErr) { setSaving(false); Alert.alert('Could not save elements', insErr.message); return; }
+
+    // Link dakkapel elements to their parent dak in each zone
+    const hasDakkapel = rows.some(r => r.element_type === 'dakkapel');
+    if (hasDakkapel) {
+      const { data: dakRows } = await supabase
+        .from('building_elements')
+        .select('id, zone_id')
+        .in('zone_id', dirtyZoneIds)
+        .eq('element_type', 'dak')
+        .eq('is_active', true);
+      const dakByZone: Record<string, string> = {};
+      for (const d of dakRows ?? []) dakByZone[d.zone_id] = d.id;
+      for (const zone of zones) {
+        const dakId = dakByZone[zone.id];
+        if (!dakId) continue;
+        await supabase.from('building_elements')
+          .update({ parent_element_id: dakId })
+          .eq('zone_id', zone.id)
+          .eq('element_type', 'dakkapel')
+          .eq('is_active', true);
+      }
+    }
 
     await supabase.from('inspection_sessions').update({ flow_stage: 6 }).eq('id', sessionId);
     setSaving(false);
@@ -254,7 +453,7 @@ export function ElementPlacer({ zones, sessionId, onSaved }: Props) {
           {zones.map((z, i) => (
             <TouchableOpacity key={z.id}
               style={[styles.tab, i === activeZoneIdx && styles.tabActive]}
-              onPress={() => { setActiveZoneIdx(i); setSelectedId(null); }}>
+              onPress={() => { setActiveZoneIdx(i); setSelectedId(null); setCanUndo((historyRef.current[z.id]?.length ?? 0) > 0); }}>
               <Text style={[styles.tabTxt, i === activeZoneIdx && styles.tabTxtActive]}>
                 {z.name} ({elementsByZone[z.id]?.length ?? 0})
               </Text>
@@ -263,7 +462,8 @@ export function ElementPlacer({ zones, sessionId, onSaved }: Props) {
         </ScrollView>
       )}
 
-      {/* Canvas */}
+      {/* Canvas — fills remaining space between header and bottom controls */}
+      <View style={styles.canvasWrap}>
       <View
         style={styles.canvas}
         onStartShouldSetResponder={() => true}
@@ -304,6 +504,18 @@ export function ElementPlacer({ zones, sessionId, onSaved }: Props) {
           );
         })}
 
+        {/* Snapping ghost — semi-transparent target shown while dragging */}
+        {ghostPos && (
+          <View pointerEvents="none" style={{
+            position: 'absolute',
+            left: ghostPos.x, top: ghostPos.y,
+            width: ghostPos.w, height: ghostPos.h,
+            borderWidth: 2, borderColor: '#2563EB',
+            borderStyle: 'dashed', borderRadius: 3,
+            backgroundColor: 'rgba(37,99,235,0.12)',
+          }} />
+        )}
+
         {/* Placed elements — render each with its own PanResponder */}
         {elements.map(el => {
           const pan = makePan(el.id);
@@ -318,45 +530,63 @@ export function ElementPlacer({ zones, sessionId, onSaved }: Props) {
           );
         })}
       </View>
+      </View>
 
-      {/* Selection actions */}
-      {selectedId && (
-        <View style={styles.selBar}>
-          <TouchableOpacity style={styles.selBtn} onPress={openRename}>
-            <Text style={styles.selBtnTxt}>✏ Rename</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.selBtn} onPress={rotateSelected}>
-            <Text style={styles.selBtnTxt}>↻ Rotate</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.selBtn, styles.selBtnDanger]} onPress={deleteSelected}>
-            <Text style={[styles.selBtnTxt, { color: '#EF4444' }]}>✕ Delete</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+      {/* ── Bottom controls — always visible ── */}
+      <View style={styles.bottomControls}>
+        {/* Undo — visible when there is something to undo */}
+        {canUndo && (
+          <View style={styles.undoBar}>
+            <TouchableOpacity style={styles.undoBtn} onPress={undoLast}>
+              <Text style={styles.undoBtnTxt}>↩ Undo</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
-      {/* Palette */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.palette}>
-        {PALETTE.map(p => (
-          <TouchableOpacity key={p.type} style={styles.chip} onPress={() => addElement(p)}>
-            <Text style={styles.chipTxt}>+ {p.display}</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+        {/* Selection actions */}
+        {selectedId && (
+          <View style={styles.selBar}>
+            <TouchableOpacity style={styles.selBtn} onPress={openRename}>
+              <Text style={styles.selBtnTxt}>✏ Rename</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.selBtn} onPress={rotateSelected}>
+              <Text style={styles.selBtnTxt}>↻ Rotate</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.selBtn, styles.selBtnDanger]} onPress={deleteSelected}>
+              <Text style={[styles.selBtnTxt, { color: '#EF4444' }]}>✕ Delete</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
-      {/* Save */}
-      <TouchableOpacity
-        style={[styles.saveBtn, (saving || totalPlaced === 0) && styles.btnDis]}
-        onPress={saveAll}
-        disabled={saving || totalPlaced === 0}
-      >
-        {saving
-          ? <ActivityIndicator color="#fff" />
-          : <Text style={styles.saveTxt}>
-              {totalPlaced === 0
-                ? 'Place at least one element to continue'
-                : `Save ${totalPlaced} element${totalPlaced !== 1 ? 's' : ''} & Continue →`}
-            </Text>}
-      </TouchableOpacity>
+        {/* Palette chips */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.paletteContent}
+          style={styles.palette}
+        >
+          {PALETTE.map(p => (
+            <TouchableOpacity key={p.type} style={styles.chip} onPress={() => addElement(p)}>
+              <Text style={styles.chipTxt}>+ {p.display}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+
+        {/* Save */}
+        <TouchableOpacity
+          style={[styles.saveBtn, (saving || totalPlaced === 0) && styles.btnDis]}
+          onPress={saveAll}
+          disabled={saving || totalPlaced === 0}
+        >
+          {saving
+            ? <ActivityIndicator color="#fff" />
+            : <Text style={styles.saveTxt}>
+                {totalPlaced === 0
+                  ? 'Place at least one element to continue'
+                  : `Save ${totalPlaced} element${totalPlaced !== 1 ? 's' : ''} & Continue →`}
+              </Text>}
+        </TouchableOpacity>
+      </View>
 
       {/* Rename modal */}
       <Modal visible={!!renameTarget} transparent animationType="fade">
@@ -387,32 +617,41 @@ export function ElementPlacer({ zones, sessionId, onSaved }: Props) {
 }
 
 const styles = StyleSheet.create({
-  wrap:        { flex: 1, padding: 16 },
-  header:      { fontSize: 20, fontWeight: '700', color: PRIMARY, marginBottom: 4 },
-  sub:         { fontSize: 13, color: '#6B7280', marginBottom: 10 },
-  tabs:        { flexDirection: 'row', marginBottom: 10 },
-  tab:         { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, backgroundColor: '#F3F4F6', marginRight: 8 },
-  tabActive:   { backgroundColor: PRIMARY },
-  tabTxt:      { fontSize: 13, color: '#374151' },
-  tabTxtActive:{ color: '#fff', fontWeight: '600' },
-  canvas:      { width: CANVAS, height: CANVAS, alignSelf: 'center',
-                 backgroundColor: '#fafafa', borderRadius: 8, overflow: 'hidden',
-                 borderWidth: 1, borderColor: '#E5E7EB' },
-  gridLine:    { position: 'absolute', backgroundColor: '#e5e7eb' },
-  gridV:       { width: 1, height: CANVAS },
-  gridH:       { height: 1, width: CANVAS },
-  selBar:      { flexDirection: 'row', gap: 8, justifyContent: 'center', marginTop: 10 },
-  selBtn:      { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8,
-                 borderWidth: 1, borderColor: '#D1D5DB', backgroundColor: '#F9FAFB' },
-  selBtnDanger:{ borderColor: '#FCA5A5' },
-  selBtnTxt:   { fontSize: 12, color: '#374151' },
-  palette:     { flexDirection: 'row', marginTop: 12, marginBottom: 4 },
-  chip:        { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
-                 backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE', marginRight: 8 },
-  chipTxt:     { fontSize: 13, color: PRIMARY, fontWeight: '600' },
-  saveBtn:     { backgroundColor: PRIMARY, borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 12 },
-  saveTxt:     { color: '#fff', fontSize: 15, fontWeight: '700' },
-  btnDis:      { opacity: 0.45 },
+  wrap:           { flex: 1, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 0 },
+  header:         { fontSize: 18, fontWeight: '700', color: PRIMARY, marginBottom: 2 },
+  sub:            { fontSize: 12, color: '#6B7280', marginBottom: 8 },
+  tabs:           { flexDirection: 'row', marginBottom: 8 },
+  tab:            { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, backgroundColor: '#F3F4F6', marginRight: 8 },
+  tabActive:      { backgroundColor: PRIMARY },
+  tabTxt:         { fontSize: 13, color: '#374151' },
+  tabTxtActive:   { color: '#fff', fontWeight: '600' },
+  // canvasWrap: fills remaining flex space, centers the canvas inside
+  canvasWrap:     { flex: 1, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
+  canvas:         { width: CANVAS, height: CANVAS,
+                    backgroundColor: '#fafafa', borderRadius: 8, overflow: 'hidden',
+                    borderWidth: 1, borderColor: '#E5E7EB' },
+  gridLine:       { position: 'absolute', backgroundColor: '#e5e7eb' },
+  gridV:          { width: 1, height: CANVAS },
+  gridH:          { height: 1, width: CANVAS },
+  // bottomControls: sticks to the bottom, never clipped
+  bottomControls: { paddingBottom: 16, paddingTop: 4 },
+  undoBar:        { flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 4 },
+  undoBtn:        { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 8,
+                    borderWidth: 1, borderColor: '#D1D5DB', backgroundColor: '#F9FAFB' },
+  undoBtnTxt:     { fontSize: 12, color: '#374151' },
+  selBar:         { flexDirection: 'row', gap: 8, justifyContent: 'center', marginBottom: 8 },
+  selBtn:         { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8,
+                    borderWidth: 1, borderColor: '#D1D5DB', backgroundColor: '#F9FAFB' },
+  selBtnDanger:   { borderColor: '#FCA5A5' },
+  selBtnTxt:      { fontSize: 12, color: '#374151' },
+  palette:        { marginBottom: 8 },
+  paletteContent: { flexDirection: 'row', paddingVertical: 2 },
+  chip:           { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
+                    backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE', marginRight: 8 },
+  chipTxt:        { fontSize: 13, color: PRIMARY, fontWeight: '600' },
+  saveBtn:        { backgroundColor: PRIMARY, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
+  saveTxt:        { color: '#fff', fontSize: 15, fontWeight: '700' },
+  btnDis:         { opacity: 0.45 },
   overlay:     { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center' },
   modalBox:    { backgroundColor: '#fff', borderRadius: 14, padding: 24, width: 280 },
   modalTitle:  { fontSize: 16, fontWeight: '700', color: '#111827', marginBottom: 12 },

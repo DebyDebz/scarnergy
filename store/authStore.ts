@@ -3,7 +3,7 @@ import { Session, User } from "@supabase/supabase-js";
 import { supabase, UserProfile } from "../lib/supabase";
 
 // Keep in sync with DEV_BYPASS_AUTH in app/_layout.tsx
-const DEV_BYPASS_AUTH = true;
+const DEV_BYPASS_AUTH = process.env.EXPO_PUBLIC_DEV_BYPASS_AUTH === 'true';
 
 const DEV_PROFILE: UserProfile = {
   id:        "00000000-0000-0000-0000-000000000000",
@@ -26,8 +26,9 @@ interface AuthState {
 export const useAuthStore = create<AuthState>((set, get) => ({
   session: null,
   user:    null,
-  profile: null,
-  loading: true,
+  // Pre-populate profile in dev-bypass mode so the router never waits for auth
+  profile: DEV_BYPASS_AUTH ? DEV_PROFILE : null,
+  loading: DEV_BYPASS_AUTH ? false : true,
 
   signIn: async (email, password) => {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });

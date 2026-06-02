@@ -5,14 +5,15 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase, Zone } from '../../../lib/supabase';
-import { DrawingCanvas } from '../../../components/inspection/DrawingCanvas';
+import { FloorPlanImageUpload } from '../../../components/inspection/FloorPlanImageUpload';
 import { ZoneManager } from '../../../components/inspection/ZoneManager';
 import { GridCanvas } from '../../../components/inspection/GridCanvas';
 import { ElementPlacer } from '../../../components/inspection/ElementPlacer';
+import { FloorPlanViewer } from '../../../components/inspection/FloorPlanViewer';
 
 const PRIMARY = '#1E3A5F';
 
-type Stage = 1 | 2 | 3 | 4 | 5;
+type Stage = 1 | 2 | 3 | 4 | 5 | 6;
 
 const STAGE_LABELS: Record<Stage, string> = {
   1: 'Checking…',
@@ -20,54 +21,113 @@ const STAGE_LABELS: Record<Stage, string> = {
   3: 'Define Zones',
   4: 'Grid Analysis',
   5: 'Place Elements',
+  6: 'View Floor Plan',
 };
 
 export default function InspectionFlowScreen() {
-  const { id: sessionId, buildingId } = useLocalSearchParams<{ id: string; buildingId: string }>();
+  const { id: sessionId, buildingId, forceStage } = useLocalSearchParams<{ id: string; buildingId: string; forceStage?: string }>();
   const router = useRouter();
 
-  const [stage, setStage]         = useState<Stage>(1);
-  const [zones, setZones]         = useState<Zone[]>([]);
+  const [stage, setStage]               = useState<Stage>(1);
+  const [zones, setZones]               = useState<Zone[]>([]);
   const [drawingZoneId,   setDrawingZoneId]   = useState<string | null>(null);
   const [drawingZoneName, setDrawingZoneName] = useState<string>('');
-  const [loading, setLoading]     = useState(true);
+  const [loading, setLoading]           = useState(true);
 
-  // ─── Stage 1: check for pre-existing zones + elements ─────────────────────
+  // ─── Stage 1: determine starting point ────────────────────────────────────
   const runCheck = useCallback(async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('zones')
-      .select('*, building_elements(id)')
-      .eq('building_id', buildingId)
-      .eq('is_active', true);
 
-    if (error || !data) {
+    // forceStage=5 lets session detail bypass runCheck and land directly on
+    // ElementPlacer — used when some zones have elements but others don't.
+    if (forceStage === '5') {
+      // Still need to load zones so ElementPlacer has zone data
+      const { data: zData } = await supabase
+        .from('zones')
+        .select('*')
+        .eq('building_id', buildingId)
+        .eq('is_active', true);
+      setZones((zData ?? []) as Zone[]);
+      setStage(5);
       setLoading(false);
-      setStage(2);
       return;
     }
 
-    const fetchedZones = data as (Zone & { building_elements: { id: string }[] })[];
-    const totalElements = fetchedZones.reduce((n, z) => n + z.building_elements.length, 0);
+    // Fetch session flow_stage (for resume) + zones with element counts
+    const [sessionRes, zonesRes] = await Promise.all([
+      supabase
+        .from('inspection_sessions')
+        .select('flow_stage')
+        .eq('id', sessionId)
+        .single(),
+      supabase
+        .from('zones')
+        .select('*, building_elements(id)')
+        .eq('building_id', buildingId)
+        .eq('is_active', true),
+    ]);
 
-    // Restore existing zone shape (strip the building_elements join before storing)
-    const cleanZones: Zone[] = fetchedZones.map(({ building_elements: _be, ...z }) => z as Zone);
+    const savedStage = sessionRes.data?.flow_stage as Stage | null | undefined;
+    const rawZones   = (zonesRes.data ?? []) as (Zone & { building_elements: { id: string }[] })[];
+
+    const cleanZones: Zone[] = rawZones.map(({ building_elements: _be, ...z }) => z as Zone);
+    const totalElements      = rawZones.reduce((n, z) => n + z.building_elements.length, 0);
+    const zonesWithPlan      = cleanZones.filter(z => z.floor_plan_points && z.floor_plan_points.length >= 3);
+
     setZones(cleanZones);
 
-    if (cleanZones.length > 0 && totalElements > 0) {
-      // Already fully set up → skip wizard entirely, go straight to measurement
+    // ── Supervisor pre-configured: all zones have image + scale → View Floor Plan ─
+    // Inspectors skip the drawing + grid stages and land on the viewer first,
+    // then proceed to element placement.
+    const zonesWithImage = cleanZones.filter(z => z.floor_plan_image_url && z.floor_plan_scale_m);
+    if (
+      cleanZones.length > 0 &&
+      zonesWithImage.length === cleanZones.length &&
+      totalElements === 0
+    ) {
+      await advanceTo(6);
       setLoading(false);
+      return;
+    }
+
+    // ── Fully set up: every zone-with-floor-plan has ≥1 element → skip wizard
+    // (Changed from "any elements" to "all zones covered" so partial setups
+    //  don't lock users out of adding elements to remaining zones.)
+    const allZonesCovered =
+      zonesWithPlan.length > 0 &&
+      zonesWithPlan.every(z => rawZones.find(r => r.id === z.id)!.building_elements.length > 0);
+
+    if (allZonesCovered) {
       router.replace(`/tabs/sessions/${sessionId}`);
       return;
-    } else if (cleanZones.length > 0) {
-      // Zones exist but no elements → skip drawing to zone manager
-      await advanceTo(3);
+    }
+
+    // ── Admin pre-uploaded zones + floor plans (no elements yet) → Grid ─────
+    if (zonesWithPlan.length > 0 && totalElements === 0) {
+      await advanceTo(4);
+      setLoading(false);
+      return;
+    }
+
+    // ── Resume in-progress session at the saved stage ────────────────────────
+    // Only restore stages 3-5 (stages that have saved state worth resuming).
+    // Stage 2 (draw) is not restored because drawn points are in-memory only.
+    if (savedStage && savedStage >= 3 && savedStage <= 5 && cleanZones.length > 0) {
+      setStage(savedStage);
+      setLoading(false);
+      return;
+    }
+
+    // ── Default routing ───────────────────────────────────────────────────────
+    // No zones at all → Stage 2 so user draws + names the first zone inline.
+    // Zones exist but none drawn → Stage 3 (Zone Manager) so user picks which to draw.
+    if (cleanZones.length === 0) {
+      await advanceTo(2);
     } else {
-      // Nothing exists → create zones first, then draw
       await advanceTo(3);
     }
     setLoading(false);
-  }, [buildingId, sessionId, router]);
+  }, [buildingId, sessionId, forceStage, router]);
 
   useEffect(() => { runCheck(); }, [runCheck]);
 
@@ -79,16 +139,19 @@ export default function InspectionFlowScreen() {
       .eq('id', sessionId);
   };
 
-  // ─── Stage 2 complete: floor plan saved for a zone ────────────────────────
-  const handlePlanSaved = async () => {
-    // Refresh zone data to get updated floor_plan_points
+  // ─── Stage 2 complete: floor plan saved (possibly with a new zone) ─────────
+  const handlePlanSaved = async (newZone?: Zone) => {
+    // Refresh zones to include any newly created zone
     const { data } = await supabase
       .from('zones')
       .select('*')
       .eq('building_id', buildingId)
       .eq('is_active', true);
-    if (data) setZones(data as Zone[]);
+
+    const updated = (data ?? []) as Zone[];
+    setZones(updated);
     setDrawingZoneId(null);
+    setDrawingZoneName('');
     await advanceTo(3);
   };
 
@@ -105,7 +168,11 @@ export default function InspectionFlowScreen() {
   };
 
   // ─── Progress bar ──────────────────────────────────────────────────────────
-  const progressSteps: Stage[] = [2, 3, 4, 5];
+  // Stage 6 (View Floor Plan) is shown when supervisor pre-configured everything;
+  // it maps to step 1 of a 2-step progress: View → Place.
+  const progressSteps: Stage[] = stage === 6 || (stage === 5 && zones.every(z => z.floor_plan_image_url))
+    ? [6, 5]
+    : [2, 3, 4, 5];
   const progressPct = stage <= 1 ? 0
     : stage >= 5 ? 1
     : (progressSteps.indexOf(stage) + 1) / progressSteps.length;
@@ -122,12 +189,21 @@ export default function InspectionFlowScreen() {
     }
 
     if (stage === 2) {
-      const zoneId   = drawingZoneId ?? (zones[0]?.id ?? '');
-      const zoneName = drawingZoneName || zones[0]?.name || 'Zone';
+      // If we're drawing a specific existing zone (from ZoneManager), pass its id.
+      // Otherwise (fresh start), pass buildingId so the component creates the zone.
+      if (drawingZoneId) {
+        return (
+          <FloorPlanImageUpload
+            zoneId={drawingZoneId}
+            zoneName={drawingZoneName}
+            buildingId={buildingId}
+            onSaved={handlePlanSaved}
+          />
+        );
+      }
       return (
-        <DrawingCanvas
-          zoneId={zoneId}
-          zoneName={zoneName}
+        <FloorPlanImageUpload
+          buildingId={buildingId}
           onSaved={handlePlanSaved}
         />
       );
@@ -160,6 +236,15 @@ export default function InspectionFlowScreen() {
           zones={zones}
           sessionId={sessionId}
           onSaved={handleFlowComplete}
+        />
+      );
+    }
+
+    if (stage === 6) {
+      return (
+        <FloorPlanViewer
+          zones={zones}
+          onContinue={() => advanceTo(5)}
         />
       );
     }

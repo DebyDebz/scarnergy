@@ -3,6 +3,7 @@
     "name": "scarnergy-app",
     "slug": "scarnergy-app",
     "version": "2.0.0",
+    "jsEngine": "hermes",
     "extra": {
       "eas": {
         "projectId": "e41c9a9f-d0c2-4076-9392-3e36e42169c0"
@@ -30,6 +31,13 @@
     "plugins": [
       "expo-router",
       "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Scarnergy to access your photos to upload floor plan images.",
+          "cameraPermission": "Allow Scarnergy to use the camera to photograph floor plans."
+        }
+      ],
       [
         "react-native-ble-plx",
         {

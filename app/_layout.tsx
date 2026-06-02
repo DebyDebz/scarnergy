@@ -35,8 +35,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: string |
   }
 }
 
-// TODO: set to false before releasing to App Store
-const DEV_BYPASS_AUTH = true;
+const DEV_BYPASS_AUTH = process.env.EXPO_PUBLIC_DEV_BYPASS_AUTH === 'true';
 
 const DEV_PROFILE = {
   id:        "00000000-0000-0000-0000-000000000000",

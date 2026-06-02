@@ -57,8 +57,14 @@
     <string>Allow $(PRODUCT_NAME) to connect to your GLM Bluetooth device.</string>
     <key>NSBluetoothPeripheralUsageDescription</key>
     <string>This app uses Bluetooth to connect to and communicate with your GLM device.</string>
+    <key>NSCameraUsageDescription</key>
+    <string>Allow Scarnergy to use the camera to photograph floor plans.</string>
     <key>NSFaceIDUsageDescription</key>
     <string>Allow $(PRODUCT_NAME) to access your Face ID biometric data.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Allow $(PRODUCT_NAME) to access your microphone</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>Allow Scarnergy to access your photos to upload floor plan images.</string>
     <key>NSUserActivityTypes</key>
     <array>
       <string>$(PRODUCT_BUNDLE_IDENTIFIER).expo.index_route</string>

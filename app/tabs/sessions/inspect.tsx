@@ -7,10 +7,12 @@ import {
 let ImagePicker: typeof import("expo-image-picker") | null = null;
 try { ImagePicker = require("expo-image-picker"); } catch { ImagePicker = null; }
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { supabase, BuildingElement } from "../../../lib/supabase";
+import { supabase, BuildingElement, Opening } from "../../../lib/supabase";
 import { useBLE } from "../../../lib/BLEContext";
 import { useAuthStore } from "../../../store/authStore";
 import { GLMMeasurement } from "../../../hooks/useBLEDevice";
+import { FieldSelect } from "../../../components/ui/FieldSelect";
+import { FieldToggle } from "../../../components/ui/FieldToggle";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -22,11 +24,12 @@ type ElementWithZone = BuildingElement & { zone_name?: string };
 
 const SLOT_MAP: Record<string, SlotDef[]> = {
   // Dutch schema enum values
-  gevel:           [{ key: "length_mm", label: "Length"    }, { key: "height_mm", label: "Height"    }, { key: "width_mm", label: "Thickness" }],
-  dak:             [{ key: "length_mm", label: "Length"    }, { key: "width_mm",  label: "Width"     }],
-  vloer:           [{ key: "length_mm", label: "Length"    }, { key: "width_mm",  label: "Width"     }],
-  transparant_deel:[{ key: "width_mm",  label: "Width"     }, { key: "height_mm", label: "Height"    }],
-  installatie:     [{ key: "length_mm", label: "Length"    }],
+  gevel:           [{ key: "length_mm", label: "Breedte"   }, { key: "height_mm", label: "Hoogte"    }, { key: "width_mm", label: "Dikte"    }],
+  dak:             [{ key: "length_mm", label: "Lengte"    }, { key: "width_mm",  label: "Breedte"   }],
+  dakkapel:        [{ key: "width_mm",  label: "Breedte"   }, { key: "height_mm", label: "Hoogte"    }, { key: "length_mm", label: "Diepte"   }],
+  vloer:           [{ key: "length_mm", label: "Lengte"    }, { key: "width_mm",  label: "Breedte"   }],
+  transparant_deel:[{ key: "width_mm",  label: "Breedte"   }, { key: "height_mm", label: "Hoogte"    }],
+  installatie:     [{ key: "length_mm", label: "Lengte"    }],
   // English fallbacks
   wall:    [{ key: "length_mm", label: "Length"    }, { key: "height_mm", label: "Height"    }, { key: "width_mm", label: "Thickness" }],
   floor:   [{ key: "length_mm", label: "Length"    }, { key: "width_mm",  label: "Width"     }],
@@ -40,6 +43,77 @@ const DEFAULT_SLOTS: SlotDef[] = [
   { key: "height_mm", label: "Height"    },
   { key: "width_mm",  label: "Thickness" },
 ];
+
+// ── Qualitative detail fields per element type ────────────────────────────────
+
+type DetailType = 'select' | 'toggle' | 'number' | 'text';
+type DetailField = {
+  key: string;
+  label: string;
+  type: DetailType;
+  options?: string[];
+  dependsOn?: { key: string; value: string | boolean };
+  target?: 'element' | 'opening';  // which table to save to; default = element
+};
+
+const DETAIL_FIELDS: Record<string, DetailField[]> = {
+  gevel: [
+    { key: 'construction_type',    label: 'Positie',                   type: 'select',
+      options: ['Voorgevel','Achtergevel','Linkergevel','Rechtergevel'] },
+    { key: 'description',          label: 'Grenzt aan',                type: 'select',
+      options: ['Buitenlucht','Kruipruimte','Aangrenzende onverwarmde ruimte','Aangrenzende verwarmde ruimte'] },
+    { key: 'insulation_type',      label: 'Isolatietype',              type: 'select',
+      options: ['Glaswol','Spouwvulling','PUR','EPS','Geen'] },
+    { key: 'dikte_vloer_boven_mm', label: 'Dikte vloer boven (mm)',   type: 'number' },
+    { key: 'dikte_vloer_onder_mm', label: 'Dikte vloer onder (mm)',   type: 'number' },
+    { key: 'dikte_muren_mm',       label: 'Dikte aangrenzende muren (mm)', type: 'number' },
+    { key: 'perimeter_m',          label: 'Perimeter (m)',             type: 'number' },
+  ],
+  transparant_deel: [
+    { key: 'opening_type',          label: 'Type',                 type: 'select', target: 'opening',
+      options: ['window','door','skylight'] },
+    { key: 'frame_type',            label: 'Kozijn materiaal',     type: 'select', target: 'opening',
+      options: ['Hout','Kunststof','Metaal','Hout/Kunststof'] },
+    { key: 'glazing_type',          label: 'Beglazing',            type: 'select', target: 'opening',
+      options: ['Enkel','Dubbel','HR+','HR++','Triple'] },
+    { key: 'thermisch_onderbroken', label: 'Thermisch onderbroken',type: 'toggle', target: 'opening' },
+    { key: 'has_shading',           label: 'Zonwering aanwezig',   type: 'toggle', target: 'opening' },
+    { key: 'shading_type',          label: 'Type zonwering',       type: 'select', target: 'opening',
+      options: ['Geen','Knikarmscherm','Uitvalscherm','Rolluik','Markies','Zonnecel'],
+      dependsOn: { key: 'has_shading', value: true } },
+    { key: 'overstek_m',            label: 'Overstek (m)',         type: 'number', target: 'opening' },
+  ],
+  vloer: [
+    { key: 'description',   label: 'Grenzt aan',    type: 'select',
+      options: ['Kruipruimte','Buitenlucht','Aangrenzende onverwarmde ruimte'] },
+    { key: 'insulation_type', label: 'Vloerisolatie', type: 'select',
+      options: ['Geen','Glaswol','PUR','EPS','Kurk'] },
+    { key: 'bodemisolatie', label: 'Bodemisolatie', type: 'toggle' },
+    { key: 'perimeter_m',   label: 'Perimeter (m)', type: 'number' },
+  ],
+  dakkapel: [
+    { key: 'description', label: 'Naam / omschrijving', type: 'text' },
+  ],
+  dak: [
+    { key: 'construction_type', label: 'Type dak',      type: 'select',
+      options: ['HellendDak','PlatDak','Zadeldak'] },
+    { key: 'tilt_deg',          label: 'Hoek (°)',       type: 'number' },
+    { key: 'nokhoogte_m',       label: 'Nokhoogte (m)', type: 'number' },
+    { key: 'insulation_type',   label: 'Isolatietype',   type: 'select',
+      options: ['Glaswol','PUR','EPS','Geen'] },
+  ],
+  installatie: [
+    { key: 'installation_type', label: 'Type installatie', type: 'select',
+      options: ['Verwarming','Tapwater','Ventilatie','WarmtePomp','ZonnePanelen','ZonneCollectoren','Koeling'] },
+    { key: 'brand',     label: 'Merk',      type: 'text' },
+    { key: 'model_nr',  label: 'Model',     type: 'text' },
+    { key: 'cv_klasse', label: 'CV klasse', type: 'select',
+      options: ['CW3','CW4','CW5','CW6'],
+      dependsOn: { key: 'installation_type', value: 'Verwarming' } },
+    { key: 'fuel_type', label: 'Brandstof', type: 'select',
+      options: ['Gas','Elektriciteit','Stadsverwarming','Biomassa'] },
+  ],
+};
 
 function clientUUID(): string {
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
@@ -77,6 +151,10 @@ export default function InspectScreen() {
   // Photos: local display URIs + optional uploaded storage paths
   const [photoUris,      setPhotoUris]      = useState<string[]>([]);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  // Qualitative detail fields (string | boolean | number keyed by field.key)
+  const [details,       setDetails]       = useState<Record<string, string | boolean | number>>({});
+  // Opening record for transparant_deel elements
+  const [openingId,     setOpeningId]     = useState<string | null>(null);
 
   const activeSlotRef = useRef<SlotKey | null>(null);
   // setActiveSlotSync keeps the ref in sync IMMEDIATELY so BLE callbacks that
@@ -127,6 +205,14 @@ export default function InspectScreen() {
             ...(rest.height_mm != null ? { height_mm: (rest.height_mm / 1000).toFixed(3) } : {}),
             ...(rest.width_mm  != null ? { width_mm:  (rest.width_mm  / 1000).toFixed(3) } : {}),
           });
+          // Populate qualitative detail fields from existing element data
+          const elementFields = (DETAIL_FIELDS[rest.element_type] ?? []).filter(f => f.target !== 'opening');
+          const initialDetails: Record<string, string | boolean | number> = {};
+          for (const f of elementFields) {
+            const v = rest[f.key];
+            if (v != null) initialDetails[f.key] = v;
+          }
+          setDetails(initialDetails);
           // Load existing photos: generate signed URLs for storage paths
           const existing: string[] = rest.photo_urls ?? [];
           if (existing.length > 0) {
@@ -151,6 +237,30 @@ export default function InspectScreen() {
       })
       .catch(() => setLoading(false));
   }, [elementId]);
+
+  // Load existing opening record for transparant_deel elements
+  useEffect(() => {
+    if (!element || element.element_type !== 'transparant_deel') return;
+    supabase
+      .from('openings')
+      .select('*')
+      .eq('element_id', element.id)
+      .eq('is_active', true)
+      .limit(1)
+      .single()
+      .then(({ data }) => {
+        if (!data) return;
+        const o = data as Opening;
+        setOpeningId(o.id);
+        const openingFields = (DETAIL_FIELDS.transparant_deel ?? []).filter(f => f.target === 'opening');
+        const od: Record<string, string | boolean | number> = {};
+        for (const f of openingFields) {
+          const v = (o as any)[f.key];
+          if (v != null) od[f.key] = v;
+        }
+        setDetails(prev => ({ ...prev, ...od }));
+      });
+  }, [element]);
 
   // Capture a photo from camera or library and upload to Supabase Storage
   const capturePhoto = useCallback(async (source: "camera" | "library") => {
@@ -301,13 +411,25 @@ export default function InspectScreen() {
         }
       }
 
-      const allFilled = slots.every(s => {
+      // Add qualitative element-level fields
+      const elementDetailFields = (DETAIL_FIELDS[element.element_type] ?? []).filter(f => f.target !== 'opening');
+      for (const f of elementDetailFields) {
+        const v = details[f.key];
+        if (v != null && v !== '') update[f.key] = v;
+      }
+
+      const allSlotsFilled = slots.every(s => {
         const raw = values[s.key];
         if (!raw) return false;
         const num = parseFloat(raw);
         return !isNaN(num) && num > 0;
       });
-      if (allFilled) update.is_complete = true;
+      const requiredDetailFields = (DETAIL_FIELDS[element.element_type] ?? [])
+        .filter(f => f.target !== 'opening' && !f.dependsOn);
+      const allDetailsFilled = requiredDetailFields.every(f => details[f.key] != null && details[f.key] !== '');
+      if (allSlotsFilled && allDetailsFilled) update.is_complete = true;
+      // Legacy: if no detail fields defined for this type, just require slots
+      if (allSlotsFilled && requiredDetailFields.length === 0) update.is_complete = true;
 
       if (Object.keys(update).length > 0) {
         const { error } = await supabase
@@ -315,6 +437,29 @@ export default function InspectScreen() {
           .update(update)
           .eq("id", element.id);
         if (error) throw error;
+      }
+
+      // For transparant_deel: upsert qualitative fields into openings table
+      if (element.element_type === 'transparant_deel') {
+        const openingFields = (DETAIL_FIELDS.transparant_deel ?? []).filter(f => f.target === 'opening');
+        const openingUpdate: Record<string, unknown> = {
+          org_id:      profile.org_id,
+          element_id:  element.id,
+          width_mm:    update.width_mm ?? element.width_mm ?? null,
+          height_mm:   update.height_mm ?? element.height_mm ?? null,
+        };
+        for (const f of openingFields) {
+          const v = details[f.key];
+          if (v != null && v !== '') openingUpdate[f.key] = v;
+        }
+        if (openingId) {
+          await supabase.from('openings').update(openingUpdate).eq('id', openingId);
+        } else {
+          const { data: newOpening } = await supabase.from('openings')
+            .insert({ ...openingUpdate, opening_type: (details.opening_type as string) ?? 'window' })
+            .select('id').single();
+          if (newOpening) setOpeningId((newOpening as any).id);
+        }
       }
 
       // Insert measurement audit records.
@@ -380,6 +525,9 @@ export default function InspectScreen() {
     const v = parseFloat(values[s.key] ?? "");
     return !isNaN(v) && v > 0;
   }).length;
+  const requiredDetails = (DETAIL_FIELDS[element.element_type] ?? []).filter(f => !f.dependsOn);
+  const filledDetails   = requiredDetails.filter(f => details[f.key] != null && details[f.key] !== '').length;
+  const isFullyComplete = filledCount === slots.length && filledDetails === requiredDetails.length;
 
   return (
     <KeyboardAvoidingView
@@ -509,6 +657,55 @@ export default function InspectScreen() {
           );
         })}
 
+        {/* ── Qualitative Details ── */}
+        {(DETAIL_FIELDS[element.element_type] ?? []).length > 0 && (
+          <View style={styles.detailSection}>
+            <Text style={styles.detailSectionLabel}>DETAILS</Text>
+            {(DETAIL_FIELDS[element.element_type] ?? []).map(field => {
+              // Conditional visibility: hide fields that depend on another field's value
+              if (field.dependsOn) {
+                const depVal = details[field.dependsOn.key];
+                if (depVal !== field.dependsOn.value) return null;
+              }
+              if (field.type === 'toggle') {
+                return (
+                  <FieldToggle
+                    key={field.key}
+                    label={field.label}
+                    value={!!details[field.key]}
+                    onChange={v => setDetails(prev => ({ ...prev, [field.key]: v }))}
+                  />
+                );
+              }
+              if (field.type === 'select' && field.options) {
+                return (
+                  <FieldSelect
+                    key={field.key}
+                    label={field.label}
+                    value={(details[field.key] as string) ?? null}
+                    options={field.options}
+                    onSelect={v => setDetails(prev => ({ ...prev, [field.key]: v }))}
+                  />
+                );
+              }
+              // number or text: inline TextInput row
+              return (
+                <View key={field.key} style={styles.detailInputRow}>
+                  <Text style={styles.detailInputLabel}>{field.label}</Text>
+                  <TextInput
+                    style={styles.detailInput}
+                    value={details[field.key] != null ? String(details[field.key]) : ''}
+                    onChangeText={v => setDetails(prev => ({ ...prev, [field.key]: field.type === 'number' ? parseFloat(v) || v : v }))}
+                    keyboardType={field.type === 'number' ? 'decimal-pad' : 'default'}
+                    placeholder={field.type === 'number' ? '0.00' : '…'}
+                    placeholderTextColor="#ccc"
+                  />
+                </View>
+              );
+            })}
+          </View>
+        )}
+
         {/* ── Photos ── */}
         <View style={styles.photoSection}>
           <Text style={styles.photoLabel}>PHOTOS</Text>
@@ -541,7 +738,7 @@ export default function InspectScreen() {
           disabled={saving}
         >
           <Text style={styles.saveBtnText}>
-            {saving ? "Saving…" : filledCount === slots.length ? "✓  Save & Complete Element" : "Save Progress"}
+            {saving ? "Saving…" : isFullyComplete ? "✓  Save & Complete Element" : "Save Progress"}
           </Text>
         </TouchableOpacity>
 
@@ -633,6 +830,21 @@ const styles = StyleSheet.create({
   livePreviewMode: { fontSize: 11, color: "#AAA" },
   flashLabel:     { fontSize: 12, color: "#1E8449", fontWeight: "700", marginTop: 6,
                     textAlign: "center" },
+
+  detailSection:        { backgroundColor: "#fff", borderRadius: 12, overflow: 'hidden',
+                          elevation: 1, shadowColor: "#000", shadowOpacity: 0.04, shadowRadius: 3 },
+  detailSectionLabel:   { fontSize: 11, fontWeight: "700", color: "#888",
+                          letterSpacing: 0.8, textTransform: "uppercase",
+                          paddingHorizontal: 16, paddingTop: 14, paddingBottom: 6 },
+  detailInputRow:       { flexDirection: 'row', alignItems: 'center',
+                          paddingVertical: 10, paddingHorizontal: 16,
+                          backgroundColor: '#fff',
+                          borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#e5e7eb' },
+  detailInputLabel:     { flex: 1, fontSize: 14, color: '#374151', fontWeight: '500' },
+  detailInput:          { fontSize: 14, fontWeight: '600', color: '#1E3A5F',
+                          borderWidth: 1, borderColor: '#dde', borderRadius: 6,
+                          paddingHorizontal: 10, paddingVertical: 6,
+                          minWidth: 100, textAlign: 'right' },
 
   photoSection:   { backgroundColor: "#fff", borderRadius: 12, padding: 14,
                     elevation: 1, shadowColor: "#000", shadowOpacity: 0.04, shadowRadius: 3 },

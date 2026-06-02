@@ -24,6 +24,18 @@ ok()   { echo -e "  ${GREEN}✓${RESET} $*"; }
 warn() { echo -e "  ${YELLOW}⚠${RESET} $*"; }
 
 # ── 1. Detect candidate LAN IP ──────────────────────────────────────────────
+# On a VPS/server the first IP is a public IP, not a LAN IP.
+# A public IP is usable if the cloud firewall opens the Metro port — but if
+# not (common on DigitalOcean / AWS / Hetzner), `npm run start:tunnel` is
+# the correct command instead of plain `npm start`.
+is_private_ip() {
+  local ip="$1"
+  [[ "$ip" =~ ^10\. ]] && return 0
+  [[ "$ip" =~ ^172\.(1[6-9]|2[0-9]|3[01])\. ]] && return 0
+  [[ "$ip" =~ ^192\.168\. ]] && return 0
+  return 1
+}
+
 detect_ip() {
   local ip=""
 
@@ -34,7 +46,15 @@ detect_ip() {
       [[ -n "$ip" && "$ip" != "127."* ]] && echo "$ip" && return
     done
   else
-    # Linux
+    # Linux — prefer a private/LAN IP over a public one so that
+    # local Wi-Fi scanning works without needing a tunnel.
+    for ip in $(hostname -I 2>/dev/null); do
+      [[ -z "$ip" || "$ip" == "127."* ]] && continue
+      if is_private_ip "$ip"; then
+        echo "$ip" && return
+      fi
+    done
+    # No private IP found — fall back to the first non-loopback address.
     ip=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
     [[ -n "$ip" && "$ip" != "127."* ]] && echo "$ip" && return
   fi
@@ -77,6 +97,13 @@ fi
 
 log "Candidate IP: $DETECTED_IP"
 
+# Warn when running on a VPS — direct Metro connections need the cloud firewall
+# to allow the port. If they don't load, use `npm run start:tunnel` instead.
+if ! is_private_ip "$DETECTED_IP"; then
+  warn "Public/VPS IP detected ($DETECTED_IP). Metro port may be blocked by your cloud firewall."
+  warn "If the QR code does not load on your device, run: npm run start:tunnel"
+fi
+
 # Verify Supabase is reachable on that IP
 if ! verify_supabase "$DETECTED_IP"; then
   warn "Port 54321 not reachable on $DETECTED_IP — is the Docker stack running?"
@@ -101,6 +128,8 @@ while IFS= read -r line; do
     echo "EXPO_PUBLIC_SUPABASE_URL=http://${DETECTED_IP}:54321"
   elif [[ "$line" =~ ^EXPO_PUBLIC_AI_SERVER_URL=http:// ]]; then
     echo "EXPO_PUBLIC_AI_SERVER_URL=http://${DETECTED_IP}:8001"
+  elif [[ "$line" =~ ^EXPO_PUBLIC_MQTT_WS_URL=ws:// ]]; then
+    echo "EXPO_PUBLIC_MQTT_WS_URL=ws://${DETECTED_IP}:9001"
   else
     echo "$line"
   fi
@@ -115,5 +144,6 @@ else
 fi
 log "EXPO_PUBLIC_SUPABASE_URL  = http://${DETECTED_IP}:54321"
 log "EXPO_PUBLIC_AI_SERVER_URL = http://${DETECTED_IP}:8001"
+log "EXPO_PUBLIC_MQTT_WS_URL   = ws://${DETECTED_IP}:9001"
 log "Metro will rebuild the bundle with the new URLs."
 echo ""

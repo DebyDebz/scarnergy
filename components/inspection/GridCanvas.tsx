@@ -135,7 +135,13 @@ export function GridCanvas({ zones, onConfirmed }: Props) {
         <View style={styles.scaleRow}>
           <Text style={styles.scaleLbl}>Width of this zone:</Text>
           <TextInput
-            style={styles.scaleInput}
+            style={[
+              styles.scaleInput,
+              (() => {
+                const v = parseFloat(scaleInputs[activeZone.id] || '');
+                return !isNaN(v) && (v < 0.5 || v > 200) ? styles.scaleInputWarn : null;
+              })(),
+            ]}
             value={scaleInputs[activeZone.id]}
             onChangeText={v => setScaleInputs(prev => ({ ...prev, [activeZone.id]: v }))}
             keyboardType="decimal-pad"
@@ -144,6 +150,15 @@ export function GridCanvas({ zones, onConfirmed }: Props) {
           />
           <Text style={styles.scaleUnit}>metres</Text>
         </View>
+
+        {(() => {
+          const v = parseFloat(scaleInputs[activeZone.id] || '');
+          return !isNaN(v) && (v < 0.5 || v > 200) ? (
+            <Text style={styles.scaleWarnTxt}>
+              ⚠ Value seems outside normal range (0.5–200 m). Please verify.
+            </Text>
+          ) : null;
+        })()}
 
         <TouchableOpacity
           style={[styles.confirmBtn, saving && styles.btnDis]}
@@ -179,7 +194,9 @@ const styles = StyleSheet.create({
   scaleInput:  { width: 70, borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8,
                  paddingHorizontal: 10, paddingVertical: 6, fontSize: 16,
                  textAlign: 'center', backgroundColor: '#fff' },
-  scaleUnit:   { fontSize: 14, color: '#6B7280' },
+  scaleUnit:      { fontSize: 14, color: '#6B7280' },
+  scaleInputWarn: { borderColor: '#F59E0B', backgroundColor: '#FFFBEB' },
+  scaleWarnTxt:   { fontSize: 11, color: '#B45309', textAlign: 'center', marginTop: 6 },
   confirmBtn:  { backgroundColor: PRIMARY, borderRadius: 12, paddingVertical: 14,
                  alignItems: 'center', marginTop: 24 },
   confirmTxt:  { color: '#fff', fontSize: 15, fontWeight: '700' },
