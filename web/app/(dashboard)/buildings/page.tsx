@@ -1,8 +1,10 @@
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase-server';
 import { EnergyLabelBadge } from '@/components/buildings/EnergyLabelBadge';
+import { DeleteBuildingButton } from '@/components/buildings/DeleteBuildingButton';
 import { Search, Plus } from 'lucide-react';
 import type { BuildingSummary, UserProfile } from '@/lib/types';
+import { fmtDate } from '@/lib/format';
 
 export const revalidate = 60;
 
@@ -70,6 +72,7 @@ export default async function BuildingsPage({ searchParams }: Props) {
               <th className="px-5 py-3 font-medium">Sessions</th>
               <th className="px-5 py-3 font-medium">Last inspected</th>
               <th className="px-5 py-3 font-medium">Label</th>
+              {isAdmin && <th className="px-5 py-3 font-medium"></th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-50">
@@ -88,17 +91,22 @@ export default async function BuildingsPage({ searchParams }: Props) {
                 <td className="px-5 py-3 text-gray-700">{b.session_count}</td>
                 <td className="px-5 py-3 text-gray-500">
                   {b.last_inspection_at
-                    ? new Date(b.last_inspection_at).toLocaleDateString('en-GB')
+                    ? fmtDate(b.last_inspection_at)
                     : '—'}
                 </td>
                 <td className="px-5 py-3">
                   <EnergyLabelBadge label={b.latest_energy_label} />
                 </td>
+                {isAdmin && (
+                  <td className="px-5 py-3 text-right">
+                    <DeleteBuildingButton id={b.id} label={b.reference_code} />
+                  </td>
+                )}
               </tr>
             ))}
             {!buildings?.length && (
               <tr>
-                <td colSpan={9} className="px-5 py-8 text-center text-gray-400">No buildings found</td>
+                <td colSpan={isAdmin ? 10 : 9} className="px-5 py-8 text-center text-gray-400">No buildings found</td>
               </tr>
             )}
           </tbody>

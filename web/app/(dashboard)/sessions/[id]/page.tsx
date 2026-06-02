@@ -5,12 +5,11 @@ import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
 import { LiveFeed } from '@/components/sessions/LiveFeed';
 import { MeasurementChart } from '@/components/charts/MeasurementChart';
 import { CloseSessionButton } from '@/components/sessions/CloseSessionButton';
-import { EnergyLabelBadge } from '@/components/buildings/EnergyLabelBadge';
-import { ArrowLeft, ChevronDown, TriangleAlert } from 'lucide-react';
-import type { SessionSummary, Measurement, UserProfile, Zone, BuildingElement } from '@/lib/types';
-
-type ZoneWithCount    = Zone & { building_elements: { count: number }[] };
-type ElementWithOpenings = BuildingElement & { openings: { count: number }[] };
+import { ExportButtons } from '@/components/sessions/ExportButtons';
+import { ElementsWithEdit } from '@/components/elements/ElementsWithEdit';
+import { ArrowLeft, TriangleAlert } from 'lucide-react';
+import type { SessionSummary, Measurement, UserProfile, Zone, BuildingElement, Opening } from '@/lib/types';
+import { fmtDate, fmtTime } from '@/lib/format';
 
 interface Props {
   params: { id: string };
@@ -21,12 +20,16 @@ export default async function SessionDetailPage({ params, searchParams }: Props)
   const supabase = await createClient();
   const anomaliesOnly = searchParams.anomalies === '1';
 
+  const { data: { user } } = await supabase.auth.getUser();
+
   const [sessionResult, measurementsResult, profileResult] = await Promise.all([
-    supabase.from('session_summary').select('*').eq('id', params.id).single(),
+    supabase.from('session_summary').select('*').eq('id', params.id).maybeSingle(),
     anomaliesOnly
       ? supabase.from('measurements').select('*').eq('session_id', params.id).eq('is_anomaly', true).order('measured_at', { ascending: false }).limit(200)
       : supabase.from('measurements').select('*').eq('session_id', params.id).order('measured_at', { ascending: false }).limit(200),
-    supabase.from('user_profiles').select('role').single(),
+    user
+      ? supabase.from('user_profiles').select('role').eq('id', user.id).maybeSingle()
+      : Promise.resolve({ data: null }),
   ]);
 
   const session = (sessionResult as unknown as { data: SessionSummary | null }).data;
@@ -35,29 +38,42 @@ export default async function SessionDetailPage({ params, searchParams }: Props)
 
   if (!session) notFound();
 
-  // Fetch zones for the session's building, then elements for those zones
-  const zonesResult = await supabase
-    .from('zones')
-    .select('*, building_elements(count)')
+  // Fetch zones, elements, and openings for the session's building
+  const zonesResult = await (supabase.from('zones') as any)
+    .select('*')
     .eq('building_id', session.building_id)
-    .order('floor_level') as unknown as { data: ZoneWithCount[] | null };
+    .order('floor_level') as unknown as { data: Zone[] | null };
 
   const zones = zonesResult.data ?? [];
-  const zoneIds = zones.map(z => z.id);
+  const zoneIds = zones.map((z: Zone) => z.id);
 
-  let elements: ElementWithOpenings[] = [];
+  let elements: BuildingElement[] = [];
+  let openings: Opening[] = [];
+
   if (zoneIds.length > 0) {
-    const elementsResult = await (supabase.from('building_elements') as any)
-      .select('*, openings(count)')
-      .in('zone_id', zoneIds)
-      .order('sort_order') as unknown as { data: ElementWithOpenings[] | null };
-    elements = elementsResult.data ?? [];
+    const [elemRes, openRes] = await Promise.all([
+      (supabase.from('building_elements') as any)
+        .select('*').in('zone_id', zoneIds).order('sort_order') as unknown as { data: BuildingElement[] | null },
+      (supabase.from('openings') as any)
+        .select('*').eq('is_active', true) as unknown as { data: Opening[] | null },
+    ]);
+    elements = elemRes.data ?? [];
+    const elementIds = new Set(elements.map(e => e.id));
+    openings = (openRes.data ?? []).filter(o => elementIds.has((o as any).element_id));
   }
 
-  const elementsByZone = elements.reduce<Record<string, ElementWithOpenings[]>>((acc, el) => {
-    (acc[el.zone_id] ??= []).push(el);
+  const openingByElement = openings.reduce<Record<string, Opening>>((acc, o) => {
+    acc[(o as any).element_id] = o;
     return acc;
   }, {});
+
+  type ZoneWithElements = Zone & { elements: (BuildingElement & { opening: Opening | null })[] };
+  const zonesWithElements: ZoneWithElements[] = zones.map((z: Zone) => ({
+    ...z,
+    elements: elements
+      .filter(e => e.zone_id === z.id)
+      .map(e => ({ ...e, opening: openingByElement[e.id] ?? null })),
+  }));
 
   const canClose = (profile?.role === 'admin' || profile?.role === 'supervisor') && session.status === 'active';
 
@@ -80,7 +96,10 @@ export default async function SessionDetailPage({ params, searchParams }: Props)
               {' · '}{session.inspector_name}
             </p>
           </div>
-          {canClose && <CloseSessionButton sessionId={params.id} />}
+          <div className="flex items-center gap-2 shrink-0">
+            <ExportButtons sessionId={params.id} sessionCode={session.session_code} />
+            {canClose && <CloseSessionButton sessionId={params.id} />}
+          </div>
         </div>
       </div>
 
@@ -101,8 +120,8 @@ export default async function SessionDetailPage({ params, searchParams }: Props)
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {[
-          { label: 'Started', value: new Date(session.started_at).toLocaleDateString('en-GB') },
-          { label: 'Completed', value: session.completed_at ? new Date(session.completed_at).toLocaleDateString('en-GB') : '—' },
+          { label: 'Started', value: fmtDate(session.started_at) },
+          { label: 'Completed', value: fmtDate(session.completed_at) },
           { label: 'Measurements', value: session.total_measurements },
           { label: 'Anomalies', value: session.anomaly_count },
         ].map(({ label, value }) => (
@@ -155,7 +174,7 @@ export default async function SessionDetailPage({ params, searchParams }: Props)
                   <tr key={m.id} className={m.is_anomaly ? 'bg-amber-50' : ''}>
                     <td className="px-4 py-2 font-mono font-medium text-gray-900">{Math.round(m.value_mm)} mm</td>
                     <td className="px-4 py-2 text-gray-500 capitalize">{m.measurement_type ?? '—'}</td>
-                    <td className="px-4 py-2 text-gray-400">{new Date(m.measured_at).toLocaleTimeString('en-GB')}</td>
+                    <td className="px-4 py-2 text-gray-400">{fmtTime(m.measured_at)}</td>
                     <td className="px-4 py-2">
                       {m.is_anomaly && <span className="text-amber-600 font-medium">⚠</span>}
                     </td>
@@ -177,85 +196,7 @@ export default async function SessionDetailPage({ params, searchParams }: Props)
         <div className="px-5 py-4 border-b border-gray-100">
           <h2 className="font-semibold text-gray-900">Zones &amp; elements</h2>
         </div>
-        <div className="divide-y divide-gray-100">
-          {zones.map(zone => {
-            const elementCount = zone.building_elements?.[0]?.count ?? 0;
-            const zoneElements = elementsByZone[zone.id] ?? [];
-            return (
-              <details key={zone.id} className="group">
-                <summary className="flex items-center gap-3 px-5 py-3.5 cursor-pointer hover:bg-gray-50 list-none">
-                  <ChevronDown className="w-4 h-4 text-gray-400 group-open:rotate-180 transition-transform" />
-                  <span className="font-medium text-gray-800">{zone.name}</span>
-                  <span className="text-xs text-gray-400 font-mono">{zone.zone_code}</span>
-                  <span className="ml-auto text-xs text-gray-500">Level {zone.floor_level}</span>
-                  <span className="text-xs text-gray-500 ml-4">{elementCount} elements</span>
-                  {zone.energy_label && (
-                    <span className="ml-2">
-                      <EnergyLabelBadge label={zone.energy_label} />
-                    </span>
-                  )}
-                </summary>
-
-                <div className="px-5 pb-4 pt-1">
-                  <p className="text-xs text-gray-500 mb-3">
-                    Area: <span className="font-medium text-gray-700">{zone.gross_area_m2} m²</span>
-                  </p>
-                  {zoneElements.length > 0 ? (
-                    <div className="rounded-lg border border-gray-100 overflow-hidden">
-                      <table className="w-full text-xs">
-                        <thead>
-                          <tr className="text-left text-gray-500 bg-gray-50 border-b border-gray-100">
-                            <th className="px-4 py-2 font-medium">Name</th>
-                            <th className="px-4 py-2 font-medium">Type</th>
-                            <th className="px-4 py-2 font-medium">Dimensions</th>
-                            <th className="px-4 py-2 font-medium">Rc (m²K/W)</th>
-                            <th className="px-4 py-2 font-medium">U (W/m²K)</th>
-                            <th className="px-4 py-2 font-medium">Openings</th>
-                            <th className="px-4 py-2 font-medium">Status</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-50">
-                          {zoneElements.map(el => {
-                            const dims = [
-                              el.length_mm ? `${el.length_mm}mm` : null,
-                              el.width_mm  ? `${el.width_mm}mm`  : null,
-                              el.height_mm ? `${el.height_mm}mm` : null,
-                            ].filter(Boolean).join(' × ');
-                            const openingCount = el.openings?.[0]?.count ?? 0;
-                            return (
-                              <tr key={el.id} className="hover:bg-gray-50">
-                                <td className="px-4 py-2 font-medium text-gray-900">{el.name}</td>
-                                <td className="px-4 py-2 text-gray-500 capitalize">{el.element_type}</td>
-                                <td className="px-4 py-2 text-gray-500 font-mono">{dims || '—'}</td>
-                                <td className="px-4 py-2 text-gray-700">{el.rc_value ?? '—'}</td>
-                                <td className="px-4 py-2 text-gray-700">{el.u_value ?? '—'}</td>
-                                <td className="px-4 py-2 text-gray-500">{openingCount}</td>
-                                <td className="px-4 py-2">
-                                  {!el.is_complete ? (
-                                    <span className="inline-flex items-center gap-1 text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded font-medium">
-                                      <TriangleAlert className="w-3 h-3" /> incomplete
-                                    </span>
-                                  ) : (
-                                    <span className="text-emerald-600 font-medium">✓</span>
-                                  )}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : (
-                    <p className="text-xs text-gray-400 italic">No elements defined for this zone</p>
-                  )}
-                </div>
-              </details>
-            );
-          })}
-          {!zones.length && (
-            <p className="px-5 py-6 text-sm text-gray-400 text-center">No zones defined for this building</p>
-          )}
-        </div>
+        <ElementsWithEdit zones={zonesWithElements} />
       </div>
     </div>
   );

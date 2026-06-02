@@ -1,0 +1,124 @@
+# ============================================================
+# ScanergyV2 — Extra services (run alongside `npx supabase start`)
+#
+# Supabase stack (DB, Auth, REST, Realtime, Studio, Storage,
+# Kong, Inbucket) is managed by the Supabase CLI.
+# This file adds: MQTT, Grafana, AI server, Web app, Metabase.
+#
+# Usage:
+#   docker compose -f docker-compose.extras.yml up -d
+#   docker compose -f docker-compose.extras.yml down
+#   docker compose -f docker-compose.extras.yml logs -f
+#
+# Supabase endpoints (already running):
+#   Studio:   http://localhost:54323
+#   API:      http://localhost:54321
+#   DB:       postgresql://postgres:postgres@localhost:54322/postgres
+# ============================================================
+
+name: scanergy-extras
+
+services:
+
+  # ─── Mosquitto MQTT Broker ──────────────────────────────────
+  mqtt:
+    image: eclipse-mosquitto:2.0
+    container_name: scanergy_mqtt
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mqtt_data:/mosquitto/data
+      - mqtt_logs:/mosquitto/log
+
+  # ─── Grafana (real-time dashboards) ─────────────────────────
+  grafana:
+    image: grafana/grafana:10.3.1
+    container_name: scanergy_grafana
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-scarnergy}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_INSTALL_PLUGINS: grafana-clock-panel,grafana-simple-json-datasource
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    networks:
+      - supabase_network
+
+  # ─── AI Server (FastAPI — energy label prediction) ───────────
+  ai_server:
+    build:
+      context: ../ai_server
+      dockerfile: Dockerfile
+    container_name: scanergy_ai
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    environment:
+      SUPABASE_URL: http://supabase_kong_ScanergyV2:8000
+      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MjA1MTIxODgwMH0.awrZCFEvvrU75SNxtv2Lb3AK4PO7_AQu7oWoz23Z9eM}
+      AI_SERVER_API_KEY: ${AI_SERVER_API_KEY:-sca_dev_key}
+    volumes:
+      - ../ai_server/models:/app/models:ro
+    networks:
+      - supabase_network
+
+  # ─── Admin Web App (Next.js) ─────────────────────────────────
+  web:
+    build:
+      context: ../web
+      dockerfile: Dockerfile.dev
+    container_name: scanergy_web
+    restart: unless-stopped
+    ports:
+      - "3003:3003"
+    environment:
+      NEXT_PUBLIC_SUPABASE_URL: http://supabase_kong_ScanergyV2:8000
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjIwNTEyMTg4MDB9.r0GAZmnw3PcxO23v52N13u52lmWHIUYQ4LcaqcYd4b8}
+      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MjA1MTIxODgwMH0.awrZCFEvvrU75SNxtv2Lb3AK4PO7_AQu7oWoz23Z9eM}
+      AI_SERVER_URL: http://scanergy_ai:8001
+      GRAFANA_URL: http://localhost:3001
+    volumes:
+      - ../web:/app
+      - /app/node_modules
+      - /app/.next
+    command: npm run dev
+    networks:
+      - supabase_network
+
+  # ─── Metabase (BI dashboards) ────────────────────────────────
+  metabase:
+    image: metabase/metabase:v0.48.8
+    container_name: scanergy_metabase
+    restart: unless-stopped
+    ports:
+      - "13002:3000"
+    environment:
+      MB_DB_TYPE: postgres
+      MB_DB_HOST: supabase_db_ScanergyV2
+      MB_DB_PORT: 5432
+      MB_DB_DBNAME: postgres
+      MB_DB_USER: postgres
+      MB_DB_PASS: ${POSTGRES_PASSWORD:-postgres}
+      MB_SITE_NAME: Scarnergy Analytics
+    volumes:
+      - metabase_data:/metabase.db
+    networks:
+      - supabase_network
+
+volumes:
+  mqtt_data:
+  mqtt_logs:
+  grafana_data:
+  metabase_data:
+
+networks:
+  supabase_network:
+    external: true
+    name: supabase_network_ScanergyV2

@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase';
 import type { RecentMeasurement } from '@/lib/types';
+import { fmtDateTime } from '@/lib/format';
 
 const POLL_INTERVAL_MS = 10_000;
 
@@ -138,9 +139,7 @@ export function MeasurementsLiveTable({ initialMeasurements }: Props) {
                     </Link>
                   </td>
                   <td className="px-5 py-3 text-gray-400 whitespace-nowrap text-xs">
-                    {new Date(m.measured_at).toLocaleString('en-GB', {
-                      day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
-                    })}
+                    {fmtDateTime(m.measured_at)}
                   </td>
                   <td className="px-5 py-3">
                     {m.is_anomaly && (

@@ -4,6 +4,7 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import type { Measurement } from '@/lib/types';
+import { fmtTimeChart } from '@/lib/format';
 
 interface Props {
   measurements: Measurement[];
@@ -13,7 +14,7 @@ export function MeasurementChart({ measurements }: Props) {
   const data = [...measurements]
     .sort((a, b) => new Date(a.measured_at).getTime() - new Date(b.measured_at).getTime())
     .map(m => ({
-      t: new Date(m.measured_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      t: fmtTimeChart(m.measured_at),
       value: Math.round(m.value_mm),
       anomaly: m.is_anomaly,
     }));

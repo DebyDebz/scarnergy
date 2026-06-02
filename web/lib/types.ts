@@ -46,6 +46,9 @@ export interface Zone {
   floor_level: number;
   gross_area_m2: number;
   energy_label: string | null;
+  floor_plan_image_url: string | null;
+  floor_plan_points: Array<{ x: number; y: number }> | null;
+  floor_plan_scale_m: number | null;
 }
 export interface BuildingElement {
   id: string;
@@ -58,10 +61,29 @@ export interface BuildingElement {
   height_mm: number | null;
   area_m2: number | null;
   orientation_deg: number | null;
+  tilt_deg: number | null;
   rc_value: number | null;
   u_value: number | null;
+  lambda_value: number | null;
+  insulation_thickness_mm: number | null;
   construction_type: string | null;
   insulation_type: string | null;
+  finish_type: string | null;
+  installation_type: string | null;
+  fuel_type: string | null;
+  efficiency: number | null;
+  capacity_kw: number | null;
+  year_installed: number | null;
+  nokhoogte_m: number | null;
+  bodemisolatie: boolean;
+  brand: string | null;
+  model_nr: string | null;
+  cv_klasse: string | null;
+  parent_element_id: string | null;
+  perimeter_m: number | null;
+  dikte_vloer_boven_mm: number | null;
+  dikte_vloer_onder_mm: number | null;
+  dikte_muren_mm: number | null;
   photo_urls: string[];
   is_complete: boolean;
   is_active: boolean;
@@ -72,10 +94,23 @@ export interface Opening {
   id: string;
   element_id: string;
   opening_type: string;
+  name: string | null;
   width_mm: number | null;
   height_mm: number | null;
+  area_m2: number | null;
   glazing_type: string | null;
+  frame_type: string | null;
+  g_value: number | null;
+  u_value_frame: number | null;
+  u_value_glass: number | null;
   u_value_total: number | null;
+  has_shading: boolean;
+  shading_type: string | null;
+  shading_factor: number | null;
+  thermisch_onderbroken: boolean;
+  overstek_m: number;
+  belemmering: string | null;
+  notes: string | null;
 }
 export interface InspectionSession {
   id: string;
@@ -100,6 +135,17 @@ export interface Measurement {
   is_anomaly: boolean;
   measured_at: string;
 }
+export interface BuildingFacadePhoto {
+  id: string;
+  org_id: string;
+  building_id: string;
+  session_id: string | null;
+  direction: 'voor' | 'achter' | 'links' | 'rechts';
+  photo_url: string;
+  captured_at: string;
+  created_at: string;
+}
+
 export interface BuildingSummary extends Building {
   full_address: string;
   zone_count: number;

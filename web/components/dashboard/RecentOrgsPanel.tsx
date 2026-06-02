@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Building2, ChevronDown, ChevronRight } from 'lucide-react';
 import { getOrgMeasurements } from '@/app/(dashboard)/dashboard/actions';
 import type { RecentMeasurement } from '@/lib/types';
+import { fmtTimeShort } from '@/lib/format';
 
 type OrgWithStats = {
   id: string;
@@ -96,7 +97,7 @@ export function RecentOrgsPanel({ orgs }: { orgs: OrgWithStats[] }) {
                           <span className="text-xs bg-amber-100 text-amber-600 rounded px-1.5 py-0.5 font-medium shrink-0">ANOMALY</span>
                         )}
                         <span className="text-xs text-gray-400 shrink-0">
-                          {new Date(m.measured_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+                          {fmtTimeShort(m.measured_at)}
                         </span>
                       </div>
                     ))}

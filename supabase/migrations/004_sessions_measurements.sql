@@ -133,11 +133,15 @@ SELECT create_hypertable('measurements', 'measured_at',
   if_not_exists => TRUE
 );
 
--- Compression policy: compress chunks older than 30 days
-SELECT add_compression_policy('measurements', INTERVAL '30 days');
+-- Compression + retention policies require the Timescale license (TSL).
+-- On local dev (Apache edition) these are silently skipped.
+DO $$ BEGIN
+  PERFORM add_compression_policy('measurements', INTERVAL '30 days');
+EXCEPTION WHEN OTHERS THEN NULL; END $$;
 
--- Retention policy: keep data for 10 years (GDPR compliance window)
-SELECT add_retention_policy('measurements', INTERVAL '10 years');
+DO $$ BEGIN
+  PERFORM add_retention_policy('measurements', INTERVAL '10 years');
+EXCEPTION WHEN OTHERS THEN NULL; END $$;
 
 -- Indexes (TimescaleDB recommends covering indexes per query pattern)
 CREATE INDEX idx_measurements_org_time    ON measurements(org_id, measured_at DESC);
@@ -150,32 +154,35 @@ CREATE INDEX idx_measurements_anomaly     ON measurements(org_id, is_anomaly, me
   WHERE is_anomaly = TRUE;
 
 -- ─── CONTINUOUS AGGREGATE: hourly stats per org + device ──────────────────
+-- Requires Timescale license (TSL). Silently skipped on local Apache edition.
 
-CREATE MATERIALIZED VIEW measurements_hourly
-WITH (timescaledb.continuous) AS
-SELECT
-  time_bucket('1 hour', measured_at)           AS bucket,
-  org_id,
-  device_id,
-  element_id,
-  COUNT(*)                                      AS measurement_count,
-  AVG(value_mm)                                 AS avg_mm,
-  MIN(value_mm)                                 AS min_mm,
-  MAX(value_mm)                                 AS max_mm,
-  STDDEV(value_mm)                              AS stddev_mm,
-  SUM(is_anomaly::INT)                          AS anomaly_count,
-  AVG(anomaly_score)                            AS avg_anomaly_score
-FROM measurements
-WHERE is_deleted = FALSE
-GROUP BY 1, 2, 3, 4
-WITH NO DATA;
-
--- Refresh policy: update hourly aggregate every 30 minutes
-SELECT add_continuous_aggregate_policy('measurements_hourly',
-  start_offset => INTERVAL '3 hours',
-  end_offset   => INTERVAL '30 minutes',
-  schedule_interval => INTERVAL '30 minutes'
-);
+DO $$ BEGIN
+  EXECUTE $sql$
+    CREATE MATERIALIZED VIEW measurements_hourly
+    WITH (timescaledb.continuous) AS
+    SELECT
+      time_bucket('1 hour', measured_at)           AS bucket,
+      org_id,
+      device_id,
+      element_id,
+      COUNT(*)                                      AS measurement_count,
+      AVG(value_mm)                                 AS avg_mm,
+      MIN(value_mm)                                 AS min_mm,
+      MAX(value_mm)                                 AS max_mm,
+      STDDEV(value_mm)                              AS stddev_mm,
+      SUM(is_anomaly::INT)                          AS anomaly_count,
+      AVG(anomaly_score)                            AS avg_anomaly_score
+    FROM measurements
+    WHERE is_deleted = FALSE
+    GROUP BY 1, 2, 3, 4
+    WITH NO DATA
+  $sql$;
+  PERFORM add_continuous_aggregate_policy('measurements_hourly',
+    start_offset      => INTERVAL '3 hours',
+    end_offset        => INTERVAL '30 minutes',
+    schedule_interval => INTERVAL '30 minutes'
+  );
+EXCEPTION WHEN OTHERS THEN NULL; END $$;
 
 -- ─── SYNC QUEUE (for offline-first conflict tracking) ─────────────────────
 

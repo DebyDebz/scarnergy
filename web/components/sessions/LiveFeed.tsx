@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase';
 import type { Measurement } from '@/lib/types';
 import { Wifi } from 'lucide-react';
+import { fmtTime } from '@/lib/format';
 
 interface Props {
   sessionId: string;
@@ -61,7 +62,7 @@ export function LiveFeed({ sessionId, initialMeasurements }: Props) {
               </span>
             )}
             <span className="ml-auto text-xs text-gray-400">
-              {new Date(m.measured_at).toLocaleTimeString('en-GB')}
+              {fmtTime(m.measured_at)}
             </span>
           </div>
         ))}

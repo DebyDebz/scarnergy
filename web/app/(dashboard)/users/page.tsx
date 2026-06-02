@@ -4,6 +4,7 @@ import { ToggleActiveButton } from '@/components/admin/ToggleActiveButton';
 import { ChangeRoleButton } from '@/components/admin/ChangeRoleButton';
 import { Users } from 'lucide-react';
 import type { UserProfile, InspectionSession } from '@/lib/types';
+import { fmtDate } from '@/lib/format';
 
 export const revalidate = 0;
 
@@ -69,7 +70,7 @@ export default async function UsersPage() {
                 </td>
                 <td className="px-5 py-3 text-gray-500 text-xs">
                   {lastSession(u.id)
-                    ? new Date(lastSession(u.id)!).toLocaleDateString('en-GB')
+                    ? fmtDate(lastSession(u.id))
                     : '—'}
                 </td>
                 <td className="px-5 py-3">

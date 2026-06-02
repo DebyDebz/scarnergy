@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase-server';
 import { EnergyLabelBadge } from '@/components/buildings/EnergyLabelBadge';
 import { ArrowLeft, Building2, MapPin, Users, Mail, Phone } from 'lucide-react';
 import type { Organisation, UserProfile, BuildingSummary } from '@/lib/types';
+import { fmtDate } from '@/lib/format';
 
 export const revalidate = 0;
 
@@ -152,7 +153,7 @@ export default async function OrgDetailPage({ params }: Props) {
                   <td className="px-5 py-3 text-gray-700">{b.session_count}</td>
                   <td className="px-5 py-3 text-gray-500">
                     {b.last_inspection_at
-                      ? new Date(b.last_inspection_at).toLocaleDateString('en-GB')
+                      ? fmtDate(b.last_inspection_at)
                       : '—'}
                   </td>
                   <td className="px-5 py-3">

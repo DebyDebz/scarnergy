@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase-server';
 import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
 import { Search } from 'lucide-react';
 import type { SessionSummary } from '@/lib/types';
+import { fmtDateTimeFull } from '@/lib/format';
 
 export const revalidate = 30;
 
@@ -95,10 +96,7 @@ export default async function SessionsPage({ searchParams }: Props) {
                 <td className="px-5 py-3 text-gray-700">{s.building_address}, {s.building_city}</td>
                 <td className="px-5 py-3 text-gray-600">{s.inspector_name}</td>
                 <td className="px-5 py-3 text-gray-500 whitespace-nowrap">
-                  {new Date(s.started_at).toLocaleDateString('en-GB', {
-                    day: '2-digit', month: 'short', year: 'numeric',
-                    hour: '2-digit', minute: '2-digit',
-                  })}
+                  {fmtDateTimeFull(s.started_at)}
                 </td>
                 <td className="px-5 py-3 text-gray-700">{s.total_measurements}</td>
                 <td className="px-5 py-3">

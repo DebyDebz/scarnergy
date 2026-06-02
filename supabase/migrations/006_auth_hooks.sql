@@ -78,3 +78,16 @@ CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW
   EXECUTE FUNCTION public.handle_new_user();
+
+-- ─── REALTIME (merged from 006_realtime.sql) ─────────────────────────────
+
+ALTER TABLE measurements        REPLICA IDENTITY FULL;
+ALTER TABLE inspection_sessions REPLICA IDENTITY FULL;
+
+DO $$ BEGIN
+  CREATE PUBLICATION supabase_realtime;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+ALTER PUBLICATION supabase_realtime ADD TABLE measurements;
+ALTER PUBLICATION supabase_realtime ADD TABLE inspection_sessions;

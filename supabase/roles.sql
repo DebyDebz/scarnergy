@@ -1,0 +1,3 @@
+-- Supabase manages all internal roles (anon, authenticated, service_role,
+-- supabase_admin, authenticator, etc.) and schemas (auth, storage, _realtime)
+-- automatically during init. Nothing custom needed here.

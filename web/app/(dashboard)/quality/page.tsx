@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase-server';
 import { KpiCard } from '@/components/dashboard/KpiCard';
 import { TriangleAlert, Ruler, ShieldCheck, CheckCircle2 } from 'lucide-react';
 import type { RecentMeasurement } from '@/lib/types';
+import { fmtDateTime } from '@/lib/format';
 
 export const revalidate = 60;
 
@@ -82,9 +83,7 @@ export default async function QualityPage() {
                     </Link>
                   </td>
                   <td className="px-5 py-3 text-gray-500 whitespace-nowrap text-xs">
-                    {new Date(m.measured_at).toLocaleString('en-GB', {
-                      day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
-                    })}
+                    {fmtDateTime(m.measured_at)}
                   </td>
                 </tr>
               ))}

@@ -3,6 +3,7 @@ import { ToggleActiveButton } from '@/components/admin/ToggleActiveButton';
 import { RegisterDeviceForm } from '@/components/admin/RegisterDeviceForm';
 import { Bluetooth, BatteryLow, BatteryFull, BatteryMedium } from 'lucide-react';
 import type { BleDevice, UserProfile } from '@/lib/types';
+import { fmtDateTime } from '@/lib/format';
 
 export const revalidate = 0;
 
@@ -74,9 +75,7 @@ export default async function DevicesPage() {
                 </td>
                 <td className="px-5 py-3 text-gray-500 text-xs">
                   {d.last_connected_at
-                    ? new Date(d.last_connected_at).toLocaleString('en-GB', {
-                        day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
-                      })
+                    ? fmtDateTime(d.last_connected_at)
                     : '—'}
                 </td>
                 <td className="px-5 py-3">

@@ -5,6 +5,7 @@ import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
 import { RecentOrgsPanel } from '@/components/dashboard/RecentOrgsPanel';
 import { Activity, Building2, TriangleAlert, Ruler } from 'lucide-react';
 import type { SessionSummary } from '@/lib/types';
+import { fmtDateTime } from '@/lib/format';
 
 type OrgWithStats = {
   id: string;
@@ -85,7 +86,7 @@ export default async function DashboardPage() {
                   <td className="px-5 py-3 text-gray-700">{s.building_address}</td>
                   <td className="px-5 py-3 text-gray-600">{s.inspector_name}</td>
                   <td className="px-5 py-3 text-gray-500">
-                    {new Date(s.started_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                    {fmtDateTime(s.started_at)}
                   </td>
                   <td className="px-5 py-3 text-gray-700">{s.total_measurements}</td>
                   <td className="px-5 py-3">
