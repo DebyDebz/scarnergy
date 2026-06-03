@@ -14,6 +14,7 @@
     "ios": "expo run:ios",
     "build:preview": "eas build --profile preview --platform all",
     "build:production": "eas build --profile production --platform all",
+    "build:ios:cloud": "bash scripts/eas-build-ios.sh",
     "test": "jest",
     "postinstall": "chmod +x node_modules/.bin/* && node scripts/patch-ngrok.js"
   },
@@ -42,6 +43,7 @@
     "@types/react-native": "^0.72.8",
     "expo": "~54.0.0",
     "expo-dev-client": "~6.0.20",
+    "expo-image-picker": "~17.0.11",
     "expo-router": "~6.0.23",
     "expo-secure-store": "~15.0.8",
     "expo-status-bar": "~3.0.9",

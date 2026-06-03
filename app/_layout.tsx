@@ -58,6 +58,13 @@ export default function RootLayout() {
       return;
     }
     loadProfile();
+    // Watchdog: never let the splash spinner hang indefinitely. If auth hasn't
+    // resolved in 8s (slow/unreachable backend), fall through so the router can
+    // show the sign-in screen instead of spinning forever.
+    const t = setTimeout(() => {
+      if (useAuthStore.getState().loading) useAuthStore.setState({ loading: false });
+    }, 8000);
+    return () => clearTimeout(t);
   }, []);
 
   useEffect(() => {
@@ -67,9 +74,14 @@ export default function RootLayout() {
       if (segments[0] !== "tabs") router.replace("/tabs");
       return;
     }
+    // Redirect rules. Note the second case must cover a session-holder sitting on
+    // the splash/index route (segments === []), not just one inside `auth` — a
+    // returning user cold-starts at index, and without this they'd stay stuck on
+    // the spinner with no rule ever sending them to /tabs.
     const inAuth = segments[0] === "auth";
-    if (!session && !inAuth)  router.replace("/auth/sign-in");
-    if (session  &&  inAuth)  router.replace("/tabs");
+    const inTabs = segments[0] === "tabs";
+    if (!session && !inAuth)     router.replace("/auth/sign-in");
+    else if (session && !inTabs) router.replace("/tabs");
   }, [mounted, session, loading, segments]);
 
   return (

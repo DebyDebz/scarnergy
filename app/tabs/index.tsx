@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { View, Text, ScrollView, StyleSheet, RefreshControl, TouchableOpacity } from "react-native";
+import { View, Text, ScrollView, StyleSheet, RefreshControl, TouchableOpacity, Alert } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
@@ -8,7 +8,7 @@ import { useSyncQueue } from "../../hooks/useSyncQueue";
 import { useBLE } from "../../lib/BLEContext";
 
 export default function Dashboard() {
-  const { profile }    = useAuthStore();
+  const { profile, signOut } = useAuthStore();
   const { pendingCount, drain } = useSyncQueue();
   const { isConnected, state: bleState, deviceName, batteryLevel } = useBLE();
   const router         = useRouter();
@@ -36,15 +36,29 @@ export default function Dashboard() {
 
   const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 
+  // Sign out clears the session; the auth gate in _layout.tsx then redirects to
+  // /auth/sign-in automatically, so no manual navigation is needed here.
+  const handleSignOut = () => {
+    Alert.alert("Sign out", "Are you sure you want to sign out?", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Sign out", style: "destructive", onPress: () => { signOut(); } },
+    ]);
+  };
+
   return (
     <ScrollView style={styles.container} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
       <View style={styles.header}>
         <Text style={styles.greeting}>Good day, {profile?.full_name?.split(" ")[0]} 👋</Text>
-        {pendingCount > 0 && (
-          <TouchableOpacity style={styles.syncBadge} onPress={drain}>
-            <Text style={styles.syncText}>⟳ {pendingCount} pending sync</Text>
+        <View style={styles.headerRight}>
+          {pendingCount > 0 && (
+            <TouchableOpacity style={styles.syncBadge} onPress={drain}>
+              <Text style={styles.syncText}>⟳ {pendingCount} pending sync</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity style={styles.logoutBtn} onPress={handleSignOut} accessibilityLabel="Sign out">
+            <Ionicons name="log-out-outline" size={24} color="#1E3A5F" />
           </TouchableOpacity>
-        )}
+        </View>
       </View>
 
       {/* Stats row */}
@@ -184,7 +198,9 @@ export default function Dashboard() {
 const styles = StyleSheet.create({
   container:      { flex: 1, backgroundColor: "#F5F7FA" },
   header:         { padding: 20, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  greeting:       { fontSize: 20, fontWeight: "700", color: "#1E3A5F" },
+  headerRight:    { flexDirection: "row", alignItems: "center", gap: 10 },
+  logoutBtn:      { padding: 4 },
+  greeting:       { fontSize: 20, fontWeight: "700", color: "#1E3A5F", flexShrink: 1 },
   syncBadge:      { backgroundColor: "#FEF9E7", borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: "#F39C12" },
   syncText:       { fontSize: 12, color: "#D68910", fontWeight: "600" },
   statsRow:       { flexDirection: "row", paddingHorizontal: 16, gap: 8, marginBottom: 16 },

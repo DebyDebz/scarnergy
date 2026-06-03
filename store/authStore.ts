@@ -43,10 +43,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   loadProfile: async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { set({ loading: false }); return; }
+    // Use getSession() (a local storage read), NOT getUser() (a network call):
+    // the splash gate only needs to know whether a session exists, and getUser
+    // adds a round-trip that blocks the sign-in screen if the backend is slow.
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user ?? null;
+    if (!user) { set({ session: null, user: null, profile: null, loading: false }); return; }
     const { data } = await supabase.from("user_profiles").select("*").eq("id", user.id).single();
-    set({ user, profile: data ?? null, loading: false });
+    set({ session, user, profile: data ?? null, loading: false });
   },
 }));
 
@@ -56,7 +60,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 supabase.auth.onAuthStateChange((_event, session) => {
   useAuthStore.setState({ session, user: session?.user ?? null });
   if (session) {
-    useAuthStore.getState().loadProfile();
+    // Defer profile load out of this callback. auth-js (v2) invokes this
+    // callback while holding its internal navigator/process lock; calling any
+    // supabase.auth.* method (getSession/getUser) synchronously here re-enters
+    // the same lock and deadlocks — `loading` stays true and the app spins on
+    // the splash screen forever, so the sign-in page never appears.
+    setTimeout(() => { useAuthStore.getState().loadProfile(); }, 0);
   } else if (DEV_BYPASS_AUTH) {
     // Dev mode: never reset profile to null — keep DEV_PROFILE stable so
     // INITIAL_SESSION (no stored session) doesn't race with _layout.tsx.
