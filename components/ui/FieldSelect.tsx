@@ -4,23 +4,32 @@ import {
   SafeAreaView, StyleSheet,
 } from 'react-native';
 
+// An option is either a plain string (value === label) or a {value, label} pair.
+// The pair form lets the UI show an English label while still storing/returning
+// the original value (e.g. the Dutch enum the DB and VABI export expect).
+export type SelectOption = string | { value: string; label: string };
+
 interface Props {
   label: string;
   value: string | null;
-  options: string[];
+  options: SelectOption[];
   onSelect: (v: string) => void;
   placeholder?: string;
 }
 
-export function FieldSelect({ label, value, options, onSelect, placeholder = 'Selecteer…' }: Props) {
+export function FieldSelect({ label, value, options, onSelect, placeholder = 'Select…' }: Props) {
   const [open, setOpen] = useState(false);
+
+  // Normalise to {value, label} so both option shapes render identically.
+  const opts = options.map(o => (typeof o === 'string' ? { value: o, label: o } : o));
+  const selectedLabel = opts.find(o => o.value === value)?.label ?? value;
 
   return (
     <>
       <TouchableOpacity style={styles.row} onPress={() => setOpen(true)} activeOpacity={0.7}>
         <Text style={styles.label}>{label}</Text>
         <Text style={[styles.value, !value && styles.placeholder]}>
-          {value ?? placeholder}
+          {selectedLabel ?? placeholder}
         </Text>
         <Text style={styles.chevron}>›</Text>
       </TouchableOpacity>
@@ -31,21 +40,21 @@ export function FieldSelect({ label, value, options, onSelect, placeholder = 'Se
             <View style={styles.sheetHeader}>
               <Text style={styles.sheetTitle}>{label}</Text>
               <TouchableOpacity onPress={() => setOpen(false)}>
-                <Text style={styles.cancel}>Annuleren</Text>
+                <Text style={styles.cancel}>Cancel</Text>
               </TouchableOpacity>
             </View>
             <FlatList
-              data={options}
-              keyExtractor={item => item}
+              data={opts}
+              keyExtractor={item => item.value}
               renderItem={({ item }) => (
                 <TouchableOpacity
-                  style={[styles.option, item === value && styles.optionSelected]}
-                  onPress={() => { onSelect(item); setOpen(false); }}
+                  style={[styles.option, item.value === value && styles.optionSelected]}
+                  onPress={() => { onSelect(item.value); setOpen(false); }}
                 >
-                  <Text style={[styles.optionText, item === value && styles.optionTextSelected]}>
-                    {item}
+                  <Text style={[styles.optionText, item.value === value && styles.optionTextSelected]}>
+                    {item.label}
                   </Text>
-                  {item === value && <Text style={styles.check}>✓</Text>}
+                  {item.value === value && <Text style={styles.check}>✓</Text>}
                 </TouchableOpacity>
               )}
               ItemSeparatorComponent={() => <View style={styles.separator} />}

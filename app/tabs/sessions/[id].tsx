@@ -7,6 +7,8 @@ import { useLocalSearchParams, useRouter, useNavigation } from "expo-router";
 import { supabase, SessionSummary, Zone, BuildingElement, Opening } from "../../../lib/supabase";
 import { useBLE } from "../../../lib/BLEContext";
 import { buildVabiXml } from "../../../lib/vabiExport";
+import { elementTypeLabel } from "../../../lib/elementTypes";
+import { FloorPlanReview } from "../../../components/inspection/FloorPlanReview";
 
 export default function SessionDetailScreen() {
   const { id: sessionId } = useLocalSearchParams<{ id: string }>();
@@ -32,7 +34,7 @@ export default function SessionDetailScreen() {
       .from("session_summary")
       .select("*")
       .eq("id", sessionId)
-      .single()
+      .maybeSingle()
       .then(({ data, error }) => {
         if (error) setSessionError(error.message);
         else setSession(data);
@@ -215,6 +217,9 @@ export default function SessionDetailScreen() {
                  : "No device";
 
   const completedCount = elements.filter(e => e.is_complete).length;
+  const selectedZone   = zones.find(z => z.id === selectedZoneId) ?? null;
+  const zoneHasPlan    = !!selectedZone &&
+    ((selectedZone.floor_plan_points?.length ?? 0) >= 3 || !!selectedZone.floor_plan_image_url);
 
   return (
     <View style={styles.container}>
@@ -298,6 +303,18 @@ export default function SessionDetailScreen() {
             data={elements}
             keyExtractor={e => e.id}
             contentContainerStyle={styles.list}
+            ListHeaderComponent={
+              zoneHasPlan && selectedZone && elements.length > 0 ? (
+                <FloorPlanReview
+                  zone={selectedZone}
+                  elements={elements}
+                  onMeasure={(elementId) => router.push({
+                    pathname: "/tabs/sessions/inspect",
+                    params: { elementId, sessionId: sessionId ?? "" },
+                  })}
+                />
+              ) : null
+            }
             ListEmptyComponent={
               <View style={styles.emptyWrap}>
                 <Text style={styles.empty}>
@@ -332,7 +349,7 @@ export default function SessionDetailScreen() {
               >
                 <View style={styles.elementTop}>
                   <View style={styles.typeBadge}>
-                    <Text style={styles.typeText}>{item.element_type.toUpperCase()}</Text>
+                    <Text style={styles.typeText}>{elementTypeLabel(item.element_type).toUpperCase()}</Text>
                   </View>
                   {item.is_complete && (
                     <Text style={styles.completeBadge}>✓ Complete</Text>

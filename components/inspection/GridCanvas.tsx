@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity,
+  View, Text, TextInput, TouchableOpacity, Image, ActivityIndicator,
   ScrollView, StyleSheet, Alert, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { supabase, Zone } from '../../lib/supabase';
+import { projectOnImage, fitToInner } from '../../lib/floorplanGeometry';
 
 const PRIMARY  = '#1E3A5F';
 const CANVAS   = 300;
@@ -11,30 +12,6 @@ const PADDING  = 12;
 const INNER    = CANVAS - PADDING * 2;
 const CELL_PX  = 20;
 const GRID_N   = Math.ceil(CANVAS / CELL_PX) + 1;
-
-interface FitResult {
-  lines: { x1:number; y1:number; x2:number; y2:number }[];
-}
-
-function fitAndProject(raw: Zone['floor_plan_points']): FitResult {
-  if (!raw || raw.length < 3) return { lines: [] };
-  const xs = raw.map(p => p.x), ys = raw.map(p => p.y);
-  const minX = Math.min(...xs), maxX = Math.max(...xs);
-  const minY = Math.min(...ys), maxY = Math.max(...ys);
-  const rangeX = maxX - minX || 1, rangeY = maxY - minY || 1;
-  const scale  = Math.min(INNER / rangeX, INNER / rangeY);
-  const offX   = PADDING + (INNER - rangeX * scale) / 2;
-  const offY   = PADDING + (INNER - rangeY * scale) / 2;
-  const mapped = raw.map(p => ({
-    x: offX + (p.x - minX) * scale,
-    y: offY + (p.y - minY) * scale,
-  }));
-  const lines = mapped.map((p, i) => {
-    const next = mapped[(i + 1) % mapped.length];
-    return { x1: p.x, y1: p.y, x2: next.x, y2: next.y };
-  });
-  return { lines };
-}
 
 interface Props {
   zones: Zone[];
@@ -48,11 +25,20 @@ export function GridCanvas({ zones, onConfirmed }: Props) {
     Object.fromEntries(zonesWithPlan.map(z => [z.id, z.floor_plan_scale_m?.toString() ?? '5']))
   );
   const [saving, setSaving] = useState(false);
+  // Image background state (per active zone) — learned from Image.onLoad.
+  const [imgLoaded, setImgLoaded] = useState(false);
+  const [imgDims,   setImgDims]   = useState<{ w: number; h: number } | null>(null);
 
   const activeZone = zonesWithPlan[activeIdx];
   if (!activeZone) return null;
 
-  const { lines } = fitAndProject(activeZone.floor_plan_points);
+  // Image zones project the outline through the same contain transform as the
+  // displayed image (once its dims are known); bbox-fit is the pre-load fallback
+  // so it's never blank. No-image zones keep the original bbox-fit behaviour.
+  const hasImage = !!activeZone.floor_plan_image_url;
+  const lines = hasImage && imgDims
+    ? projectOnImage(activeZone.floor_plan_points, imgDims, CANVAS)
+    : fitToInner(activeZone.floor_plan_points, CANVAS, PADDING);
   const scaleM = parseFloat(scaleInputs[activeZone.id] || '5') || 5;
   const cellM  = scaleM / (INNER / CELL_PX);
 
@@ -88,7 +74,7 @@ export function GridCanvas({ zones, onConfirmed }: Props) {
             {zonesWithPlan.map((z, i) => (
               <TouchableOpacity key={z.id}
                 style={[styles.tab, i === activeIdx && styles.tabActive]}
-                onPress={() => setActiveIdx(i)}>
+                onPress={() => { setActiveIdx(i); setImgLoaded(false); setImgDims(null); }}>
                 <Text style={[styles.tabTxt, i === activeIdx && styles.tabTxtActive]}>{z.name}</Text>
               </TouchableOpacity>
             ))}
@@ -97,6 +83,27 @@ export function GridCanvas({ zones, onConfirmed }: Props) {
 
         {/* Canvas */}
         <View style={styles.canvas}>
+          {/* Floor plan image background (image-upload zones only) */}
+          {hasImage && (
+            <>
+              {!imgLoaded && (
+                <View style={styles.imgLoading}>
+                  <ActivityIndicator color={PRIMARY} />
+                </View>
+              )}
+              <Image
+                source={{ uri: activeZone.floor_plan_image_url! }}
+                style={[styles.img, imgLoaded ? styles.imgVisible : styles.imgHidden]}
+                resizeMode="contain"
+                onLoad={(e) => {
+                  const src = e.nativeEvent?.source;
+                  if (src?.width && src?.height) setImgDims({ w: src.width, h: src.height });
+                  setImgLoaded(true);
+                }}
+              />
+            </>
+          )}
+
           {/* Grid lines */}
           {Array.from({ length: GRID_N }).map((_, i) => (
             <View key={`v${i}`} style={[styles.gridLine, styles.gridV, { left: i * CELL_PX }]} />
@@ -184,6 +191,11 @@ const styles = StyleSheet.create({
   canvas:      { width: CANVAS, height: CANVAS, alignSelf: 'center',
                  backgroundColor: '#fafafa', borderRadius: 8, overflow: 'hidden',
                  borderWidth: 1, borderColor: '#E5E7EB' },
+  img:         { position: 'absolute', top: 0, left: 0, width: CANVAS, height: CANVAS },
+  imgVisible:  { opacity: 1 },
+  imgHidden:   { opacity: 0 },
+  imgLoading:  { position: 'absolute', top: 0, left: 0, width: CANVAS, height: CANVAS,
+                 alignItems: 'center', justifyContent: 'center' },
   gridLine:    { position: 'absolute', backgroundColor: '#e5e7eb' },
   gridV:       { width: 1, height: CANVAS },
   gridH:       { height: 1, width: CANVAS },

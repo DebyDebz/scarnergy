@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  View, Text, StyleSheet, ActivityIndicator,
+  View, Text, StyleSheet, ActivityIndicator, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase, Zone } from '../../../lib/supabase';
+import { useAuthStore } from '../../../store/authStore';
+import { FloorPlanDetection, elementsToDrafts } from '../../../lib/floorplanDetect';
+import { uploadImageToStorage } from '../../../lib/uploadImage';
 import { FloorPlanImageUpload } from '../../../components/inspection/FloorPlanImageUpload';
 import { ZoneManager } from '../../../components/inspection/ZoneManager';
 import { GridCanvas } from '../../../components/inspection/GridCanvas';
@@ -27,6 +30,7 @@ const STAGE_LABELS: Record<Stage, string> = {
 export default function InspectionFlowScreen() {
   const { id: sessionId, buildingId, forceStage } = useLocalSearchParams<{ id: string; buildingId: string; forceStage?: string }>();
   const router = useRouter();
+  const { profile } = useAuthStore();
 
   const [stage, setStage]               = useState<Stage>(1);
   const [zones, setZones]               = useState<Zone[]>([]);
@@ -76,19 +80,13 @@ export default function InspectionFlowScreen() {
 
     setZones(cleanZones);
 
-    // ── Supervisor pre-configured: all zones have image + scale → View Floor Plan ─
-    // Inspectors skip the drawing + grid stages and land on the viewer first,
-    // then proceed to element placement.
-    const zonesWithImage = cleanZones.filter(z => z.floor_plan_image_url && z.floor_plan_scale_m);
-    if (
-      cleanZones.length > 0 &&
-      zonesWithImage.length === cleanZones.length &&
-      totalElements === 0
-    ) {
-      await advanceTo(6);
-      setLoading(false);
-      return;
-    }
+    // ── Unified routing ──────────────────────────────────────────────────────
+    // Image-upload and manually-drawn zones now follow the SAME path. Every zone
+    // with a traced outline (whether it has a background image or not) routes
+    // through Grid Analysis, where scale is set/confirmed on the image-backed
+    // grid. There is no longer a separate "image + scale → viewer" shortcut that
+    // bypassed the grid — supervisor-pre-configured zones carry points + scale +
+    // image and land on the same grid (scale pre-filled) as everyone else.
 
     // ── Fully set up: every zone-with-floor-plan has ≥1 element → skip wizard
     // (Changed from "any elements" to "all zones covered" so partial setups
@@ -155,6 +153,102 @@ export default function InspectionFlowScreen() {
     await advanceTo(3);
   };
 
+  // ─── Auto-detect: create one zone per detected room + draft elements ───────
+  // Drafts only — the inspector reviews/edits in ZoneManager, Grid (manual
+  // scale) and ElementPlacer, which loads the inserted elements automatically.
+  const handleDetected = async (
+    det: FloorPlanDetection,
+    image: { uri: string; mime: string; ext: string },
+  ) => {
+    if (!profile) return;
+    const usableRooms = det.rooms.filter(r => r.polygon && r.polygon.length >= 3);
+    if (!usableRooms.length) {
+      Alert.alert('Nothing detected', 'Could not find an outline. Trace it manually instead.');
+      return;
+    }
+
+    // Auto-detect "owns" the zones it creates (tagged metadata.auto_detected).
+    // A prior auto-detect run for this building is replaced — manually created
+    // zones are never touched — so re-running is idempotent instead of piling up
+    // duplicate "Room N" zones.
+    const { data: priorAuto } = await supabase
+      .from('zones')
+      .select('id')
+      .eq('building_id', buildingId)
+      .eq('is_active', true)
+      .eq('metadata->>auto_detected', 'true');
+    const priorAutoIds = (priorAuto ?? []).map((z: { id: string }) => z.id);
+
+    if (priorAutoIds.length > 0) {
+      const replace = await new Promise<boolean>(resolve => {
+        Alert.alert(
+          'Re-run detection?',
+          `This replaces the ${priorAutoIds.length} previously auto-detected zone${priorAutoIds.length > 1 ? 's' : ''}. Manually added zones are kept.`,
+          [
+            { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'Replace', style: 'destructive', onPress: () => resolve(true) },
+          ],
+          { cancelable: true, onDismiss: () => resolve(false) },
+        );
+      });
+      if (!replace) return;
+    }
+
+    setLoading(true);
+    try {
+      // Soft-delete the prior auto set (and its elements) so they vanish from the
+      // wizard (queries filter is_active) without destroying manual work.
+      if (priorAutoIds.length > 0) {
+        await supabase.from('building_elements').update({ is_active: false }).in('zone_id', priorAutoIds);
+        await supabase.from('zones').update({ is_active: false }).in('id', priorAutoIds);
+      }
+      // Number new zones after the remaining (manual) zones only.
+      const manualCount = zones.filter(z => !priorAutoIds.includes(z.id)).length;
+
+      for (let i = 0; i < usableRooms.length; i++) {
+        const room = usableRooms[i];
+        const zoneCode = `Z${String(manualCount + i + 1).padStart(2, '0')}`;
+        const name = usableRooms.length > 1 ? `Room ${i + 1}` : 'Floor plan';
+
+        const { data: zoneRow, error: zErr } = await supabase
+          .from('zones')
+          .insert({ org_id: profile.org_id, building_id: buildingId, zone_code: zoneCode, name, floor_level: 0, metadata: { auto_detected: true } })
+          .select()
+          .single();
+        if (zErr || !zoneRow) continue;
+        const zone = zoneRow as Zone;
+
+        const path = `${buildingId}/${zone.id}/floor_plan.${image.ext}`;
+        let imageUrl: string | null = null;
+        const { error: upErr } = await uploadImageToStorage(
+          'floor-plans', path, image.uri, image.mime, { upsert: true },
+        );
+        if (!upErr) {
+          imageUrl = supabase.storage.from('floor-plans').getPublicUrl(path).data.publicUrl;
+        }
+
+        const payload: Record<string, unknown> = { floor_plan_points: room.polygon };
+        if (imageUrl) payload.floor_plan_image_url = imageUrl;
+        await supabase.from('zones').update(payload).eq('id', zone.id);
+
+        const drafts = elementsToDrafts(room, zone.id, profile.org_id);
+        if (drafts.length) await supabase.from('building_elements').insert(drafts);
+      }
+
+      // Reload zones and hand off to the review wizard.
+      const { data } = await supabase
+        .from('zones').select('*').eq('building_id', buildingId).eq('is_active', true);
+      setZones((data ?? []) as Zone[]);
+      setDrawingZoneId(null);
+      setDrawingZoneName('');
+      await advanceTo(3);
+    } catch (e: any) {
+      Alert.alert('Auto-detect failed', e?.message ?? 'Could not apply the detection.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // ─── Stage 3: trigger drawing for a specific zone ─────────────────────────
   const handleDrawZone = (zoneId: string, zoneName: string) => {
     setDrawingZoneId(zoneId);
@@ -168,11 +262,10 @@ export default function InspectionFlowScreen() {
   };
 
   // ─── Progress bar ──────────────────────────────────────────────────────────
-  // Stage 6 (View Floor Plan) is shown when supervisor pre-configured everything;
-  // it maps to step 1 of a 2-step progress: View → Place.
-  const progressSteps: Stage[] = stage === 6 || (stage === 5 && zones.every(z => z.floor_plan_image_url))
-    ? [6, 5]
-    : [2, 3, 4, 5];
+  // Both entry modes (image upload + manual draw) share the same four setup
+  // steps: Draw → Zones → Grid → Place. (Measurement is the separate inspect
+  // screen, launched per element from the session detail.)
+  const progressSteps: Stage[] = [2, 3, 4, 5];
   const progressPct = stage <= 1 ? 0
     : stage >= 5 ? 1
     : (progressSteps.indexOf(stage) + 1) / progressSteps.length;
@@ -192,12 +285,27 @@ export default function InspectionFlowScreen() {
       // If we're drawing a specific existing zone (from ZoneManager), pass its id.
       // Otherwise (fresh start), pass buildingId so the component creates the zone.
       if (drawingZoneId) {
+        // Stage 3 sub-regions: show the main floor-plan outline (the largest
+        // already-drawn polygon of another zone) as a backdrop so this zone is
+        // traced as a sub-region within it.
+        const area = (pts: { x: number; y: number }[]) => {
+          let a = 0;
+          for (let i = 0; i < pts.length; i++) {
+            const j = (i + 1) % pts.length;
+            a += pts[i].x * pts[j].y - pts[j].x * pts[i].y;
+          }
+          return Math.abs(a) / 2;
+        };
+        const mainShape = zones
+          .filter(z => z.id !== drawingZoneId && z.floor_plan_points && z.floor_plan_points.length >= 3)
+          .sort((a, b) => area(b.floor_plan_points!) - area(a.floor_plan_points!))[0];
         return (
           <FloorPlanImageUpload
             zoneId={drawingZoneId}
             zoneName={drawingZoneName}
             buildingId={buildingId}
             onSaved={handlePlanSaved}
+            backdropPoints={mainShape?.floor_plan_points ?? null}
           />
         );
       }
@@ -205,6 +313,7 @@ export default function InspectionFlowScreen() {
         <FloorPlanImageUpload
           buildingId={buildingId}
           onSaved={handlePlanSaved}
+          onDetected={handleDetected}
         />
       );
     }

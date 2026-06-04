@@ -9,7 +9,8 @@ export async function getOrgMeasurements(orgId: string): Promise<RecentMeasureme
   const { data: sessions } = await supabase
     .from('inspection_sessions')
     .select('id')
-    .eq('org_id', orgId);
+    .eq('org_id', orgId)
+    .eq('is_active', true);
 
   const sessionIds = (sessions as unknown as { id: string }[] | null)?.map(s => s.id) ?? [];
   if (!sessionIds.length) return [];

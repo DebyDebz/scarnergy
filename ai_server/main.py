@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 
-from routers import validate, energy
+from routers import validate, energy, floorplan
 from models.loader import ModelRegistry
 
 logger = logging.getLogger("scarnergy.ai")
@@ -44,8 +44,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(validate.router, prefix="/validate", tags=["Validation"])
-app.include_router(energy.router,   prefix="/energy",   tags=["Energy"])
+app.include_router(validate.router,  prefix="/validate",  tags=["Validation"])
+app.include_router(energy.router,    prefix="/energy",    tags=["Energy"])
+app.include_router(floorplan.router, prefix="/floorplan", tags=["FloorPlan"])
 
 
 @app.get("/health")

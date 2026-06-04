@@ -4,6 +4,7 @@ import {
   TouchableOpacity, StyleSheet, ActivityIndicator,
 } from 'react-native';
 import { Zone } from '../../lib/supabase';
+import { projectOnImage, fitToInner } from '../../lib/floorplanGeometry';
 
 const PRIMARY = '#1E3A5F';
 const CANVAS  = 300;
@@ -11,20 +12,6 @@ const CELL_PX = 20;
 const PADDING = 12;
 const INNER   = CANVAS - PADDING * 2;
 const GRID_N  = Math.ceil(CANVAS / CELL_PX) + 1;
-
-// Same projection used in GridCanvas / ElementPlacer
-function fitLines(raw: Zone['floor_plan_points']): { x1: number; y1: number; x2: number; y2: number }[] {
-  if (!raw || raw.length < 3) return [];
-  const xs = raw.map(p => p.x), ys = raw.map(p => p.y);
-  const minX = Math.min(...xs), maxX = Math.max(...xs);
-  const minY = Math.min(...ys), maxY = Math.max(...ys);
-  const rX = maxX - minX || 1, rY = maxY - minY || 1;
-  const scale = Math.min(INNER / rX, INNER / rY);
-  const offX  = PADDING + (INNER - rX * scale) / 2;
-  const offY  = PADDING + (INNER - rY * scale) / 2;
-  const mapped = raw.map(p => ({ x: offX + (p.x - minX) * scale, y: offY + (p.y - minY) * scale }));
-  return mapped.map((p, i) => { const n = mapped[(i + 1) % mapped.length]; return { x1: p.x, y1: p.y, x2: n.x, y2: n.y }; });
-}
 
 interface Props {
   zones: Zone[];
@@ -35,11 +22,16 @@ export function FloorPlanViewer({ zones, onContinue }: Props) {
   const zonesWithImage = zones.filter(z => z.floor_plan_image_url && z.floor_plan_scale_m);
   const [activeIdx, setActiveIdx] = useState(0);
   const [imgLoaded, setImgLoaded] = useState(false);
+  const [imgDims,   setImgDims]   = useState<{ w: number; h: number } | null>(null);
 
   const activeZone = zonesWithImage[activeIdx];
   if (!activeZone) return null;
 
-  const lines   = fitLines(activeZone.floor_plan_points ?? null);
+  // Overlay the outline using the image's real proportions; bbox-fit only as a
+  // pre-load fallback so it's never blank.
+  const lines   = imgDims
+    ? projectOnImage(activeZone.floor_plan_points ?? null, imgDims, CANVAS)
+    : fitToInner(activeZone.floor_plan_points ?? null, CANVAS, PADDING);
   const scaleM  = activeZone.floor_plan_scale_m ?? 5;
   const cellM   = scaleM / (INNER / CELL_PX);
 
@@ -54,7 +46,7 @@ export function FloorPlanViewer({ zones, onContinue }: Props) {
             <TouchableOpacity
               key={z.id}
               style={[styles.tab, i === activeIdx && styles.tabActive]}
-              onPress={() => { setActiveIdx(i); setImgLoaded(false); }}
+              onPress={() => { setActiveIdx(i); setImgLoaded(false); setImgDims(null); }}
             >
               <Text style={[styles.tabTxt, i === activeIdx && styles.tabTxtActive]}>{z.name}</Text>
             </TouchableOpacity>
@@ -76,7 +68,11 @@ export function FloorPlanViewer({ zones, onContinue }: Props) {
               source={{ uri: activeZone.floor_plan_image_url }}
               style={[styles.img, imgLoaded ? styles.imgVisible : styles.imgHidden]}
               resizeMode="contain"
-              onLoad={() => setImgLoaded(true)}
+              onLoad={(e) => {
+                const src = e.nativeEvent?.source;
+                if (src?.width && src?.height) setImgDims({ w: src.width, h: src.height });
+                setImgLoaded(true);
+              }}
             />
           </>
         )}

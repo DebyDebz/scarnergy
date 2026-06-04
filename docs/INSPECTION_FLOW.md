@@ -1,6 +1,10 @@
 # Scarnergy v2.0 — Inspection Flow
 **Built:** 2026-05-26
 
+> **Update (2026-06-04):** Image-upload and manual-draw zones now share this exact flow —
+> Stage 2 no longer has an inline scale step, and uploaded plans route through Grid Analysis
+> (Stage 4) like manual ones. See [`UNIFIED_FLOORPLAN_FLOW.md`](./UNIFIED_FLOORPLAN_FLOW.md).
+
 ---
 
 ## Overview

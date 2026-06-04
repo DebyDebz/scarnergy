@@ -33,8 +33,8 @@ export default async function DashboardPage() {
     recentResult,
     recentOrgsResult,
   ] = await Promise.all([
-    supabase.from('inspection_sessions').select('*', { count: 'exact', head: true }).eq('status', 'active'),
-    supabase.from('buildings').select('*', { count: 'exact', head: true }),
+    supabase.from('inspection_sessions').select('*', { count: 'exact', head: true }).eq('status', 'active').eq('is_active', true),
+    supabase.from('buildings').select('*', { count: 'exact', head: true }).eq('is_active', true),
     supabase.from('measurements').select('*', { count: 'exact', head: true }).eq('is_anomaly', true).gte('measured_at', sevenDaysAgo),
     supabase.from('measurements').select('*', { count: 'exact', head: true }).gte('measured_at', todayISO),
     supabase.from('session_summary').select('*').order('started_at', { ascending: false }).limit(10),

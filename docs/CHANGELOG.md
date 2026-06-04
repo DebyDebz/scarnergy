@@ -4,6 +4,55 @@ Chronological record of every significant feature added and problem solved acros
 
 ---
 
+## 2026-06-04 — Stage 3 & 6 Spec-Conformance Closures
+
+**Problem:** Two stages of the canonical inspection flow were only partially met. Stage 3 had no
+"main floor plan shape" — zones were independent polygons, not sub-regions. Stage 6 captured
+measurements in a form and listed them, but didn't display them next to elements on the grid.
+
+**Solution:**
+- **Stage 3 backdrop:** `FloorPlanImageUpload` accepts `backdropPoints`; `flow.tsx` passes the
+  largest already-drawn zone polygon so new zones are traced as sub-regions over a faint main-shape
+  outline (blank-canvas mode; no schema change).
+- **Stage 6 on-grid review:** new `FloorPlanReview` component renders the zone grid + placed
+  elements at their `grid_*` positions with each captured value as an on-plan chip and tap-to-measure;
+  embedded as the element-list header in session detail (`[id].tsx`). Reuses `lib/floorplanGeometry`.
+
+**Files changed:**
+- `components/inspection/FloorPlanImageUpload.tsx`, `app/tabs/sessions/flow.tsx` (backdrop)
+- `components/inspection/FloorPlanReview.tsx` *(new)*, `app/tabs/sessions/[id].tsx` (on-grid review)
+- `docs/UNIFIED_FLOORPLAN_FLOW.md`, `docs/PHASE4_LAYER_C_CHECKLIST.md` (updated)
+
+**Status:** code complete + type-clean; on-device verification (C2b, C6b) pending.
+
+---
+
+## 2026-06-04 — Unified Floor-Plan Flow (Image Upload + Manual Draw)
+
+**Problem:** The inspection setup had two divergent floor-plan paths. Image upload bundled
+pick → trace → set-scale into one screen and then skipped Zone Definition and Grid Analysis,
+jumping to a read-only viewer; manual drawing walked the discrete stages. Different stage
+orders, scale captured in different places.
+
+**Solution:** Both entry modes now follow the same pipeline — Create → Zones → Grid → Place →
+Measure. Scale is written only by Grid Analysis (single pivot), GridCanvas renders the uploaded
+image behind the outline, the inline scale step was removed from Stage 2, and `flow.tsx` routing
+gates purely on data (points/scale/elements) instead of "was an image used". No DB schema change.
+
+Verified: geometry unit tests (13/13) and a live authenticated backend write path through every
+stage (15/15, self-cleaned). See `docs/UNIFIED_FLOORPLAN_FLOW.md` for the full write-up and
+`docs/PHASE4_LAYER_C_CHECKLIST.md` for the on-device pass.
+
+**Files changed:**
+- `components/inspection/GridCanvas.tsx` (image-aware grid)
+- `components/inspection/FloorPlanImageUpload.tsx` (removed inline scale step)
+- `app/tabs/sessions/flow.tsx` (unified routing)
+- `components/inspection/FloorPlanViewer.tsx` (shared geometry)
+- `lib/floorplanGeometry.ts` *(new)*, `__tests__/floorplanGeometry.test.ts` *(new)*
+- `scripts/phase4_backend_smoke.sh` *(new)*, `docs/UNIFIED_FLOORPLAN_FLOW.md` *(new)*, `docs/PHASE4_LAYER_C_CHECKLIST.md` *(new)*
+
+---
+
 ## 2026-05-26 — Web Admin UI Color Unification
 
 **Problem:** The web admin panel (`web/`) used Tailwind's default `indigo` and `purple` palette, which clashed with the mobile app's dark navy blue brand color (`#1E3A5F`).

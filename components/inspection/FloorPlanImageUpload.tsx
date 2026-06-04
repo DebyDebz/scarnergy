@@ -6,6 +6,10 @@ import {
 } from 'react-native';
 import { supabase, Zone } from '../../lib/supabase';
 import { useAuthStore } from '../../store/authStore';
+import {
+  detectFloorPlan, FloorPlanDetection, DetectionUnavailableError,
+} from '../../lib/floorplanDetect';
+import { uploadImageToStorage } from '../../lib/uploadImage';
 
 let ImagePicker: typeof import('expo-image-picker') | null = null;
 try { ImagePicker = require('expo-image-picker'); } catch { ImagePicker = null; }
@@ -16,8 +20,6 @@ const DOT_R     = 6;
 const PRIMARY   = '#1E3A5F';
 const GRID_STEP = 20;
 const GRID_N    = Math.ceil(CANVAS / GRID_STEP);
-const CELL_PX   = 20;
-const INNER     = CANVAS - 12 * 2;
 
 interface Point { x: number; y: number }
 
@@ -26,6 +28,45 @@ interface Props {
   zoneName?: string;
   buildingId?: string;
   onSaved: (newZone?: Zone) => void;
+  /**
+   * When provided (fresh-start context), auto-detect hands the full result up
+   * so the flow can create one zone per detected room + draft elements. When
+   * omitted (editing a specific zone), auto-detect pre-fills this zone's
+   * boundary in place for review.
+   */
+  onDetected?: (
+    detection: FloorPlanDetection,
+    image: { uri: string; mime: string; ext: string },
+  ) => void;
+  /**
+   * Stage 3 "sub-regions" support: the main floor-plan outline (normalised points
+   * of the primary zone) shown as a faint backdrop so this zone is traced as a
+   * sub-region within it. Only rendered in blank-canvas (no-image) mode, where
+   * points share the px/CANVAS normalisation and therefore align.
+   */
+  backdropPoints?: { x: number; y: number }[] | null;
+}
+
+/**
+ * Letterbox offsets for an image shown `resizeMode="contain"` inside the square
+ * canvas. Points are stored image-relative (canvasPx - off) / CANVAS so they can
+ * be overlaid back onto the contain-fit image in FloorPlanViewer. Falls back to
+ * no offset (square) when image dimensions are unknown.
+ */
+function containOffsets(w: number, h: number, canvas: number): { offX: number; offY: number } {
+  if (!w || !h) return { offX: 0, offY: 0 };
+  const cs = canvas / Math.max(w, h);
+  return { offX: (canvas - w * cs) / 2, offY: (canvas - h * cs) / 2 };
+}
+
+/** Shoelace area of a normalised polygon — used to pick the largest room. */
+function polyArea(poly: { x: number; y: number }[]): number {
+  let a = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const j = (i + 1) % poly.length;
+    a += poly[i].x * poly[j].y - poly[j].x * poly[i].y;
+  }
+  return Math.abs(a) / 2;
 }
 
 function LineSegment({
@@ -52,20 +93,24 @@ function LineSegment({
   );
 }
 
-export function FloorPlanImageUpload({ zoneId, zoneName, buildingId, onSaved }: Props) {
+export function FloorPlanImageUpload({ zoneId, zoneName, buildingId, onSaved, onDetected, backdropPoints }: Props) {
   const { profile } = useAuthStore();
   const isNewZone = !zoneId && !!buildingId;
 
-  // step 1 = choose image, step 2 = draw polygon, step 3 = set scale (only with image)
-  const [step,         setStep]         = useState<1 | 2 | 3>(1);
+  // step 1 = choose image, step 2 = draw polygon. Scale is set later at the
+  // shared Grid Analysis stage (GridCanvas), so both image and no-image paths
+  // finish Stage 2 the same way — no inline scale step.
+  const [step,         setStep]         = useState<1 | 2>(1);
   const [imgUri,       setImgUri]       = useState<string | null>(null);
   const [imgMime,      setImgMime]      = useState<string>('image/jpeg');
   const [imgExt,       setImgExt]       = useState<string>('jpg');
+  const [imgW,         setImgW]         = useState<number>(0);
+  const [imgH,         setImgH]         = useState<number>(0);
   const [newZoneName,  setNewZoneName]  = useState('');
   const [points,       setPoints]       = useState<Point[]>([]);
   const [closed,       setClosed]       = useState(false);
-  const [scaleInput,   setScaleInput]   = useState('');
   const [saving,       setSaving]       = useState(false);
+  const [detecting,    setDetecting]    = useState(false);
 
   // ─── Step 1: pick image ────────────────────────────────────────────────────
   const pickImage = async (source: 'camera' | 'library') => {
@@ -91,6 +136,8 @@ export function FloorPlanImageUpload({ zoneId, zoneName, buildingId, onSaved }: 
     const asset = result.assets[0];
     setImgUri(asset.uri);
     setImgMime(asset.mimeType ?? 'image/jpeg');
+    setImgW(asset.width ?? 0);
+    setImgH(asset.height ?? 0);
     const rawExt = asset.uri.split('.').pop()?.toLowerCase() ?? 'jpg';
     setImgExt(['jpg', 'jpeg', 'png', 'webp'].includes(rawExt) ? rawExt : 'jpg');
     setPoints([]);
@@ -101,6 +148,52 @@ export function FloorPlanImageUpload({ zoneId, zoneName, buildingId, onSaved }: 
   const skipImage = () => {
     setImgUri(null);
     setStep(2);
+  };
+
+  // ─── Auto-detect (OpenCV) — pre-fill, never auto-commit ────────────────────
+  const autoDetect = async () => {
+    if (!imgUri || detecting) return;
+    setDetecting(true);
+    try {
+      const det = await detectFloorPlan(imgUri, { mode: 'full', mimeType: imgMime });
+      if (!det.rooms.length) {
+        Alert.alert(
+          'Nothing detected',
+          'Could not find a floor-plan outline. Trace it manually by tapping on the image.',
+        );
+        return;
+      }
+      // Fresh-start context → let the flow create zones + draft elements.
+      if (onDetected) {
+        onDetected(det, { uri: imgUri, mime: imgMime, ext: imgExt });
+        return;
+      }
+      // Editing a specific zone → pre-fill the largest room's boundary for review.
+      // Map normalised points back onto the contain-fit image inside the canvas so
+      // the overlay lines up with what the inspector sees.
+      const largest = det.rooms.reduce((a, b) => (polyArea(b.polygon) >= polyArea(a.polygon) ? b : a));
+      const maxDim = Math.max(det.image_w || 1, det.image_h || 1);
+      const cs   = CANVAS / maxDim;
+      const offX = (CANVAS - (det.image_w || CANVAS) * cs) / 2;
+      const offY = (CANVAS - (det.image_h || CANVAS) * cs) / 2;
+      const pts = largest.polygon.map(p => ({
+        x: Math.max(0, Math.min(CANVAS, p.x * CANVAS + offX)),
+        y: Math.max(0, Math.min(CANVAS, p.y * CANVAS + offY)),
+      }));
+      if (pts.length < 3) {
+        Alert.alert('Nothing detected', 'Could not trace a usable outline. Trace it manually.');
+        return;
+      }
+      setPoints(pts);
+      setClosed(true);
+    } catch (e: unknown) {
+      const msg = e instanceof DetectionUnavailableError
+        ? e.message
+        : 'Auto-detect failed. Trace the outline manually.';
+      Alert.alert('Auto-detect unavailable', msg);
+    } finally {
+      setDetecting(false);
+    }
   };
 
   // ─── Step 2: polygon drawing ───────────────────────────────────────────────
@@ -127,16 +220,15 @@ export function FloorPlanImageUpload({ zoneId, zoneName, buildingId, onSaved }: 
       Alert.alert('Zone name required', 'Please enter a name for this zone before saving.');
       return;
     }
-    const scaleVal = parseFloat(scaleInput);
-    if (imgUri && (isNaN(scaleVal) || scaleVal < 0.5 || scaleVal > 200)) {
-      Alert.alert('Invalid scale', 'Please enter a valid zone width between 0.5 and 200 metres.');
-      return;
-    }
     setSaving(true);
 
+    // Store points image-relative (remove the contain letterbox offset) so the
+    // outline can be overlaid exactly on the image later. With no image (manual
+    // grid draw), offsets are 0 → same as before.
+    const { offX, offY } = imgUri ? containOffsets(imgW, imgH, CANVAS) : { offX: 0, offY: 0 };
     const normalized = points.map(p => ({
-      x: parseFloat((p.x / CANVAS).toFixed(4)),
-      y: parseFloat((p.y / CANVAS).toFixed(4)),
+      x: parseFloat(((p.x - offX) / CANVAS).toFixed(4)),
+      y: parseFloat(((p.y - offY) / CANVAS).toFixed(4)),
     }));
 
     try {
@@ -165,11 +257,9 @@ export function FloorPlanImageUpload({ zoneId, zoneName, buildingId, onSaved }: 
       let imageUrl: string | null = null;
       if (imgUri && actualZoneId) {
         const storagePath = `${buildingId}/${actualZoneId}/floor_plan.${imgExt}`;
-        const response = await fetch(imgUri);
-        const blob     = await response.blob();
-        const { error: upErr } = await supabase.storage
-          .from('floor-plans')
-          .upload(storagePath, blob, { contentType: imgMime, upsert: true });
+        const { error: upErr } = await uploadImageToStorage(
+          'floor-plans', storagePath, imgUri, imgMime, { upsert: true },
+        );
         if (upErr) throw new Error(`Upload failed: ${upErr.message}`);
         const { data: urlData } = supabase.storage
           .from('floor-plans')
@@ -177,10 +267,11 @@ export function FloorPlanImageUpload({ zoneId, zoneName, buildingId, onSaved }: 
         imageUrl = urlData.publicUrl;
       }
 
-      // 3. Save plan data to zone
+      // 3. Save plan data to zone. Scale is intentionally NOT written here — it is
+      // set at the shared Grid Analysis stage (GridCanvas) for both image and
+      // no-image zones, so the flow routes identically.
       const payload: Record<string, unknown> = { floor_plan_points: normalized };
-      if (imageUrl)              payload.floor_plan_image_url = imageUrl;
-      if (imgUri && scaleVal)    payload.floor_plan_scale_m   = scaleVal;
+      if (imageUrl) payload.floor_plan_image_url = imageUrl;
 
       const { error: planErr } = await supabase
         .from('zones')
@@ -205,17 +296,12 @@ export function FloorPlanImageUpload({ zoneId, zoneName, buildingId, onSaved }: 
 
   // ─── Derived UI state ──────────────────────────────────────────────────────
   const hint = closed
-    ? imgUri ? 'Shape closed. Tap Next to continue.' : 'Shape closed. Tap Save to continue.'
+    ? 'Shape closed. Tap Save to continue.'
     : points.length === 0
     ? 'Tap on the canvas to place points.'
     : points.length < 3
     ? `${points.length} point${points.length > 1 ? 's' : ''} — add at least ${3 - points.length} more.`
     : 'Tap the first point (blue) to close the shape.';
-
-  const scaleVal   = parseFloat(scaleInput);
-  const scaleWarn  = scaleInput !== '' && (isNaN(scaleVal) || scaleVal < 0.5 || scaleVal > 200);
-  const scaleValid = !isNaN(scaleVal) && scaleVal >= 0.5 && scaleVal <= 200;
-  const cellM      = scaleValid ? scaleVal / (INNER / CELL_PX) : null;
 
   // ─── Render ────────────────────────────────────────────────────────────────
   return (
@@ -275,6 +361,19 @@ export function FloorPlanImageUpload({ zoneId, zoneName, buildingId, onSaved }: 
 
             <Text style={styles.hint}>{hint}</Text>
 
+            {/* Auto-detect (OpenCV) — pre-fills the outline for review */}
+            {imgUri && (
+              <TouchableOpacity
+                style={[styles.detectBtn, detecting && styles.btnDis]}
+                onPress={autoDetect}
+                disabled={detecting}
+              >
+                {detecting
+                  ? <ActivityIndicator color="#fff" size="small" />
+                  : <Text style={styles.detectBtnTxt}>✨ Auto-detect outline</Text>}
+              </TouchableOpacity>
+            )}
+
             <View
               style={[styles.canvas, closed && styles.canvasClosed]}
               onStartShouldSetResponder={() => true}
@@ -298,6 +397,16 @@ export function FloorPlanImageUpload({ zoneId, zoneName, buildingId, onSaved }: 
                 <View key={`h${i}`} pointerEvents="none"
                   style={[styles.gridLine, styles.gridH, { top: i * GRID_STEP }]} />
               ))}
+
+              {/* Main floor-plan outline as a faint backdrop (Stage 3 sub-regions).
+                  Blank-canvas only — shares px/CANVAS normalisation so it aligns. */}
+              {!imgUri && backdropPoints && backdropPoints.length >= 3 &&
+                backdropPoints.map((bp, i) => {
+                  const a = { x: bp.x * CANVAS, y: bp.y * CANVAS };
+                  const n = backdropPoints[(i + 1) % backdropPoints.length];
+                  const b = { x: n.x * CANVAS, y: n.y * CANVAS };
+                  return <LineSegment key={`bd${i}`} x1={a.x} y1={a.y} x2={b.x} y2={b.y} dashed />;
+                })}
 
               {/* Polygon edges */}
               {points.map((p, i) => {
@@ -347,14 +456,10 @@ export function FloorPlanImageUpload({ zoneId, zoneName, buildingId, onSaved }: 
                   <Text style={styles.btnPriTxt}>Close Shape</Text>
                 </TouchableOpacity>
               )}
-              {/* Image path → go to scale step */}
-              {closed && imgUri && (
-                <TouchableOpacity style={styles.btnPri} onPress={() => setStep(3)}>
-                  <Text style={styles.btnPriTxt}>Next →</Text>
-                </TouchableOpacity>
-              )}
-              {/* No-image path → save directly (scale at GridCanvas stage 4) */}
-              {closed && !imgUri && (
+              {/* Both paths → save directly. Real-world scale is set later at the
+                  shared Grid Analysis stage (GridCanvas), so image and no-image
+                  zones finish Stage 2 identically. */}
+              {closed && (
                 <TouchableOpacity
                   style={[styles.btnPri, saving && styles.btnDis]}
                   onPress={save}
@@ -374,78 +479,6 @@ export function FloorPlanImageUpload({ zoneId, zoneName, buildingId, onSaved }: 
               </TouchableOpacity>
             )}
           </>
-        )}
-
-        {/* ── Step 3: Set scale ── */}
-        {step === 3 && (
-          <View style={styles.stepSection}>
-            <Text style={styles.stepTitle}>Set Scale</Text>
-            <Text style={styles.stepSub}>
-              Enter the real-world width of this zone so grid cells represent accurate measurements.
-            </Text>
-
-            {/* Grid preview with image background */}
-            <View style={styles.canvas}>
-              {imgUri && (
-                <Image
-                  source={{ uri: imgUri }}
-                  style={[styles.canvasImg, { opacity: 0.45 }]}
-                  resizeMode="contain"
-                />
-              )}
-              {Array.from({ length: Math.ceil(CANVAS / CELL_PX) + 1 }).map((_, i) => (
-                <View key={`v${i}`} pointerEvents="none"
-                  style={[styles.gridLine, styles.gridV, { left: i * CELL_PX }]} />
-              ))}
-              {Array.from({ length: Math.ceil(CANVAS / CELL_PX) + 1 }).map((_, i) => (
-                <View key={`h${i}`} pointerEvents="none"
-                  style={[styles.gridLine, styles.gridH, { top: i * CELL_PX }]} />
-              ))}
-              {cellM && Array.from({ length: Math.floor(INNER / CELL_PX) + 1 }).map((_, i) => (
-                <Text key={i} style={[styles.gridLabel, { left: i * CELL_PX + 2, bottom: 2 }]}>
-                  {(i * cellM).toFixed(1)}
-                </Text>
-              ))}
-            </View>
-
-            <View style={styles.scaleRow}>
-              <Text style={styles.scaleLbl}>Zone width:</Text>
-              <TextInput
-                style={[styles.scaleInput, scaleWarn && styles.scaleInputWarn]}
-                value={scaleInput}
-                onChangeText={setScaleInput}
-                keyboardType="decimal-pad"
-                placeholder="e.g. 10"
-                returnKeyType="done"
-                autoFocus
-              />
-              <Text style={styles.scaleUnit}>metres</Text>
-              {cellM ? (
-                <Text style={styles.cellMLabel}>≈ {cellM.toFixed(2)} m/cell</Text>
-              ) : null}
-            </View>
-
-            {scaleWarn && (
-              <Text style={styles.scaleWarnTxt}>
-                ⚠ Value seems outside normal range (0.5–200 m). Please verify.
-              </Text>
-            )}
-
-            <View style={[styles.controls, { marginTop: 20 }]}>
-              <TouchableOpacity style={styles.btnSec} onPress={() => setStep(2)}>
-                <Text style={styles.btnSecTxt}>← Back</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.btnPri, (!scaleValid || saving) && styles.btnDis]}
-                onPress={save}
-                disabled={!scaleValid || saving}
-              >
-                {saving
-                  ? <ActivityIndicator color="#fff" size="small" />
-                  : <Text style={styles.btnPriTxt}>Save Floor Plan →</Text>}
-              </TouchableOpacity>
-            </View>
-          </View>
         )}
 
       </ScrollView>
@@ -475,6 +508,12 @@ const styles = StyleSheet.create({
   bold:           { fontWeight: '700', color: PRIMARY },
   hint:           { fontSize: 12, color: '#6B7280', marginBottom: 12, textAlign: 'center' },
 
+  detectBtn:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+                    gap: 8, backgroundColor: PRIMARY, borderRadius: 10,
+                    paddingVertical: 11, paddingHorizontal: 16, marginBottom: 12,
+                    width: CANVAS, alignSelf: 'center' },
+  detectBtnTxt:   { fontSize: 14, color: '#fff', fontWeight: '700' },
+
   nameInput:      { width: CANVAS, borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8,
                     paddingHorizontal: 12, paddingVertical: 10, fontSize: 15,
                     backgroundColor: '#fff', marginBottom: 10 },
@@ -487,7 +526,6 @@ const styles = StyleSheet.create({
   gridLine:       { position: 'absolute', backgroundColor: '#f0f0f0' },
   gridV:          { width: 1, height: CANVAS },
   gridH:          { height: 1, width: CANVAS },
-  gridLabel:      { position: 'absolute', fontSize: 7, color: '#9CA3AF' },
 
   dot:            { position: 'absolute', width: DOT_R * 2, height: DOT_R * 2,
                     borderRadius: DOT_R, backgroundColor: PRIMARY,
@@ -510,15 +548,4 @@ const styles = StyleSheet.create({
 
   changeImgBtn:   { marginTop: 12, paddingVertical: 6 },
   changeImgTxt:   { fontSize: 13, color: '#6B7280' },
-
-  scaleRow:       { flexDirection: 'row', alignItems: 'center', gap: 10,
-                    marginTop: 16, flexWrap: 'wrap', justifyContent: 'center' },
-  scaleLbl:       { fontSize: 14, color: '#374151' },
-  scaleInput:     { width: 70, borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8,
-                    paddingHorizontal: 10, paddingVertical: 6, fontSize: 16,
-                    textAlign: 'center', backgroundColor: '#fff' },
-  scaleUnit:      { fontSize: 14, color: '#6B7280' },
-  scaleInputWarn: { borderColor: '#F59E0B', backgroundColor: '#FFFBEB' },
-  cellMLabel:     { fontSize: 12, color: '#9CA3AF' },
-  scaleWarnTxt:   { fontSize: 12, color: '#B45309', textAlign: 'center', marginTop: 6 },
 });

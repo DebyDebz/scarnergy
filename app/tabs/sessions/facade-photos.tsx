@@ -6,6 +6,7 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase, BuildingFacadePhoto } from '../../../lib/supabase';
 import { useAuthStore } from '../../../store/authStore';
+import { uploadImageToStorage } from '../../../lib/uploadImage';
 
 let ImagePicker: typeof import('expo-image-picker') | null = null;
 try { ImagePicker = require('expo-image-picker'); } catch { ImagePicker = null; }
@@ -101,11 +102,9 @@ export default function FacadePhotosScreen() {
       const filename  = `${direction}_${Date.now()}.jpg`;
       const storagePath = `${profile.org_id}/${buildingId}/${filename}`;
 
-      const response = await fetch(localUri);
-      const blob     = await response.blob();
-      const { error: upErr } = await supabase.storage
-        .from('facade-photos')
-        .upload(storagePath, blob, { contentType: 'image/jpeg', upsert: true });
+      const { error: upErr } = await uploadImageToStorage(
+        'facade-photos', storagePath, localUri, 'image/jpeg', { upsert: true },
+      );
 
       if (upErr) throw upErr;
 

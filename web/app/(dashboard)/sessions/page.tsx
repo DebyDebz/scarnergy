@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase-server';
 import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
+import { DeleteSessionButton } from '@/components/sessions/DeleteSessionButton';
 import { Search } from 'lucide-react';
 import type { SessionSummary } from '@/lib/types';
 import { fmtDateTimeFull } from '@/lib/format';
@@ -83,6 +84,7 @@ export default async function SessionsPage({ searchParams }: Props) {
               <th className="px-5 py-3 font-medium">Measurements</th>
               <th className="px-5 py-3 font-medium">Anomalies</th>
               <th className="px-5 py-3 font-medium">Status</th>
+              <th className="px-5 py-3 font-medium text-right">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-50">
@@ -109,11 +111,14 @@ export default async function SessionsPage({ searchParams }: Props) {
                 <td className="px-5 py-3">
                   <SessionStatusBadge status={s.status} />
                 </td>
+                <td className="px-5 py-3 text-right">
+                  <DeleteSessionButton sessionId={s.id} sessionCode={s.session_code} />
+                </td>
               </tr>
             ))}
             {!sessions?.length && (
               <tr>
-                <td colSpan={7} className="px-5 py-8 text-center text-gray-400">No sessions</td>
+                <td colSpan={8} className="px-5 py-8 text-center text-gray-400">No sessions</td>
               </tr>
             )}
           </tbody>

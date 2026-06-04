@@ -5,6 +5,7 @@ import {
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { supabase, BuildingElement } from "../../../lib/supabase";
+import { elementTypeLabel } from "../../../lib/elementTypes";
 
 const { width: SCREEN_W } = Dimensions.get("window");
 const PLAN_SIZE = Math.min(SCREEN_W - 32, 340);
@@ -106,7 +107,7 @@ function ElementItem({
     >
       <View style={styles.elementCardRow}>
         <View style={styles.typeBadge}>
-          <Text style={styles.typeText}>{item.element_type.toUpperCase()}</Text>
+          <Text style={styles.typeText}>{elementTypeLabel(item.element_type).toUpperCase()}</Text>
         </View>
         {item.is_complete && (
           <Text style={styles.completeBadge}>✓</Text>

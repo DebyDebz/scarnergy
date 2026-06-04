@@ -124,6 +124,7 @@ export interface InspectionSession {
   total_measurements: number;
   anomaly_count: number;
   sync_status: string;
+  is_active: boolean;
 }
 export interface Measurement {
   id: string;

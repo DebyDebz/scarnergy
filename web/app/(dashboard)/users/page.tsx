@@ -22,7 +22,7 @@ export default async function UsersPage() {
 
   const [usersResult, sessionsResult] = await Promise.all([
     supabase.from('user_profiles').select('*').eq('org_id', orgId).order('full_name'),
-    supabase.from('inspection_sessions').select('inspector_id, started_at').eq('org_id', orgId).order('started_at', { ascending: false }),
+    supabase.from('inspection_sessions').select('inspector_id, started_at').eq('org_id', orgId).eq('is_active', true).order('started_at', { ascending: false }),
   ]);
 
   const users = (usersResult as unknown as { data: UserProfile[] | null }).data ?? [];

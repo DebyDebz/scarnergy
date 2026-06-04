@@ -8,30 +8,39 @@ let ImagePicker: typeof import("expo-image-picker") | null = null;
 try { ImagePicker = require("expo-image-picker"); } catch { ImagePicker = null; }
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { supabase, BuildingElement, Opening } from "../../../lib/supabase";
+import { uploadImageToStorage } from "../../../lib/uploadImage";
 import { useBLE } from "../../../lib/BLEContext";
 import { useAuthStore } from "../../../store/authStore";
 import { GLMMeasurement } from "../../../hooks/useBLEDevice";
 import { FieldSelect } from "../../../components/ui/FieldSelect";
 import { FieldToggle } from "../../../components/ui/FieldToggle";
+import { elementTypeLabel } from "../../../lib/elementTypes";
+import {
+  EMPTY_SWEEP, SweepState, addSweepSample,
+  thicknessFromFaces, thicknessFromSweep, isUsableThickness,
+} from "../../../lib/thickness";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type SlotKey = "length_mm" | "height_mm" | "width_mm";
-type SlotDef = { key: SlotKey; label: string };
+// `thickness` slots represent a depth/thickness dimension. A laser only returns
+// distance-to-surface, so these are captured from TWO readings (front + back →
+// |Δ| in point mode, or a min/max sweep in continuous mode) rather than one shot.
+type SlotDef = { key: SlotKey; label: string; thickness?: boolean };
 type ElementWithZone = BuildingElement & { zone_name?: string };
 
 // ── Slot definitions — keys match the Dutch enum values stored in the DB ──────
 
 const SLOT_MAP: Record<string, SlotDef[]> = {
-  // Dutch schema enum values
-  gevel:           [{ key: "length_mm", label: "Breedte"   }, { key: "height_mm", label: "Hoogte"    }, { key: "width_mm", label: "Dikte"    }],
-  dak:             [{ key: "length_mm", label: "Lengte"    }, { key: "width_mm",  label: "Breedte"   }],
-  dakkapel:        [{ key: "width_mm",  label: "Breedte"   }, { key: "height_mm", label: "Hoogte"    }, { key: "length_mm", label: "Diepte"   }],
-  vloer:           [{ key: "length_mm", label: "Lengte"    }, { key: "width_mm",  label: "Breedte"   }],
-  transparant_deel:[{ key: "width_mm",  label: "Breedte"   }, { key: "height_mm", label: "Hoogte"    }],
-  installatie:     [{ key: "length_mm", label: "Lengte"    }],
+  // Keys are the Dutch enum values stored in the DB; labels are display-only (English).
+  gevel:           [{ key: "length_mm", label: "Width"     }, { key: "height_mm", label: "Height"    }, { key: "width_mm", label: "Thickness", thickness: true }],
+  dak:             [{ key: "length_mm", label: "Length"    }, { key: "width_mm",  label: "Width"     }],
+  dakkapel:        [{ key: "width_mm",  label: "Width"     }, { key: "height_mm", label: "Height"    }, { key: "length_mm", label: "Depth", thickness: true }],
+  vloer:           [{ key: "length_mm", label: "Length"    }, { key: "width_mm",  label: "Width"     }],
+  transparant_deel:[{ key: "width_mm",  label: "Width"     }, { key: "height_mm", label: "Height"    }],
+  installatie:     [{ key: "length_mm", label: "Length"    }],
   // English fallbacks
-  wall:    [{ key: "length_mm", label: "Length"    }, { key: "height_mm", label: "Height"    }, { key: "width_mm", label: "Thickness" }],
+  wall:    [{ key: "length_mm", label: "Length"    }, { key: "height_mm", label: "Height"    }, { key: "width_mm", label: "Thickness", thickness: true }],
   floor:   [{ key: "length_mm", label: "Length"    }, { key: "width_mm",  label: "Width"     }],
   ceiling: [{ key: "length_mm", label: "Length"    }, { key: "width_mm",  label: "Width"     }],
   roof:    [{ key: "length_mm", label: "Length"    }, { key: "width_mm",  label: "Width"     }],
@@ -41,77 +50,148 @@ const SLOT_MAP: Record<string, SlotDef[]> = {
 const DEFAULT_SLOTS: SlotDef[] = [
   { key: "length_mm", label: "Length"    },
   { key: "height_mm", label: "Height"    },
-  { key: "width_mm",  label: "Thickness" },
+  { key: "width_mm",  label: "Thickness", thickness: true },
 ];
+
 
 // ── Qualitative detail fields per element type ────────────────────────────────
 
 type DetailType = 'select' | 'toggle' | 'number' | 'text';
+// Options carry a Dutch `value` (stored in the DB / used by the VABI export) and an
+// English `label` (shown in the dropdown). Plain strings are still accepted where
+// value === label (e.g. codes like CW3, or already-English values).
+type DetailOption = string | { value: string; label: string };
 type DetailField = {
   key: string;
   label: string;
   type: DetailType;
-  options?: string[];
+  options?: DetailOption[];
   dependsOn?: { key: string; value: string | boolean };
   target?: 'element' | 'opening';  // which table to save to; default = element
 };
 
 const DETAIL_FIELDS: Record<string, DetailField[]> = {
   gevel: [
-    { key: 'construction_type',    label: 'Positie',                   type: 'select',
-      options: ['Voorgevel','Achtergevel','Linkergevel','Rechtergevel'] },
-    { key: 'description',          label: 'Grenzt aan',                type: 'select',
-      options: ['Buitenlucht','Kruipruimte','Aangrenzende onverwarmde ruimte','Aangrenzende verwarmde ruimte'] },
-    { key: 'insulation_type',      label: 'Isolatietype',              type: 'select',
-      options: ['Glaswol','Spouwvulling','PUR','EPS','Geen'] },
-    { key: 'dikte_vloer_boven_mm', label: 'Dikte vloer boven (mm)',   type: 'number' },
-    { key: 'dikte_vloer_onder_mm', label: 'Dikte vloer onder (mm)',   type: 'number' },
-    { key: 'dikte_muren_mm',       label: 'Dikte aangrenzende muren (mm)', type: 'number' },
+    { key: 'construction_type',    label: 'Position',                  type: 'select',
+      options: [
+        { value: 'Voorgevel',   label: 'Front facade' },
+        { value: 'Achtergevel', label: 'Rear facade'  },
+        { value: 'Linkergevel', label: 'Left facade'  },
+        { value: 'Rechtergevel',label: 'Right facade' },
+      ] },
+    { key: 'description',          label: 'Adjacent to',               type: 'select',
+      options: [
+        { value: 'Buitenlucht',                        label: 'Outside air'           },
+        { value: 'Kruipruimte',                        label: 'Crawl space'           },
+        { value: 'Aangrenzende onverwarmde ruimte',    label: 'Adjacent unheated space' },
+        { value: 'Aangrenzende verwarmde ruimte',      label: 'Adjacent heated space'   },
+      ] },
+    { key: 'insulation_type',      label: 'Insulation type',           type: 'select',
+      options: [
+        { value: 'Glaswol',     label: 'Glass wool' },
+        { value: 'Spouwvulling',label: 'Cavity fill' },
+        { value: 'PUR',         label: 'PUR' },
+        { value: 'EPS',         label: 'EPS' },
+        { value: 'Geen',        label: 'None' },
+      ] },
+    { key: 'dikte_vloer_boven_mm', label: 'Floor thickness above (mm)', type: 'number' },
+    { key: 'dikte_vloer_onder_mm', label: 'Floor thickness below (mm)', type: 'number' },
+    { key: 'dikte_muren_mm',       label: 'Adjacent wall thickness (mm)', type: 'number' },
     { key: 'perimeter_m',          label: 'Perimeter (m)',             type: 'number' },
   ],
   transparant_deel: [
     { key: 'opening_type',          label: 'Type',                 type: 'select', target: 'opening',
       options: ['window','door','skylight'] },
-    { key: 'frame_type',            label: 'Kozijn materiaal',     type: 'select', target: 'opening',
-      options: ['Hout','Kunststof','Metaal','Hout/Kunststof'] },
-    { key: 'glazing_type',          label: 'Beglazing',            type: 'select', target: 'opening',
-      options: ['Enkel','Dubbel','HR+','HR++','Triple'] },
-    { key: 'thermisch_onderbroken', label: 'Thermisch onderbroken',type: 'toggle', target: 'opening' },
-    { key: 'has_shading',           label: 'Zonwering aanwezig',   type: 'toggle', target: 'opening' },
-    { key: 'shading_type',          label: 'Type zonwering',       type: 'select', target: 'opening',
-      options: ['Geen','Knikarmscherm','Uitvalscherm','Rolluik','Markies','Zonnecel'],
+    { key: 'frame_type',            label: 'Frame material',       type: 'select', target: 'opening',
+      options: [
+        { value: 'Hout',          label: 'Wood' },
+        { value: 'Kunststof',     label: 'Plastic (uPVC)' },
+        { value: 'Metaal',        label: 'Metal' },
+        { value: 'Hout/Kunststof',label: 'Wood/Plastic' },
+      ] },
+    { key: 'glazing_type',          label: 'Glazing',              type: 'select', target: 'opening',
+      options: [
+        { value: 'Enkel', label: 'Single' },
+        { value: 'Dubbel',label: 'Double' },
+        { value: 'HR+',   label: 'HR+' },
+        { value: 'HR++',  label: 'HR++' },
+        { value: 'Triple',label: 'Triple' },
+      ] },
+    { key: 'thermisch_onderbroken', label: 'Thermally broken',     type: 'toggle', target: 'opening' },
+    { key: 'has_shading',           label: 'Shading present',      type: 'toggle', target: 'opening' },
+    { key: 'shading_type',          label: 'Shading type',         type: 'select', target: 'opening',
+      options: [
+        { value: 'Geen',          label: 'None' },
+        { value: 'Knikarmscherm', label: 'Folding-arm awning' },
+        { value: 'Uitvalscherm',  label: 'Drop-arm awning' },
+        { value: 'Rolluik',       label: 'Roller shutter' },
+        { value: 'Markies',       label: 'Awning' },
+        { value: 'Zonnecel',      label: 'Solar cell' },
+      ],
       dependsOn: { key: 'has_shading', value: true } },
-    { key: 'overstek_m',            label: 'Overstek (m)',         type: 'number', target: 'opening' },
+    { key: 'overstek_m',            label: 'Overhang (m)',         type: 'number', target: 'opening' },
   ],
   vloer: [
-    { key: 'description',   label: 'Grenzt aan',    type: 'select',
-      options: ['Kruipruimte','Buitenlucht','Aangrenzende onverwarmde ruimte'] },
-    { key: 'insulation_type', label: 'Vloerisolatie', type: 'select',
-      options: ['Geen','Glaswol','PUR','EPS','Kurk'] },
-    { key: 'bodemisolatie', label: 'Bodemisolatie', type: 'toggle' },
-    { key: 'perimeter_m',   label: 'Perimeter (m)', type: 'number' },
+    { key: 'description',   label: 'Adjacent to',     type: 'select',
+      options: [
+        { value: 'Kruipruimte',                     label: 'Crawl space' },
+        { value: 'Buitenlucht',                     label: 'Outside air' },
+        { value: 'Aangrenzende onverwarmde ruimte', label: 'Adjacent unheated space' },
+      ] },
+    { key: 'insulation_type', label: 'Floor insulation', type: 'select',
+      options: [
+        { value: 'Geen',    label: 'None' },
+        { value: 'Glaswol', label: 'Glass wool' },
+        { value: 'PUR',     label: 'PUR' },
+        { value: 'EPS',     label: 'EPS' },
+        { value: 'Kurk',    label: 'Cork' },
+      ] },
+    { key: 'bodemisolatie', label: 'Ground insulation', type: 'toggle' },
+    { key: 'perimeter_m',   label: 'Perimeter (m)',   type: 'number' },
   ],
   dakkapel: [
-    { key: 'description', label: 'Naam / omschrijving', type: 'text' },
+    { key: 'description', label: 'Name / description', type: 'text' },
   ],
   dak: [
-    { key: 'construction_type', label: 'Type dak',      type: 'select',
-      options: ['HellendDak','PlatDak','Zadeldak'] },
-    { key: 'tilt_deg',          label: 'Hoek (°)',       type: 'number' },
-    { key: 'nokhoogte_m',       label: 'Nokhoogte (m)', type: 'number' },
-    { key: 'insulation_type',   label: 'Isolatietype',   type: 'select',
-      options: ['Glaswol','PUR','EPS','Geen'] },
+    { key: 'construction_type', label: 'Roof type',      type: 'select',
+      options: [
+        { value: 'HellendDak', label: 'Pitched roof' },
+        { value: 'PlatDak',    label: 'Flat roof' },
+        { value: 'Zadeldak',   label: 'Gable roof' },
+      ] },
+    { key: 'tilt_deg',          label: 'Angle (°)',       type: 'number' },
+    { key: 'nokhoogte_m',       label: 'Ridge height (m)', type: 'number' },
+    { key: 'insulation_type',   label: 'Insulation type',  type: 'select',
+      options: [
+        { value: 'Glaswol', label: 'Glass wool' },
+        { value: 'PUR',     label: 'PUR' },
+        { value: 'EPS',     label: 'EPS' },
+        { value: 'Geen',    label: 'None' },
+      ] },
   ],
   installatie: [
-    { key: 'installation_type', label: 'Type installatie', type: 'select',
-      options: ['Verwarming','Tapwater','Ventilatie','WarmtePomp','ZonnePanelen','ZonneCollectoren','Koeling'] },
-    { key: 'brand',     label: 'Merk',      type: 'text' },
+    { key: 'installation_type', label: 'Installation type', type: 'select',
+      options: [
+        { value: 'Verwarming',       label: 'Heating' },
+        { value: 'Tapwater',         label: 'Hot water' },
+        { value: 'Ventilatie',       label: 'Ventilation' },
+        { value: 'WarmtePomp',       label: 'Heat pump' },
+        { value: 'ZonnePanelen',     label: 'Solar panels (PV)' },
+        { value: 'ZonneCollectoren', label: 'Solar collectors' },
+        { value: 'Koeling',          label: 'Cooling' },
+      ] },
+    { key: 'brand',     label: 'Brand',     type: 'text' },
     { key: 'model_nr',  label: 'Model',     type: 'text' },
-    { key: 'cv_klasse', label: 'CV klasse', type: 'select',
+    { key: 'cv_klasse', label: 'Boiler class', type: 'select',
       options: ['CW3','CW4','CW5','CW6'],
       dependsOn: { key: 'installation_type', value: 'Verwarming' } },
-    { key: 'fuel_type', label: 'Brandstof', type: 'select',
-      options: ['Gas','Elektriciteit','Stadsverwarming','Biomassa'] },
+    { key: 'fuel_type', label: 'Fuel',      type: 'select',
+      options: [
+        { value: 'Gas',            label: 'Gas' },
+        { value: 'Elektriciteit',  label: 'Electricity' },
+        { value: 'Stadsverwarming',label: 'District heating' },
+        { value: 'Biomassa',       label: 'Biomass' },
+      ] },
   ],
 };
 
@@ -148,6 +228,11 @@ export default function InspectScreen() {
   const [saving,        setSaving]        = useState(false);
   // Briefly highlights the slot card that was just auto-filled by a trigger press.
   const [flashedSlot,   setFlashedSlot]   = useState<SlotKey | null>(null);
+  // Thickness capture (point mode): the first ("front") face reading, in mm, while
+  // we wait for the second ("back") face. Null when no thickness capture is mid-flight.
+  const [thicknessFaceA, setThicknessFaceA] = useState<number | null>(null);
+  // Thickness capture (continuous mode): running min/max of the live stream sweep.
+  const [sweep,          setSweep]          = useState<SweepState>(EMPTY_SWEEP);
   // Photos: local display URIs + optional uploaded storage paths
   const [photoUris,      setPhotoUris]      = useState<string[]>([]);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
@@ -175,6 +260,65 @@ export default function InspectScreen() {
   useEffect(() => {
     if (element) slotsRef.current = SLOT_MAP[element.element_type] ?? DEFAULT_SLOTS;
   }, [element]);
+
+  // Refs mirror the thickness-capture state so BLE callbacks read current values.
+  const thicknessFaceARef = useRef<number | null>(null);
+  const sweepRef          = useRef<SweepState>(sweep);
+  useEffect(() => { sweepRef.current = sweep; }, [sweep]);
+  const setFaceA = useCallback((v: number | null) => {
+    thicknessFaceARef.current = v;
+    setThicknessFaceA(v);
+  }, []);
+
+  // Records one face of a thickness/depth measurement (point mode). The first reading
+  // is held as the front face; the second computes |back − front| and fills the slot.
+  const captureThicknessFace = useCallback((slot: SlotKey, value_mm: number) => {
+    if (thicknessFaceARef.current == null) {
+      setFaceA(value_mm);
+      setFlashedSlot(slot);
+      setTimeout(() => setFlashedSlot(null), 800);
+      return;
+    }
+    const t = thicknessFromFaces(thicknessFaceARef.current, value_mm);
+    if (!isUsableThickness(t)) {
+      Alert.alert("Same face?", "The two readings are almost identical (thickness ≈ 0). Re-measure the opposite face.");
+      return;
+    }
+    setValues(prev => ({ ...prev, [slot]: (t / 1000).toFixed(3) }));
+    setFaceA(null);
+    setActiveSlotSync(null);
+    setFlashedSlot(slot);
+    setTimeout(() => setFlashedSlot(null), 1500);
+  }, [setActiveSlotSync, setFaceA]);
+
+  // Continuous mode: fold each live streaming sample into the sweep's running min/max.
+  // Only continuous heartbeat packets count — trigger packets are ignored here.
+  useEffect(() => {
+    if (!sweepRef.current.active) return;
+    if (!lastMeasurement || !lastMeasurement.is_continuous) return;
+    const v = lastMeasurement.value_mm;
+    setSweep(prev => (prev.active ? addSweepSample(prev, v) : prev));
+  }, [lastMeasurement]);
+
+  // Start a sweep, or stop it and fill the slot with (max − min).
+  const toggleSweep = useCallback((slot: SlotKey) => {
+    const cur = sweepRef.current;
+    if (!cur.active) {
+      setSweep({ ...EMPTY_SWEEP, active: true });
+      return;
+    }
+    const t = thicknessFromSweep(cur);
+    setSweep(EMPTY_SWEEP);
+    if (t == null) {
+      const spread = cur.max_mm - cur.min_mm;
+      Alert.alert("Sweep too short", `Need a clear front-to-back sweep across the edge.\nGot ${cur.samples} samples, spread ${isFinite(spread) ? spread.toFixed(0) : 0} mm.`);
+      return;
+    }
+    setValues(prev => ({ ...prev, [slot]: (t / 1000).toFixed(3) }));
+    setActiveSlotSync(null);
+    setFlashedSlot(slot);
+    setTimeout(() => setFlashedSlot(null), 1500);
+  }, [setActiveSlotSync]);
 
   // One ref per slot so we can programmatically focus the TextInput
   const inputRefs = useRef<Partial<Record<SlotKey, TextInput | null>>>({});
@@ -294,11 +438,9 @@ export default function InspectScreen() {
       const filename = `${Date.now()}.jpg`;
       const storagePath = `${profile.org_id}/${element.id}/${filename}`;
 
-      const response = await fetch(localUri);
-      const blob     = await response.blob();
-      const { error: upErr } = await supabase.storage
-        .from("inspection-photos")
-        .upload(storagePath, blob, { contentType: "image/jpeg", upsert: false });
+      const { error: upErr } = await uploadImageToStorage(
+        "inspection-photos", storagePath, localUri, "image/jpeg", { upsert: false },
+      );
 
       if (upErr) {
         // Keep the local URI in photo_urls as fallback
@@ -330,6 +472,13 @@ export default function InspectScreen() {
         return isNaN(v) || v <= 0;
       })?.key ?? null;
       if (!slot) return;
+      // Thickness/depth slots need two readings — route the trigger press into the
+      // front/back face accumulator instead of filling the slot directly.
+      const def = slotsRef.current.find(s => s.key === slot);
+      if (def?.thickness) {
+        captureThicknessFace(slot, m.value_mm);
+        return;
+      }
       console.log("[BLE] Filling slot:", slot, "→", m.value_mm.toFixed(1), "mm");
       setValues(prev => ({ ...prev, [slot]: (m.value_mm / 1000).toFixed(3) }));
       setActiveSlotSync(null);
@@ -338,7 +487,7 @@ export default function InspectScreen() {
       setTimeout(() => setFlashedSlot(null), 1500);
     });
     return () => setOnMeasurement(() => {});
-  }, [setOnMeasurement, setActiveSlotSync]);
+  }, [setOnMeasurement, setActiveSlotSync, captureThicknessFace]);
 
   // Manually capture the current live GLM reading into the active (or first unfilled) slot.
   // Works in continuous mode without requiring CMD_ENABLE or trigger-press indications.
@@ -359,11 +508,16 @@ export default function InspectScreen() {
   // "types" the measurement (in metres) into whichever TextInput has first-responder focus.
   const toggleSlot = (key: SlotKey) => {
     const wasActive = activeSlot === key;
+    const isThickness = !!((SLOT_MAP[element?.element_type ?? ""] ?? DEFAULT_SLOTS).find(s => s.key === key)?.thickness);
     setActiveSlotSync(wasActive ? null : key);
+    // Switching slots abandons any half-finished thickness capture.
+    setFaceA(null);
+    setSweep(EMPTY_SWEEP);
     // Only arm the pendingRef when CMD_ENABLE was confirmed by the device (GATT trigger-press
     // mode active). In continuous-only mode arming pendingRef causes the very next 200ms
     // heartbeat to fill the slot before the user has aimed — use Capture button instead.
-    if (!wasActive && isConnected && cmdEnabled) requestMeasurement();
+    // Thickness slots never arm: each face is an explicit trigger press / face button.
+    if (!wasActive && isConnected && cmdEnabled && !isThickness) requestMeasurement();
   };
 
   // Called when the user presses Enter / GLM keyboard sends Return after typing.
@@ -546,7 +700,7 @@ export default function InspectScreen() {
             : null}
         </View>
         <View style={styles.typeBadge}>
-          <Text style={styles.typeText}>{element.element_type.toUpperCase()}</Text>
+          <Text style={styles.typeText}>{elementTypeLabel(element.element_type).toUpperCase()}</Text>
         </View>
       </View>
 
@@ -635,7 +789,68 @@ export default function InspectScreen() {
                 </View>
               )}
 
-              {isActive && (
+              {/* Thickness/depth capture — two faces (point) or a sweep (continuous) */}
+              {slot.thickness && isActive && (
+                <View style={styles.thicknessPanel}>
+                  <Text style={styles.thicknessHint}>
+                    Thickness needs two distances from one spot. Capture the front face,
+                    then the back face — we take the difference. Or sweep across the edge
+                    in continuous mode (max − min).
+                  </Text>
+
+                  {/* Point mode: front face → back face */}
+                  <View style={styles.thicknessRow}>
+                    <TouchableOpacity
+                      style={[styles.faceBtn, thicknessFaceA == null && styles.faceBtnNext]}
+                      onPress={() => {
+                        const v = lastMeasurement?.value_mm;
+                        if (v == null) { Alert.alert("No reading", "Aim the GLM at the front face first."); return; }
+                        captureThicknessFace(slot.key, v);
+                      }}
+                    >
+                      <Text style={styles.faceBtnText} allowFontScaling={false}>
+                        {thicknessFaceA == null ? "① Front face" : `① Front ✓ ${(thicknessFaceA / 1000).toFixed(3)} m`}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.faceBtn, thicknessFaceA != null && styles.faceBtnNext]}
+                      disabled={thicknessFaceA == null}
+                      onPress={() => {
+                        const v = lastMeasurement?.value_mm;
+                        if (v == null) { Alert.alert("No reading", "Aim the GLM at the back face."); return; }
+                        captureThicknessFace(slot.key, v);
+                      }}
+                    >
+                      <Text style={[styles.faceBtnText, thicknessFaceA == null && styles.faceBtnTextDisabled]} allowFontScaling={false}>
+                        ② Back face
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                  {cmdEnabled && (
+                    <Text style={styles.thicknessSub}>Or press the GLM trigger twice — front, then back.</Text>
+                  )}
+
+                  {/* Continuous mode: min/max sweep */}
+                  <TouchableOpacity
+                    style={[styles.sweepBtn, sweep.active && styles.sweepBtnActive]}
+                    onPress={() => toggleSweep(slot.key)}
+                  >
+                    <Text style={styles.sweepBtnText} allowFontScaling={false}>
+                      {sweep.active ? "■ Stop sweep & use (max − min)" : "↔ Start continuous sweep"}
+                    </Text>
+                  </TouchableOpacity>
+                  {sweep.active && (
+                    <Text style={styles.thicknessSub}>
+                      min {isFinite(sweep.min_mm) ? (sweep.min_mm / 1000).toFixed(3) : "—"} m ·
+                      max {isFinite(sweep.max_mm) ? (sweep.max_mm / 1000).toFixed(3) : "—"} m ·
+                      Δ {isFinite(sweep.max_mm - sweep.min_mm) ? ((sweep.max_mm - sweep.min_mm) / 1000).toFixed(3) : "0.000"} m ·
+                      {" "}{sweep.samples} samples
+                    </Text>
+                  )}
+                </View>
+              )}
+
+              {isActive && !slot.thickness && (
                 <View style={styles.hint}>
                   <Text style={styles.hintText}>
                     {cmdEnabled
@@ -813,6 +1028,20 @@ const styles = StyleSheet.create({
   hint:           { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: "#AED6F1" },
   hintText:       { fontSize: 12, color: "#2E86C1", fontStyle: "italic" },
   hintSub:        { fontSize: 11, color: "#7FB3D3", marginTop: 3 },
+
+  thicknessPanel:    { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: "#AED6F1" },
+  thicknessHint:     { fontSize: 12, color: "#2E86C1", fontStyle: "italic", marginBottom: 10, lineHeight: 17 },
+  thicknessRow:      { flexDirection: "row", gap: 8 },
+  faceBtn:           { flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: "center",
+                       borderWidth: 1, borderColor: "#DDE", backgroundColor: "#F8FAFC" },
+  faceBtnNext:       { borderColor: "#2E86C1", backgroundColor: "#EBF5FB" },
+  faceBtnText:       { fontSize: 13, fontWeight: "700", color: "#1E3A5F" },
+  faceBtnTextDisabled:{ color: "#AAB" },
+  thicknessSub:      { fontSize: 11, color: "#7FB3D3", marginTop: 6 },
+  sweepBtn:          { marginTop: 10, paddingVertical: 12, borderRadius: 8, alignItems: "center",
+                       borderWidth: 1, borderColor: "#1E3A5F", backgroundColor: "#1E3A5F" },
+  sweepBtnActive:    { borderColor: "#C0392B", backgroundColor: "#C0392B" },
+  sweepBtnText:      { fontSize: 13, fontWeight: "700", color: "#fff" },
 
   saveBtn:        { backgroundColor: "#1E8449", borderRadius: 12, padding: 18,
                     alignItems: "center", marginTop: 4 },

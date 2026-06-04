@@ -16,8 +16,11 @@ export async function DELETE(_req: NextRequest, { params }: { params: { id: stri
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
+  // Soft-delete: flag inactive instead of hard-deleting, so the building's
+  // zones/sessions/measurements aren't cascade-wiped. Hidden everywhere by
+  // the summary views' is_active filter.
   const { error } = await (supabase.from('buildings') as any)
-    .delete()
+    .update({ is_active: false })
     .eq('id', params.id);
 
   if (error) {
