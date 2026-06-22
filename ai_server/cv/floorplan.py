@@ -59,7 +59,7 @@ MAX_DIM          = 1600    # downscale very large images before processing
 MIN_ROOM_FRAC    = 0.01    # ignore regions smaller than 1% of the image area
 MIN_BOUNDARY_FRAC = 0.05   # boundary contour must cover at least 5% of the image
 APPROX_EPS_FRAC  = 0.01    # room polygon simplification tolerance (fraction of perimeter)
-BOUNDARY_EPS_FRAC = 0.03   # boundary simplification — looser, collapses to real corners
+BOUNDARY_EPS_FRAC = 0.01   # boundary simplification — tight enough to keep bump-outs/notches
 EDGE_MIN_LEN_FRAC = 0.03   # ignore polygon edges shorter than this (fraction of max dim)
 OPENING_MIN_FRAC  = 0.015  # a wall-ink gap shorter than this (fraction of max dim) is ignored
 DOOR_MAX_FRAC     = 0.06   # gaps up to this (fraction of max dim) are doors; wider -> windows
@@ -150,31 +150,48 @@ def _normaliser(w: int, h: int):
 # ── Stage: boundary ──────────────────────────────────────────────────────────
 def _largest_polygon(binary: np.ndarray) -> Optional[np.ndarray]:
     h, w = binary.shape
-    # Close gaps so the outer wall outline becomes one solid blob, then take its
-    # convex outer contour. A light close (not a heavy dilate) avoids the jagged
-    # double-edge that adaptive threshold leaves around thick wall strokes.
-    closed = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, np.ones((7, 7), np.uint8), iterations=2)
-    contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    img_area = w * h
 
-    # Primary: largest external contour, when it's a sensible size and not a
-    # frame-filling "leak". A larger epsilon collapses noisy edges to the real
-    # corners (a rectangular room -> ~4 points) while preserving concavity.
-    if contours:
+    def _best_external(mask: np.ndarray) -> Optional[np.ndarray]:
+        """Largest sensible external contour of `mask`, simplified — or None.
+
+        Uses RETR_EXTERNAL (not a convex hull) so concavities — L-shapes, bump-
+        outs, the deck/stair notch — are preserved. The tight BOUNDARY_EPS_FRAC
+        keeps real corners instead of collapsing the outline to ~4 points.
+        """
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return None
         biggest = max(contours, key=cv2.contourArea)
         area = cv2.contourArea(biggest)
-        if MIN_BOUNDARY_FRAC * w * h <= area <= 0.95 * w * h:
-            peri = cv2.arcLength(biggest, True)
-            poly = cv2.approxPolyDP(biggest, BOUNDARY_EPS_FRAC * peri, True)
-            if len(poly) >= 3:
-                return poly.reshape(-1, 2)
+        if not (MIN_BOUNDARY_FRAC * img_area <= area <= 0.98 * img_area):
+            return None
+        peri = cv2.arcLength(biggest, True)
+        poly = cv2.approxPolyDP(biggest, BOUNDARY_EPS_FRAC * peri, True)
+        return poly.reshape(-1, 2) if len(poly) >= 3 else None
 
-    # Fallback: when the outer wall has a large opening (window/door) the contour
-    # leaks or collapses to a thin "C". The convex hull of all wall ink is robust
-    # to such gaps and still yields a clean enclosing polygon.
-    pts = cv2.findNonZero(closed)
+    # 1) Light close — just heal the jagged double-edge from adaptive threshold,
+    #    without merging features. Preserves the true (often concave) outline.
+    light = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8), iterations=1)
+    poly = _best_external(light)
+    if poly is not None:
+        return poly
+
+    # 2) Bridge openings: when a door/window in the OUTER wall lets the contour
+    #    leak or collapse to a thin "C", close with a kernel sized to a typical
+    #    opening, then re-contour. Concavity survives — unlike a convex hull.
+    k = max(3, int(round(0.04 * max(w, h))) | 1)  # odd kernel ~4% of max dim — spans a doorway
+    bridged = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, np.ones((k, k), np.uint8), iterations=2)
+    poly = _best_external(bridged)
+    if poly is not None:
+        return poly
+
+    # 3) Last resort — convex hull of all wall ink. Loses concavity, but always
+    #    yields a clean enclosing polygon when the outline is too broken to trace.
+    pts = cv2.findNonZero(bridged)
     if pts is not None and len(pts) > 10:
         hull = cv2.convexHull(pts)
-        if cv2.contourArea(hull) >= MIN_BOUNDARY_FRAC * w * h:
+        if cv2.contourArea(hull) >= MIN_BOUNDARY_FRAC * img_area:
             peri = cv2.arcLength(hull, True)
             poly = cv2.approxPolyDP(hull, BOUNDARY_EPS_FRAC * peri, True)
             if len(poly) >= 3:

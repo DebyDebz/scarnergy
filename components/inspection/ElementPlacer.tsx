@@ -7,13 +7,13 @@ import {
 import { supabase, Zone } from '../../lib/supabase';
 import { useAuthStore } from '../../store/authStore';
 import { isPointInPolygon } from '../../lib/geometry';
+import { ClippedGrid } from './ClippedGrid';
 
 const PRIMARY  = '#1E3A5F';
 const CANVAS   = 300;
 const CELL_PX  = 20;
 const PADDING  = 12;
 const INNER    = CANVAS - PADDING * 2;
-const GRID_N   = Math.ceil(CANVAS / CELL_PX) + 1;
 
 type ElementType = 'gevel' | 'transparant_deel_door' | 'transparant_deel_window' | 'dak' | 'dakkapel' | 'vloer' | 'installatie';
 
@@ -469,13 +469,9 @@ export function ElementPlacer({ zones, sessionId, onSaved }: Props) {
         onStartShouldSetResponder={() => true}
         onResponderGrant={() => setSelectedId(null)}
       >
-        {/* Grid */}
-        {Array.from({ length: GRID_N }).map((_, i) => (
-          <View key={`v${i}`} style={[styles.gridLine, styles.gridV, { left: i * CELL_PX }]} />
-        ))}
-        {Array.from({ length: GRID_N }).map((_, i) => (
-          <View key={`h${i}`} style={[styles.gridLine, styles.gridH, { top: i * CELL_PX }]} />
-        ))}
+        {/* Grid clipped to the footprint (full grid when no plan). Outline kept
+            separate below to preserve the existing subtle look. */}
+        <ClippedGrid size={CANVAS} cellPx={CELL_PX} points={polygonPixelPts} gridColor="#e5e7eb" showOutline={false} />
 
         {/* Placeholder when no floor plan drawn for this zone */}
         {floorLines.length === 0 && elements.length === 0 && (
@@ -630,9 +626,6 @@ const styles = StyleSheet.create({
   canvas:         { width: CANVAS, height: CANVAS,
                     backgroundColor: '#fafafa', borderRadius: 8, overflow: 'hidden',
                     borderWidth: 1, borderColor: '#E5E7EB' },
-  gridLine:       { position: 'absolute', backgroundColor: '#e5e7eb' },
-  gridV:          { width: 1, height: CANVAS },
-  gridH:          { height: 1, width: CANVAS },
   // bottomControls: sticks to the bottom, never clipped
   bottomControls: { paddingBottom: 16, paddingTop: 4 },
   undoBar:        { flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 4 },

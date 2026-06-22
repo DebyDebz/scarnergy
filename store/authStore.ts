@@ -20,8 +20,13 @@ interface AuthState {
   loading:  boolean;
   signIn:   (email: string, password: string) => Promise<void>;
   signOut:  () => Promise<void>;
-  loadProfile: () => Promise<void>;
+  loadProfile: (session?: Session | null) => Promise<void>;
 }
+
+// Dedupe concurrent profile loads: signIn() and the onAuthStateChange listener
+// both trigger loadProfile() on a single sign-in. Without this guard each would
+// run its own getSession() + user_profiles query, doubling the post-auth latency.
+let profileInflight: Promise<void> | null = null;
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   session: null,
@@ -34,7 +39,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
     set({ session: data.session, user: data.user });
-    await get().loadProfile();
+    // Pass the session we just received so loadProfile skips a second getSession()
+    // round-trip (which contends on auth-js's internal lock right after sign-in).
+    await get().loadProfile(data.session);
   },
 
   signOut: async () => {
@@ -42,15 +49,28 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ session: null, user: null, profile: null });
   },
 
-  loadProfile: async () => {
-    // Use getSession() (a local storage read), NOT getUser() (a network call):
-    // the splash gate only needs to know whether a session exists, and getUser
-    // adds a round-trip that blocks the sign-in screen if the backend is slow.
-    const { data: { session } } = await supabase.auth.getSession();
-    const user = session?.user ?? null;
-    if (!user) { set({ session: null, user: null, profile: null, loading: false }); return; }
-    const { data } = await supabase.from("user_profiles").select("*").eq("id", user.id).single();
-    set({ session, user, profile: data ?? null, loading: false });
+  loadProfile: async (sessionArg) => {
+    // Coalesce overlapping calls (signIn + the auth listener) into one query.
+    if (profileInflight) return profileInflight;
+    profileInflight = (async () => {
+      try {
+        // Prefer the session handed in by the caller; only fall back to
+        // getSession() (a local storage read), NOT getUser() (a network call),
+        // when we weren't given one. Avoiding getSession() right after sign-in
+        // skips a needless round-trip that contends on auth-js's lock.
+        let session = sessionArg;
+        if (session === undefined) {
+          session = (await supabase.auth.getSession()).data.session;
+        }
+        const user = session?.user ?? null;
+        if (!user) { set({ session: null, user: null, profile: null, loading: false }); return; }
+        const { data } = await supabase.from("user_profiles").select("*").eq("id", user.id).single();
+        set({ session, user, profile: data ?? null, loading: false });
+      } finally {
+        profileInflight = null;
+      }
+    })();
+    return profileInflight;
   },
 }));
 

@@ -1,18 +1,23 @@
+import { Fragment } from 'react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { createClient } from '@/lib/supabase-server';
 import { EnergyLabelBadge } from '@/components/buildings/EnergyLabelBadge';
 import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
 import { FloorPlanButton } from '@/components/buildings/FloorPlanButton';
+import { BuildingFloorPlanUpload } from '@/components/buildings/BuildingFloorPlanUpload';
 import { FloorPlanViewer } from '@/components/buildings/FloorPlanViewer';
 import { BuildingExportButtons } from '@/components/buildings/BuildingExportButtons';
-import { ElementsWithEdit } from '@/components/elements/ElementsWithEdit';
 import { ArrowLeft, ChevronDown, TriangleAlert } from 'lucide-react';
 import type {
   BuildingSummary, Zone, SessionSummary,
   BuildingElement, Opening, BuildingFacadePhoto,
 } from '@/lib/types';
 import { fmtDate } from '@/lib/format';
+import {
+  areaByFloor, totalZoneArea, fmtArea,
+  fmtEfficiencyPct, fmtMeters, mmToM, openingArea,
+} from '@/lib/calc';
 
 interface Props { params: { id: string } }
 
@@ -96,6 +101,10 @@ export default async function BuildingDetailPage({ params }: Props) {
 
   const hasFacadePhotos = facadePhotosRaw.length > 0;
   const hasFloorPlans   = zones.some((z: Zone) => z.floor_plan_image_url);
+
+  // Derived floor-area aggregation (previously only in VABI export / print)
+  const floorAreas = areaByFloor(zones);
+  const totalArea  = totalZoneArea(zones);
 
   return (
     <div className="space-y-6 max-w-5xl">
@@ -185,10 +194,34 @@ export default async function BuildingDetailPage({ params }: Props) {
         </div>
       )}
 
+      {/* ── Floor area summary (derived) ────────────────────────────────── */}
+      {zones.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200">
+          <div className="px-5 py-4 border-b border-gray-100">
+            <h2 className="font-semibold text-gray-900">Floor area</h2>
+          </div>
+          <table className="w-full text-sm">
+            <tbody className="divide-y divide-gray-50">
+              {floorAreas.map(f => (
+                <tr key={f.level}>
+                  <td className="px-5 py-2.5 text-gray-700">{f.name}</td>
+                  <td className="px-5 py-2.5 text-right text-gray-700">{fmtArea(f.area)}</td>
+                </tr>
+              ))}
+              <tr className="border-t border-gray-200 bg-gray-50">
+                <td className="px-5 py-2.5 font-semibold text-gray-900">Total</td>
+                <td className="px-5 py-2.5 text-right font-semibold text-gray-900">{fmtArea(totalArea)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+
       {/* ── Zones & elements ────────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-gray-200">
         <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
           <h2 className="font-semibold text-gray-900">Zones &amp; elements</h2>
+          <BuildingFloorPlanUpload zones={zones} buildingId={params.id} />
         </div>
         {/* Zone headers keep the existing FloorPlanButton for upload */}
         <div className="divide-y divide-gray-100">
@@ -210,7 +243,7 @@ export default async function BuildingDetailPage({ params }: Props) {
 
               <div className="px-5 pb-4 pt-2 space-y-3">
                 <p className="text-xs text-gray-500">
-                  Area: <span className="font-medium text-gray-700">{zone.gross_area_m2} m²</span>
+                  Area: <span className="font-medium text-gray-700">{fmtArea(zone.gross_area_m2)}</span>
                 </p>
 
                 {/* Inline floor plan if available */}
@@ -228,6 +261,7 @@ export default async function BuildingDetailPage({ params }: Props) {
                           <th className="px-4 py-2 font-medium">Dimensions</th>
                           <th className="px-4 py-2 font-medium">Rc</th>
                           <th className="px-4 py-2 font-medium">U</th>
+                          <th className="px-4 py-2 font-medium">Efficiency</th>
                           <th className="px-4 py-2 font-medium">Status</th>
                         </tr>
                       </thead>
@@ -238,23 +272,42 @@ export default async function BuildingDetailPage({ params }: Props) {
                             el.width_mm  ? `${el.width_mm}mm`  : null,
                             el.height_mm ? `${el.height_mm}mm` : null,
                           ].filter(Boolean).join(' × ');
+                          const op = el.opening;
                           return (
-                            <tr key={el.id} className="hover:bg-gray-50">
-                              <td className="px-4 py-2 font-medium text-gray-900">{el.name}</td>
-                              <td className="px-4 py-2 text-gray-500 capitalize">{el.element_type}</td>
-                              <td className="px-4 py-2 text-gray-500 font-mono">{dims || '—'}</td>
-                              <td className="px-4 py-2 text-gray-700">{el.rc_value ?? '—'}</td>
-                              <td className="px-4 py-2 text-gray-700">{el.u_value ?? '—'}</td>
-                              <td className="px-4 py-2">
-                                {!el.is_complete ? (
-                                  <span className="inline-flex items-center gap-1 text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded font-medium text-xs">
-                                    <TriangleAlert className="w-3 h-3" /> incomplete
-                                  </span>
-                                ) : (
-                                  <span className="text-emerald-600 font-medium">✓</span>
-                                )}
-                              </td>
-                            </tr>
+                            <Fragment key={el.id}>
+                              <tr className="hover:bg-gray-50">
+                                <td className="px-4 py-2 font-medium text-gray-900">{el.name}</td>
+                                <td className="px-4 py-2 text-gray-500 capitalize">{el.element_type}</td>
+                                <td className="px-4 py-2 text-gray-500 font-mono">{dims || '—'}</td>
+                                <td className="px-4 py-2 text-gray-700">{el.rc_value ?? '—'}</td>
+                                <td className="px-4 py-2 text-gray-700">{el.u_value ?? '—'}</td>
+                                <td className="px-4 py-2 text-gray-700">{fmtEfficiencyPct(el.efficiency)}</td>
+                                <td className="px-4 py-2">
+                                  {!el.is_complete ? (
+                                    <span className="inline-flex items-center gap-1 text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded font-medium text-xs">
+                                      <TriangleAlert className="w-3 h-3" /> incomplete
+                                    </span>
+                                  ) : (
+                                    <span className="text-emerald-600 font-medium">✓</span>
+                                  )}
+                                </td>
+                              </tr>
+                              {op && (
+                                <tr className="bg-indigo-50/40">
+                                  <td className="px-4 py-1.5 pl-8 text-gray-500" colSpan={3}>
+                                    <span className="text-indigo-400 mr-1.5">↳</span>
+                                    <span className="capitalize font-medium text-gray-600">{op.opening_type}</span>
+                                    {op.name ? <span className="text-gray-400"> · {op.name}</span> : null}
+                                    <span className="text-gray-400 font-mono ml-2">
+                                      {fmtMeters(mmToM(op.width_mm))} × {fmtMeters(mmToM(op.height_mm))}
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-1.5 text-gray-600" colSpan={3}>
+                                    Opening area: <span className="font-medium text-gray-700">{fmtArea(openingArea(op))}</span>
+                                  </td>
+                                </tr>
+                              )}
+                            </Fragment>
                           );
                         })}
                       </tbody>

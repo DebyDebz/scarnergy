@@ -95,13 +95,13 @@ export function MeasurementsLiveTable({ initialMeasurements }: Props) {
         <table className="w-full text-sm">
           <thead>
             <tr className="text-xs text-gray-500 bg-gray-50 border-b border-gray-100 text-left">
+              <th className="px-5 py-3 font-medium">Building</th>
+              <th className="px-5 py-3 font-medium">Zone</th>
+              <th className="px-5 py-3 font-medium">Element</th>
+              <th className="px-5 py-3 font-medium">Session</th>
               <th className="px-5 py-3 font-medium">Value</th>
               <th className="px-5 py-3 font-medium">Type</th>
-              <th className="px-5 py-3 font-medium">Element</th>
-              <th className="px-5 py-3 font-medium">Zone</th>
-              <th className="px-5 py-3 font-medium">Building</th>
               <th className="px-5 py-3 font-medium">Device</th>
-              <th className="px-5 py-3 font-medium">Session</th>
               <th className="px-5 py-3 font-medium">Time</th>
               <th className="px-5 py-3 font-medium">Flag</th>
             </tr>
@@ -120,6 +120,14 @@ export function MeasurementsLiveTable({ initialMeasurements }: Props) {
                         : 'hover:bg-gray-50 transition-colors'
                   }
                 >
+                  <td className="px-5 py-3 text-gray-700">{m.building_address}</td>
+                  <td className="px-5 py-3 text-gray-500">{m.zone_name ?? '—'}</td>
+                  <td className="px-5 py-3 text-gray-700">{m.element_name ?? '—'}</td>
+                  <td className="px-5 py-3 font-mono text-xs">
+                    <Link href={`/sessions/${m.session_id}`} className="text-indigo-600 hover:underline">
+                      session →
+                    </Link>
+                  </td>
                   <td className="px-5 py-3 font-mono font-bold text-gray-900">
                     {Math.round(m.value_mm)} mm
                     {isNew && (
@@ -129,15 +137,7 @@ export function MeasurementsLiveTable({ initialMeasurements }: Props) {
                     )}
                   </td>
                   <td className="px-5 py-3 text-gray-500 capitalize">{m.measurement_type ?? '—'}</td>
-                  <td className="px-5 py-3 text-gray-700">{m.element_name ?? '—'}</td>
-                  <td className="px-5 py-3 text-gray-500">{m.zone_name ?? '—'}</td>
-                  <td className="px-5 py-3 text-gray-700">{m.building_address}</td>
                   <td className="px-5 py-3 text-gray-400 text-xs font-mono">{m.device_nickname ?? '—'}</td>
-                  <td className="px-5 py-3 font-mono text-xs">
-                    <Link href={`/sessions/${m.session_id}`} className="text-indigo-600 hover:underline">
-                      session →
-                    </Link>
-                  </td>
                   <td className="px-5 py-3 text-gray-400 whitespace-nowrap text-xs">
                     {fmtDateTime(m.measured_at)}
                   </td>

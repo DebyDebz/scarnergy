@@ -4,14 +4,14 @@ import {
   ScrollView, StyleSheet, Alert, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { supabase, Zone } from '../../lib/supabase';
-import { projectOnImage, fitToInner } from '../../lib/floorplanGeometry';
+import { projectPointsOnImage, fitPointsToInner } from '../../lib/floorplanGeometry';
+import { ClippedGrid } from './ClippedGrid';
 
 const PRIMARY  = '#1E3A5F';
 const CANVAS   = 300;
 const PADDING  = 12;
 const INNER    = CANVAS - PADDING * 2;
 const CELL_PX  = 20;
-const GRID_N   = Math.ceil(CANVAS / CELL_PX) + 1;
 
 interface Props {
   zones: Zone[];
@@ -36,9 +36,9 @@ export function GridCanvas({ zones, onConfirmed }: Props) {
   // displayed image (once its dims are known); bbox-fit is the pre-load fallback
   // so it's never blank. No-image zones keep the original bbox-fit behaviour.
   const hasImage = !!activeZone.floor_plan_image_url;
-  const lines = hasImage && imgDims
-    ? projectOnImage(activeZone.floor_plan_points, imgDims, CANVAS)
-    : fitToInner(activeZone.floor_plan_points, CANVAS, PADDING);
+  const outlinePts = hasImage && imgDims
+    ? projectPointsOnImage(activeZone.floor_plan_points, imgDims, CANVAS)
+    : fitPointsToInner(activeZone.floor_plan_points, CANVAS, PADDING);
   const scaleM = parseFloat(scaleInputs[activeZone.id] || '5') || 5;
   const cellM  = scaleM / (INNER / CELL_PX);
 
@@ -104,32 +104,8 @@ export function GridCanvas({ zones, onConfirmed }: Props) {
             </>
           )}
 
-          {/* Grid lines */}
-          {Array.from({ length: GRID_N }).map((_, i) => (
-            <View key={`v${i}`} style={[styles.gridLine, styles.gridV, { left: i * CELL_PX }]} />
-          ))}
-          {Array.from({ length: GRID_N }).map((_, i) => (
-            <View key={`h${i}`} style={[styles.gridLine, styles.gridH, { top: i * CELL_PX }]} />
-          ))}
-
-          {/* Polygon edges */}
-          {lines.map((seg, i) => {
-            const dx = seg.x2 - seg.x1, dy = seg.y2 - seg.y1;
-            const len = Math.hypot(dx, dy);
-            if (len < 1) return null;
-            const angle = Math.atan2(dy, dx) * (180 / Math.PI);
-            return (
-              <View key={i} style={{
-                position:        'absolute',
-                width:           len,
-                height:          2,
-                backgroundColor: PRIMARY,
-                left:            (seg.x1 + seg.x2) / 2 - len / 2,
-                top:             (seg.y1 + seg.y2) / 2 - 1,
-                transform:       [{ rotate: `${angle}deg` }],
-              }} />
-            );
-          })}
+          {/* Grid clipped to the footprint outline (full grid when not yet traced) */}
+          <ClippedGrid size={CANVAS} cellPx={CELL_PX} points={outlinePts} gridColor="#e5e7eb" />
 
           {/* Scale labels */}
           {Array.from({ length: Math.floor(INNER / CELL_PX) + 1 }).map((_, i) => (
@@ -196,9 +172,6 @@ const styles = StyleSheet.create({
   imgHidden:   { opacity: 0 },
   imgLoading:  { position: 'absolute', top: 0, left: 0, width: CANVAS, height: CANVAS,
                  alignItems: 'center', justifyContent: 'center' },
-  gridLine:    { position: 'absolute', backgroundColor: '#e5e7eb' },
-  gridV:       { width: 1, height: CANVAS },
-  gridH:       { height: 1, width: CANVAS },
   gridLabel:   { position: 'absolute', fontSize: 7, color: '#9CA3AF' },
   scaleRow:    { flexDirection: 'row', alignItems: 'center', gap: 10,
                  marginTop: 16, justifyContent: 'center' },

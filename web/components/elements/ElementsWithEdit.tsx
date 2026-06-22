@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { Fragment, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Pencil, TriangleAlert } from 'lucide-react';
 import { EnergyLabelBadge } from '@/components/buildings/EnergyLabelBadge';
 import { ElementEditPanel } from './ElementEditPanel';
+import { fmtEfficiencyPct, fmtMeters, fmtArea, mmToM, openingArea } from '@/lib/calc';
 import type { BuildingElement, Opening, Zone } from '@/lib/types';
 
 type ZoneWithElements = Zone & {
@@ -67,6 +68,7 @@ export function ElementsWithEdit({ zones }: Props) {
                           <th className="px-4 py-2 font-medium">Dimensions</th>
                           <th className="px-4 py-2 font-medium">Rc (m²K/W)</th>
                           <th className="px-4 py-2 font-medium">U (W/m²K)</th>
+                          <th className="px-4 py-2 font-medium">Efficiency</th>
                           <th className="px-4 py-2 font-medium">Status</th>
                           <th className="px-4 py-2 font-medium w-8" />
                         </tr>
@@ -78,32 +80,52 @@ export function ElementsWithEdit({ zones }: Props) {
                             el.width_mm  ? `${el.width_mm}mm`  : null,
                             el.height_mm ? `${el.height_mm}mm` : null,
                           ].filter(Boolean).join(' × ');
+                          const op = el.opening;
                           return (
-                            <tr key={el.id} className="hover:bg-gray-50">
-                              <td className="px-4 py-2 font-medium text-gray-900">{el.name}</td>
-                              <td className="px-4 py-2 text-gray-500 capitalize">{el.element_type}</td>
-                              <td className="px-4 py-2 text-gray-500 font-mono">{dims || '—'}</td>
-                              <td className="px-4 py-2 text-gray-700">{el.rc_value ?? '—'}</td>
-                              <td className="px-4 py-2 text-gray-700">{el.u_value ?? '—'}</td>
-                              <td className="px-4 py-2">
-                                {!el.is_complete ? (
-                                  <span className="inline-flex items-center gap-1 text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded font-medium">
-                                    <TriangleAlert className="w-3 h-3" /> incomplete
-                                  </span>
-                                ) : (
-                                  <span className="text-emerald-600 font-medium">✓</span>
-                                )}
-                              </td>
-                              <td className="px-4 py-2">
-                                <button
-                                  onClick={() => openPanel(el, el.opening)}
-                                  className="p-1 rounded hover:bg-indigo-50 text-gray-400 hover:text-indigo-600 transition-colors"
-                                  title="Edit element details"
-                                >
-                                  <Pencil className="w-3.5 h-3.5" />
-                                </button>
-                              </td>
-                            </tr>
+                            <Fragment key={el.id}>
+                              <tr className="hover:bg-gray-50">
+                                <td className="px-4 py-2 font-medium text-gray-900">{el.name}</td>
+                                <td className="px-4 py-2 text-gray-500 capitalize">{el.element_type}</td>
+                                <td className="px-4 py-2 text-gray-500 font-mono">{dims || '—'}</td>
+                                <td className="px-4 py-2 text-gray-700">{el.rc_value ?? '—'}</td>
+                                <td className="px-4 py-2 text-gray-700">{el.u_value ?? '—'}</td>
+                                <td className="px-4 py-2 text-gray-700">{fmtEfficiencyPct(el.efficiency)}</td>
+                                <td className="px-4 py-2">
+                                  {!el.is_complete ? (
+                                    <span className="inline-flex items-center gap-1 text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded font-medium">
+                                      <TriangleAlert className="w-3 h-3" /> incomplete
+                                    </span>
+                                  ) : (
+                                    <span className="text-emerald-600 font-medium">✓</span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-2">
+                                  <button
+                                    onClick={() => openPanel(el, el.opening)}
+                                    className="p-1 rounded hover:bg-indigo-50 text-gray-400 hover:text-indigo-600 transition-colors"
+                                    title="Edit element details"
+                                  >
+                                    <Pencil className="w-3.5 h-3.5" />
+                                  </button>
+                                </td>
+                              </tr>
+                              {op && (
+                                <tr className="bg-indigo-50/40">
+                                  <td className="px-4 py-1.5 pl-9 text-gray-500" colSpan={3}>
+                                    <span className="text-indigo-400 mr-1.5">↳</span>
+                                    <span className="capitalize font-medium text-gray-600">{op.opening_type}</span>
+                                    {op.name ? <span className="text-gray-400"> · {op.name}</span> : null}
+                                    <span className="text-gray-400 font-mono ml-2">
+                                      {fmtMeters(mmToM(op.width_mm))} × {fmtMeters(mmToM(op.height_mm))}
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-1.5 text-gray-600" colSpan={4}>
+                                    Opening area: <span className="font-medium text-gray-700">{fmtArea(openingArea(op))}</span>
+                                  </td>
+                                  <td className="px-4 py-1.5" />
+                                </tr>
+                              )}
+                            </Fragment>
                           );
                         })}
                       </tbody>

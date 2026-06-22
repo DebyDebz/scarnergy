@@ -127,9 +127,11 @@ function ElementItem({
 
 // ── Main screen ───────────────────────────────────────────────────────────────
 
+// Display labels only — the WallSide keys and the inferWall() name-matching
+// (which still recognises Dutch zone/element names) are unchanged.
 const SIDE_LABELS: Record<WallSide, string> = {
-  north: "Noordgevel", east: "Oostgevel", south: "Zuidgevel", west: "Westgevel",
-  dak: "Dak", vloer: "Vloer", installatie: "Installaties", other: "Overig",
+  north: "North facade", east: "East facade", south: "South facade", west: "West facade",
+  dak: "Roof", vloer: "Floor", installatie: "Installations", other: "Other",
 };
 
 export default function FloorPlanScreen() {
@@ -219,7 +221,7 @@ export default function FloorPlanScreen() {
         >
           <View style={[styles.typeCardDot, { backgroundColor: completionColor(groups.dak) }]} />
           <View style={{ flex: 1 }}>
-            <Text style={styles.typeCardLabel}>Dak (Roof)</Text>
+            <Text style={styles.typeCardLabel}>Roof</Text>
             <Text style={styles.typeCardSub}>
               {groups.dak.length === 0 ? "No elements" :
                 `${groups.dak.filter(e => e.is_complete).length}/${groups.dak.length} complete`}
@@ -233,7 +235,7 @@ export default function FloorPlanScreen() {
 
           {/* North wall (top) */}
           <WallBand
-            label="Noord"
+            label="North"
             elements={groups.north}
             active={activeSide === "north"}
             onPress={() => tapSide("north", groups.north)}
@@ -267,7 +269,7 @@ export default function FloorPlanScreen() {
                   onPress={() => tapSide("installatie", groups.installatie)}
                 >
                   <Text style={styles.installBtnText}>
-                    ⚙ {groups.installatie.length} installatie{groups.installatie.length !== 1 ? "s" : ""}
+                    ⚙ {groups.installatie.length} installation{groups.installatie.length !== 1 ? "s" : ""}
                   </Text>
                 </TouchableOpacity>
               )}
@@ -277,7 +279,7 @@ export default function FloorPlanScreen() {
                   onPress={() => tapSide("other", groups.other)}
                 >
                   <Text style={styles.otherBtnText}>
-                    ● {groups.other.length} overig
+                    ● {groups.other.length} other
                   </Text>
                 </TouchableOpacity>
               )}
@@ -285,7 +287,7 @@ export default function FloorPlanScreen() {
 
             {/* East wall — border on left, not right */}
             <WallBand
-              label="Oost"
+              label="East"
               elements={groups.east}
               active={activeSide === "east"}
               onPress={() => tapSide("east", groups.east)}
@@ -295,7 +297,7 @@ export default function FloorPlanScreen() {
 
           {/* South wall (bottom) */}
           <WallBand
-            label="Zuid"
+            label="South"
             elements={groups.south}
             active={activeSide === "south"}
             onPress={() => tapSide("south", groups.south)}
@@ -316,7 +318,7 @@ export default function FloorPlanScreen() {
         >
           <View style={[styles.typeCardDot, { backgroundColor: completionColor(groups.vloer) }]} />
           <View style={{ flex: 1 }}>
-            <Text style={styles.typeCardLabel}>Vloer (Floor)</Text>
+            <Text style={styles.typeCardLabel}>Floor</Text>
             <Text style={styles.typeCardSub}>
               {groups.vloer.length === 0 ? "No elements" :
                 `${groups.vloer.filter(e => e.is_complete).length}/${groups.vloer.length} complete`}

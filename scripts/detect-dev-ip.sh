@@ -46,17 +46,38 @@ detect_ip() {
       [[ -n "$ip" && "$ip" != "127."* ]] && echo "$ip" && return
     done
   else
-    # Linux — prefer a private/LAN IP over a public one so that
-    # local Wi-Fi scanning works without needing a tunnel.
-    for ip in $(hostname -I 2>/dev/null); do
-      [[ -z "$ip" || "$ip" == "127."* ]] && continue
-      if is_private_ip "$ip"; then
+    # Linux — enumerate real interfaces, skipping loopback and Docker/virtual
+    # bridges (docker0, br-*, veth*, virbr*, cni*, …). Those carry 172.x bridge
+    # GATEWAY addresses that are RFC1918-"private" but unreachable from a phone
+    # on the LAN/internet — selecting one silently breaks the mobile backend URL.
+    local real_ips=()
+    if command -v ip >/dev/null 2>&1; then
+      while read -r ifname cidr; do
+        case "$ifname" in
+          lo|docker*|br-*|veth*|virbr*|cni*|flannel*|kube*|tailscale*|tun*|cali*) continue ;;
+        esac
+        [[ -n "$cidr" ]] && real_ips+=("${cidr%%/*}")
+      done < <(ip -o -4 addr show 2>/dev/null | awk '{print $2, $4}')
+    fi
+    # Fallback when `ip` is unavailable: hostname -I (cannot filter by interface)
+    if [[ ${#real_ips[@]} -eq 0 ]]; then
+      for ip in $(hostname -I 2>/dev/null); do
+        [[ -z "$ip" || "$ip" == "127."* ]] && continue
+        real_ips+=("$ip")
+      done
+    fi
+    # Prefer a real private/LAN IP (laptop Wi-Fi/ethernet) so local scanning works
+    # without a tunnel; otherwise fall back to the first public IP (e.g. a VPS).
+    if [[ ${#real_ips[@]} -gt 0 ]]; then
+      for ip in "${real_ips[@]}"; do
+        [[ "$ip" == "127."* ]] && continue
+        if is_private_ip "$ip"; then echo "$ip" && return; fi
+      done
+      for ip in "${real_ips[@]}"; do
+        [[ "$ip" == "127."* ]] && continue
         echo "$ip" && return
-      fi
-    done
-    # No private IP found — fall back to the first non-loopback address.
-    ip=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
-    [[ -n "$ip" && "$ip" != "127."* ]] && echo "$ip" && return
+      done
+    fi
   fi
 
   echo ""

@@ -4,14 +4,14 @@ import {
   TouchableOpacity, StyleSheet, ActivityIndicator,
 } from 'react-native';
 import { Zone } from '../../lib/supabase';
-import { projectOnImage, fitToInner } from '../../lib/floorplanGeometry';
+import { projectPointsOnImage, fitPointsToInner } from '../../lib/floorplanGeometry';
+import { ClippedGrid } from './ClippedGrid';
 
 const PRIMARY = '#1E3A5F';
 const CANVAS  = 300;
 const CELL_PX = 20;
 const PADDING = 12;
 const INNER   = CANVAS - PADDING * 2;
-const GRID_N  = Math.ceil(CANVAS / CELL_PX) + 1;
 
 interface Props {
   zones: Zone[];
@@ -29,9 +29,9 @@ export function FloorPlanViewer({ zones, onContinue }: Props) {
 
   // Overlay the outline using the image's real proportions; bbox-fit only as a
   // pre-load fallback so it's never blank.
-  const lines   = imgDims
-    ? projectOnImage(activeZone.floor_plan_points ?? null, imgDims, CANVAS)
-    : fitToInner(activeZone.floor_plan_points ?? null, CANVAS, PADDING);
+  const outlinePts = imgDims
+    ? projectPointsOnImage(activeZone.floor_plan_points ?? null, imgDims, CANVAS)
+    : fitPointsToInner(activeZone.floor_plan_points ?? null, CANVAS, PADDING);
   const scaleM  = activeZone.floor_plan_scale_m ?? 5;
   const cellM   = scaleM / (INNER / CELL_PX);
 
@@ -77,33 +77,8 @@ export function FloorPlanViewer({ zones, onContinue }: Props) {
           </>
         )}
 
-        {/* Grid overlay */}
-        {Array.from({ length: GRID_N }).map((_, i) => (
-          <View key={`v${i}`} style={[styles.gridLine, styles.gridV, { left: i * CELL_PX }]} />
-        ))}
-        {Array.from({ length: GRID_N }).map((_, i) => (
-          <View key={`h${i}`} style={[styles.gridLine, styles.gridH, { top: i * CELL_PX }]} />
-        ))}
-
-        {/* Polygon outline */}
-        {lines.map((seg, i) => {
-          const dx = seg.x2 - seg.x1, dy = seg.y2 - seg.y1;
-          const len = Math.hypot(dx, dy);
-          if (len < 1) return null;
-          const angle = Math.atan2(dy, dx) * (180 / Math.PI);
-          return (
-            <View key={i} style={{
-              position:        'absolute',
-              width:           len,
-              height:          2,
-              backgroundColor: PRIMARY,
-              opacity:         0.8,
-              left:            (seg.x1 + seg.x2) / 2 - len / 2,
-              top:             (seg.y1 + seg.y2) / 2 - 1,
-              transform:       [{ rotate: `${angle}deg` }],
-            }} />
-          );
-        })}
+        {/* Grid clipped to the footprint outline (full grid when not yet traced) */}
+        <ClippedGrid size={CANVAS} cellPx={CELL_PX} points={outlinePts} gridColor="rgba(229,231,235,0.6)" />
 
         {/* Scale labels */}
         {Array.from({ length: Math.floor(INNER / CELL_PX) + 1 }).map((_, i) => (
@@ -143,9 +118,6 @@ const styles = StyleSheet.create({
   imgHidden:   { opacity: 0 },
   imgLoading:  { position: 'absolute', top: 0, left: 0, width: CANVAS, height: CANVAS,
                  alignItems: 'center', justifyContent: 'center' },
-  gridLine:    { position: 'absolute', backgroundColor: 'rgba(229,231,235,0.6)' },
-  gridV:       { width: 1, height: CANVAS },
-  gridH:       { height: 1, width: CANVAS },
   scaleLabel:  { position: 'absolute', fontSize: 7, color: '#9CA3AF' },
   infoRow:     { flexDirection: 'row', justifyContent: 'center', gap: 24, marginTop: 12 },
   infoTxt:     { fontSize: 12, color: '#6B7280' },

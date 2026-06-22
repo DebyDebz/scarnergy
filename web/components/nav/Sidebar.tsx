@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard, Building2, ClipboardList, Users,
-  Building, Bluetooth, Zap, Ruler, ShieldCheck
+  Building, Bluetooth, Zap, Ruler
 } from 'lucide-react';
 import type { Role } from '@/lib/types';
 
@@ -12,7 +12,6 @@ const NAV = [
   { href: '/buildings', label: 'Buildings', icon: Building2, roles: ['supervisor', 'admin'] as Role[] },
   { href: '/sessions', label: 'Sessions', icon: ClipboardList, roles: ['supervisor', 'admin'] as Role[] },
   { href: '/measurements', label: 'Measurements', icon: Ruler, roles: ['supervisor', 'admin'] as Role[] },
-  { href: '/quality', label: 'Quality', icon: ShieldCheck, roles: ['supervisor', 'admin'] as Role[] },
   { href: '/users', label: 'Users', icon: Users, roles: ['admin'] as Role[] },
   { href: '/organizations', label: 'Organizations', icon: Building, roles: ['admin'] as Role[] },
   { href: '/devices', label: 'BLE Devices', icon: Bluetooth, roles: ['admin'] as Role[] },

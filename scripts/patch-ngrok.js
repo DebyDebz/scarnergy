@@ -19,7 +19,7 @@ if (src.includes("cloudflared quick tunnel")) {
   process.exit(0);
 }
 
-const DEAD_CONNECT = /let processUrl = null;\s*let ngrokClient = null;\s*async function connect\(opts\) \{[\s\S]*?\}/;
+const DEAD_CONNECT = /let processUrl = null;\s*let ngrokClient = null;\s*async function connect\(opts\) \{[\s\S]*?return connectRetry\(opts\);\s*\}/;
 
 const LIVE_CONNECT = `let processUrl = null;
 let ngrokClient = null;

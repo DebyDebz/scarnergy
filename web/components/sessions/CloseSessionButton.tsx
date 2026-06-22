@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { createClient } from '@/lib/supabase';
+import { closeSession } from '@/app/(dashboard)/sessions/actions';
 import { XCircle } from 'lucide-react';
 
 export function CloseSessionButton({ sessionId }: { sessionId: string }) {
@@ -13,10 +13,9 @@ export function CloseSessionButton({ sessionId }: { sessionId: string }) {
     if (!confirm('Close this session? This action cannot be undone.')) return;
     setLoading(true);
     setError('');
-    const supabase = createClient();
-    const { error: err } = await (supabase.rpc as any)('close_inspection_session', { p_session_id: sessionId });
+    const { error: err } = await closeSession(sessionId);
     if (err) {
-      setError(err.message);
+      setError(err);
       setLoading(false);
     } else {
       router.refresh();

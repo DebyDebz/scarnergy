@@ -22,33 +22,33 @@ function toSegments(mapped: Pt[]): Seg[] {
 }
 
 /**
- * Image-anchored projection. Points are image-relative, so mapping them through
- * the SAME `resizeMode="contain"` transform as the displayed image places the
- * outline exactly on the room in the picture. Needs the image's intrinsic size
- * (learned from Image.onLoad). Returns [] when inputs are insufficient.
+ * Image-anchored projection to canvas-space POINTS. Points are image-relative, so
+ * mapping them through the SAME `resizeMode="contain"` transform as the displayed
+ * image places the outline exactly on the room in the picture. Needs the image's
+ * intrinsic size (learned from Image.onLoad). Returns [] when inputs insufficient.
  */
-export function projectOnImage(
+export function projectPointsOnImage(
   points: Pt[] | null | undefined,
   dims: { w: number; h: number },
   canvas: number,
-): Seg[] {
+): Pt[] {
   if (!points || points.length < 3 || !dims.w || !dims.h) return [];
   const cs = canvas / Math.max(dims.w, dims.h);
   const offX = (canvas - dims.w * cs) / 2;
   const offY = (canvas - dims.h * cs) / 2;
-  return toSegments(points.map(p => ({ x: offX + p.x * canvas, y: offY + p.y * canvas })));
+  return points.map(p => ({ x: offX + p.x * canvas, y: offY + p.y * canvas }));
 }
 
 /**
- * Bbox-fit projection (no background image). Fits the outline's bounding box into
- * the canvas inner area (canvas minus `padding` on each side), preserving aspect
- * ratio and centring. Returns [] when inputs are insufficient.
+ * Bbox-fit projection to canvas-space POINTS (no background image). Fits the
+ * outline's bounding box into the canvas inner area (canvas minus `padding` on
+ * each side), preserving aspect ratio and centring. Returns [] when insufficient.
  */
-export function fitToInner(
+export function fitPointsToInner(
   points: Pt[] | null | undefined,
   canvas: number,
   padding: number,
-): Seg[] {
+): Pt[] {
   if (!points || points.length < 3) return [];
   const xs = points.map(p => p.x), ys = points.map(p => p.y);
   const minX = Math.min(...xs), maxX = Math.max(...xs);
@@ -58,5 +58,29 @@ export function fitToInner(
   const scale = Math.min(inner / rX, inner / rY);
   const offX  = padding + (inner - rX * scale) / 2;
   const offY  = padding + (inner - rY * scale) / 2;
-  return toSegments(points.map(p => ({ x: offX + (p.x - minX) * scale, y: offY + (p.y - minY) * scale })));
+  return points.map(p => ({ x: offX + (p.x - minX) * scale, y: offY + (p.y - minY) * scale }));
+}
+
+/**
+ * Image-anchored projection. Returns the outline as edge segments. Thin wrapper
+ * over projectPointsOnImage so points (for clip paths) and segments (for stroked
+ * edges) stay in exact agreement.
+ */
+export function projectOnImage(
+  points: Pt[] | null | undefined,
+  dims: { w: number; h: number },
+  canvas: number,
+): Seg[] {
+  return toSegments(projectPointsOnImage(points, dims, canvas));
+}
+
+/**
+ * Bbox-fit projection. Returns the outline as edge segments (see projectOnImage).
+ */
+export function fitToInner(
+  points: Pt[] | null | undefined,
+  canvas: number,
+  padding: number,
+): Seg[] {
+  return toSegments(fitPointsToInner(points, canvas, padding));
 }

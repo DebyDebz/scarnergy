@@ -3,7 +3,8 @@ import {
   View, Text, Image, TouchableOpacity, StyleSheet, ActivityIndicator,
 } from 'react-native';
 import { Zone, BuildingElement } from '../../lib/supabase';
-import { projectOnImage, fitToInner } from '../../lib/floorplanGeometry';
+import { projectPointsOnImage, fitPointsToInner } from '../../lib/floorplanGeometry';
+import { ClippedGrid } from './ClippedGrid';
 
 /**
  * Stage 6 support — read-only gridded plan that renders placed elements at their
@@ -18,7 +19,6 @@ const CANVAS   = 300;
 const PADDING  = 12;
 const CELL_PX  = 20;
 const INNER    = CANVAS - PADDING * 2;
-const GRID_N   = Math.ceil(CANVAS / CELL_PX) + 1;
 
 // Element box colours per type (mirrors ElementPlacer palette intent).
 const TYPE_COLOR: Record<string, { bg: string; border: string }> = {
@@ -46,10 +46,10 @@ export function FloorPlanReview({ zone, elements, onMeasure }: Props) {
   const [imgLoaded, setImgLoaded] = useState(false);
   const [imgDims,   setImgDims]   = useState<{ w: number; h: number } | null>(null);
 
-  // Outline: image-anchored when the photo dims are known, bbox-fit otherwise.
-  const lines = hasImage && imgDims
-    ? projectOnImage(zone.floor_plan_points, imgDims, CANVAS)
-    : fitToInner(zone.floor_plan_points, CANVAS, PADDING);
+  // Outline points: image-anchored when the photo dims are known, bbox-fit otherwise.
+  const outlinePts = hasImage && imgDims
+    ? projectPointsOnImage(zone.floor_plan_points, imgDims, CANVAS)
+    : fitPointsToInner(zone.floor_plan_points, CANVAS, PADDING);
 
   const scaleM = zone.floor_plan_scale_m ?? null;
   const cellM  = scaleM != null ? scaleM / (INNER / CELL_PX) : null;
@@ -80,28 +80,8 @@ export function FloorPlanReview({ zone, elements, onMeasure }: Props) {
           </>
         )}
 
-        {/* Grid */}
-        {Array.from({ length: GRID_N }).map((_, i) => (
-          <View key={`v${i}`} pointerEvents="none" style={[styles.gridLine, styles.gridV, { left: i * CELL_PX }]} />
-        ))}
-        {Array.from({ length: GRID_N }).map((_, i) => (
-          <View key={`h${i}`} pointerEvents="none" style={[styles.gridLine, styles.gridH, { top: i * CELL_PX }]} />
-        ))}
-
-        {/* Zone outline */}
-        {lines.map((seg, i) => {
-          const dx = seg.x2 - seg.x1, dy = seg.y2 - seg.y1;
-          const len = Math.hypot(dx, dy);
-          if (len < 1) return null;
-          const ang = Math.atan2(dy, dx) * (180 / Math.PI);
-          return (
-            <View key={`o${i}`} pointerEvents="none" style={{
-              position: 'absolute', width: len, height: 2, backgroundColor: PRIMARY, opacity: 0.7,
-              left: (seg.x1 + seg.x2) / 2 - len / 2, top: (seg.y1 + seg.y2) / 2 - 1,
-              transform: [{ rotate: `${ang}deg` }],
-            }} />
-          );
-        })}
+        {/* Grid clipped to the footprint outline (full grid when not yet traced) */}
+        <ClippedGrid size={CANVAS} cellPx={CELL_PX} points={outlinePts} />
 
         {/* Elements (tappable) */}
         {placed.map(el => {
@@ -162,9 +142,6 @@ const styles = StyleSheet.create({
   imgHidden:  { opacity: 0 },
   imgLoading: { position: 'absolute', top: 0, left: 0, width: CANVAS, height: CANVAS,
                 alignItems: 'center', justifyContent: 'center' },
-  gridLine:   { position: 'absolute', backgroundColor: 'rgba(229,231,235,0.7)' },
-  gridV:      { width: 1, height: CANVAS },
-  gridH:      { height: 1, width: CANVAS },
   chip:       { position: 'absolute', backgroundColor: 'rgba(30,58,95,0.92)',
                 borderRadius: 4, paddingHorizontal: 3, paddingVertical: 1 },
   chipTxt:    { fontSize: 8, color: '#fff', fontWeight: '700' },
