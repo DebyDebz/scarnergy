@@ -19,6 +19,7 @@ import {
   EMPTY_SWEEP, SweepState, addSweepSample,
   thicknessFromFaces, thicknessFromSweep, isUsableThickness,
 } from "../../../lib/thickness";
+import { gridLengthMeters } from "../../../lib/floorplanGeometry";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -27,7 +28,7 @@ type SlotKey = "length_mm" | "height_mm" | "width_mm";
 // distance-to-surface, so these are captured from TWO readings (front + back →
 // |Δ| in point mode, or a min/max sweep in continuous mode) rather than one shot.
 type SlotDef = { key: SlotKey; label: string; thickness?: boolean };
-type ElementWithZone = BuildingElement & { zone_name?: string };
+type ElementWithZone = BuildingElement & { zone_name?: string; zone_scale_m?: number | null };
 
 // ── Slot definitions — keys match the Dutch enum values stored in the DB ──────
 
@@ -337,13 +338,13 @@ export default function InspectScreen() {
     Promise.resolve(
       supabase
         .from("building_elements")
-        .select("*, zones(name)")
+        .select("*, zones(name, floor_plan_scale_m)")
         .eq("id", elementId)
         .single()
     ).then(({ data }) => {
         if (data) {
           const { zones: zoneData, ...rest } = data as any;
-          setElement({ ...rest, zone_name: zoneData?.name ?? null });
+          setElement({ ...rest, zone_name: zoneData?.name ?? null, zone_scale_m: zoneData?.floor_plan_scale_m ?? null });
           setValues({
             ...(rest.length_mm != null ? { length_mm: (rest.length_mm / 1000).toFixed(3) } : {}),
             ...(rest.height_mm != null ? { height_mm: (rest.height_mm / 1000).toFixed(3) } : {}),
@@ -675,6 +676,11 @@ export default function InspectScreen() {
   if (!element) return <Text style={styles.error}>Element not found.</Text>;
 
   const slots      = SLOT_MAP[element.element_type] ?? DEFAULT_SLOTS;
+  // Plan-derived in-plan length (metres) from the element's grid width × the zone
+  // scale. Offered as a one-tap suggestion on the matching slot — never auto-filled,
+  // so the measurement audit trail only records values the inspector accepts.
+  const planLengthSlot: SlotKey = element.element_type === 'transparant_deel' ? 'width_mm' : 'length_mm';
+  const planLengthM = gridLengthMeters(element.grid_w, element.zone_scale_m);
   const filledCount = slots.filter(s => {
     const v = parseFloat(values[s.key] ?? "");
     return !isNaN(v) && v > 0;
@@ -777,6 +783,19 @@ export default function InspectScreen() {
                   <Text style={styles.glmBtnText} allowFontScaling={false}>{isActive ? "⏸" : "▶ GLM"}</Text>
                 </TouchableOpacity>
               </View>
+
+              {/* Plan-derived suggestion — one tap to use, then editable */}
+              {slot.key === planLengthSlot && planLengthM != null && !isFilled && (
+                <TouchableOpacity
+                  style={styles.planHint}
+                  onPress={() => {
+                    setValues(prev => ({ ...prev, [slot.key]: planLengthM.toFixed(3) }));
+                    setActiveSlotSync(null);
+                  }}
+                >
+                  <Text style={styles.planHintText}>📐 From plan ≈ {planLengthM.toFixed(2)} m — tap to use</Text>
+                </TouchableOpacity>
+              )}
 
               {/* Live GLM preview while this slot is active */}
               {isActive && isConnected && lastMeasurement && (
@@ -1024,6 +1043,10 @@ const styles = StyleSheet.create({
                     backgroundColor: "#1E3A5F", width: 72, alignItems: "center" },
   glmBtnActive:   { backgroundColor: "#2E86C1" },
   glmBtnText:     { color: "#fff", fontWeight: "700", fontSize: 13 },
+
+  planHint:       { marginTop: 8, alignSelf: "flex-start", backgroundColor: "#EEF2F7",
+                    borderRadius: 6, paddingHorizontal: 10, paddingVertical: 6 },
+  planHintText:   { fontSize: 12, color: "#1E3A5F", fontWeight: "600" },
 
   hint:           { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: "#AED6F1" },
   hintText:       { fontSize: 12, color: "#2E86C1", fontStyle: "italic" },

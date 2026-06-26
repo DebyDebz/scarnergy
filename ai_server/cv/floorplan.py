@@ -119,6 +119,27 @@ def _maybe_deskew(gray: np.ndarray) -> np.ndarray:
     if len(quad) != 4:
         return gray
     src = _order_quad(quad)
+
+    # Only warp when there is REAL perspective skew. Two guards stop us tilting or
+    # stretching plans that are already flat (clean scans/exports, or a sheet that
+    # fills the frame), which previously introduced a spurious tilt in the outline.
+    xs, ys = src[:, 0], src[:, 1]
+    bw, bh = xs.max() - xs.min(), ys.max() - ys.min()
+    if bw >= 0.97 * w and bh >= 0.97 * h:
+        return gray  # quad ≈ the full page frame: nothing to correct
+
+    def _corner_devs(p: np.ndarray) -> list[float]:
+        devs = []
+        for i in range(4):
+            a = p[(i - 1) % 4] - p[i]
+            b = p[(i + 1) % 4] - p[i]
+            cosang = float(np.dot(a, b) / ((np.linalg.norm(a) * np.linalg.norm(b)) + 1e-6))
+            devs.append(abs(np.degrees(np.arccos(np.clip(cosang, -1.0, 1.0))) - 90.0))
+        return devs
+
+    if max(_corner_devs(src)) <= 10.0:
+        return gray  # already near-rectangular: no skew to remove
+
     dst = np.array([[0, 0], [w - 1, 0], [w - 1, h - 1], [0, h - 1]], dtype="float32")
     m = cv2.getPerspectiveTransform(src, dst)
     return cv2.warpPerspective(gray, m, (w, h))
@@ -197,6 +218,52 @@ def _largest_polygon(binary: np.ndarray) -> Optional[np.ndarray]:
             if len(poly) >= 3:
                 return poly.reshape(-1, 2)
     return None
+
+
+# ── Stage: regularise the footprint ──────────────────────────────────────────
+def _regularize(poly: np.ndarray, max_dim: float) -> np.ndarray:
+    """Square off a footprint polygon: snap near-axis edges to exact H/V and drop
+    tiny edges. Floor plans are overwhelmingly orthogonal, so this removes skew
+    artefacts (e.g. a diagonal cut across an open porch, jagged double-edges)
+    without discarding genuine bump-outs/notches. Pixel space in and out.
+
+    Sequential walk: each vertex is placed relative to the previous one — a
+    near-horizontal edge keeps the previous y, a near-vertical edge keeps the
+    previous x — so shared corners stay consistent. The closing edge is then
+    reconciled so the ring stays closed.
+    """
+    pts = poly.reshape(-1, 2).astype(np.float64)
+    n = len(pts)
+    if n < 4:
+        return poly
+    ANGLE_TOL = 12.0                       # deg from an axis to treat an edge as H/V
+    MIN_EDGE = 0.01 * max_dim              # drop sub-1%-of-image edges (noise)
+
+    out = [pts[0].copy()]
+    for i in range(1, n):
+        prev = out[-1]
+        cur = pts[i].copy()
+        dx, dy = cur[0] - prev[0], cur[1] - prev[1]
+        ang = abs(np.degrees(np.arctan2(dy, dx)))
+        if min(ang, abs(ang - 180.0)) <= ANGLE_TOL:
+            cur[1] = prev[1]               # near-horizontal → keep y
+        elif abs(ang - 90.0) <= ANGLE_TOL:
+            cur[0] = prev[0]               # near-vertical → keep x
+        if np.hypot(cur[0] - prev[0], cur[1] - prev[1]) >= MIN_EDGE:
+            out.append(cur)
+    if len(out) < 3:
+        return poly
+
+    # Reconcile the closing edge back to the first vertex if it is near-axis.
+    first, last = out[0], out[-1]
+    dx, dy = first[0] - last[0], first[1] - last[1]
+    ang = abs(np.degrees(np.arctan2(dy, dx)))
+    if min(ang, abs(ang - 180.0)) <= ANGLE_TOL:
+        first[1] = last[1]
+    elif abs(ang - 90.0) <= ANGLE_TOL:
+        first[0] = last[0]
+
+    return np.array(out, dtype=np.int32).reshape(-1, 2)
 
 
 # ── Stage: rooms ─────────────────────────────────────────────────────────────
@@ -345,12 +412,18 @@ def detect(image_bytes: bytes, mode: str = "full") -> DetectResult:
         confidence = 0.6 if rooms else 0.0
         return DetectResult(image_w=w, image_h=h, confidence=confidence, rooms=rooms)
 
-    # full mode: segment rooms, detect elements per room (fall back to boundary).
-    room_polys = _segment_rooms(binary)
-    if not room_polys:
-        poly = _largest_polygon(binary)
-        if poly is not None:
-            room_polys = [poly]
+    # full mode: the zone footprint is the OUTER boundary — it is by far the most
+    # reliable signal. Room segmentation is kept only as a fallback: on many real
+    # plans the interior leaks to the exterior through deck/stair openings and the
+    # connected-component pass collapses to a small wrong fragment, so it must not
+    # be trusted as the footprint. The footprint is squared off (rectilinear) and
+    # its edges become the walls/openings (aligned by construction).
+    boundary = _largest_polygon(binary)
+    if boundary is not None:
+        footprint = _regularize(boundary, float(max(w, h)))
+        room_polys = [footprint]
+    else:
+        room_polys = _segment_rooms(binary)
 
     # Elements are derived per room from its own polygon (walls = edges, openings
     # = ink gaps along edges), so they align with the outline by construction and
@@ -375,10 +448,11 @@ if __name__ == "__main__":
     import sys
 
     if len(sys.argv) < 2:
-        print("usage: python -m ai_server.cv.floorplan <image> [boundary|full]")
+        print("usage: python -m ai_server.cv.floorplan <image> [boundary|full] [--annotate out.png]")
         raise SystemExit(2)
     path = sys.argv[1]
-    mode = sys.argv[2] if len(sys.argv) > 2 else "full"
+    mode = sys.argv[2] if len(sys.argv) > 2 and not sys.argv[2].startswith("-") else "full"
+    annotate = sys.argv[sys.argv.index("--annotate") + 1] if "--annotate" in sys.argv else None
     with open(path, "rb") as f:
         data = f.read()
     result = detect(data, mode)
@@ -390,3 +464,19 @@ if __name__ == "__main__":
         "elements_per_room": [len(r["elements"]) for r in result["rooms"]],
     }
     print(json.dumps(summary, indent=2))
+
+    if annotate:
+        # Draw the detected footprint (red) + elements (wall/window/door) onto the
+        # image for visual regression. Coordinates are normalised by max(w, h).
+        w, h, m = result["image_w"], result["image_h"], float(max(result["image_w"], result["image_h"]))
+        img = cv2.resize(_decode(data), (w, h))
+        for room in result["rooms"]:
+            pts = np.array([[p["x"] * m, p["y"] * m] for p in room["polygon"]], np.int32)
+            cv2.polylines(img, [pts], True, (0, 0, 255), 3)
+            for e in room["elements"]:
+                a = (int(e["x1"] * m), int(e["y1"] * m))
+                b = (int(e["x2"] * m), int(e["y2"] * m))
+                col = (255, 0, 0) if e["kind"] == "wall" else (0, 180, 0) if e["kind"] == "window" else (0, 140, 255)
+                cv2.line(img, a, b, col, 4)
+        cv2.imwrite(annotate, img)
+        print(f"annotated -> {annotate}")

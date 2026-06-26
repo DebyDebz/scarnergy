@@ -9,7 +9,10 @@
  * Run: npx jest __tests__/floorplanGeometry.test.ts
  */
 
-import { projectOnImage, fitToInner, Pt, Seg } from "../lib/floorplanGeometry";
+import {
+  projectOnImage, fitToInner, imageOffsets, projectGridRect, unprojectPoint,
+  gridLengthMeters, Pt, Seg,
+} from "../lib/floorplanGeometry";
 
 const CANVAS = 300;
 const PADDING = 12;
@@ -85,5 +88,77 @@ describe("fitToInner", () => {
     // Same shape (square) => same fitted geometry regardless of original scale/offset.
     expect(maxCoord(b)).toBeCloseTo(maxCoord(a));
     expect(minCoord(b)).toBeCloseTo(minCoord(a));
+  });
+});
+
+describe("imageOffsets", () => {
+  it("square image => no letterbox", () => {
+    expect(imageOffsets({ w: 100, h: 100 }, CANVAS)).toEqual({ offX: 0, offY: 0 });
+  });
+  it("landscape image => vertical letterbox only", () => {
+    // 200x100 contain-fit into 300 => scale 1.5, drawn 300x150, centred offY=75.
+    expect(imageOffsets({ w: 200, h: 100 }, CANVAS)).toEqual({ offX: 0, offY: 75 });
+  });
+  it("portrait image => horizontal letterbox only", () => {
+    expect(imageOffsets({ w: 100, h: 200 }, CANVAS)).toEqual({ offX: 75, offY: 0 });
+  });
+  it("zero dims => no offset (safe fallback)", () => {
+    expect(imageOffsets({ w: 0, h: 0 }, CANVAS)).toEqual({ offX: 0, offY: 0 });
+  });
+});
+
+describe("projectGridRect / unprojectPoint", () => {
+  const rect = { x: 0.2, y: 0.3, w: 0.1, h: 0.05 };
+
+  it("blank-zone ({0,0} offsets) reduces to grid_* * canvas", () => {
+    expect(projectGridRect(rect, CANVAS)).toEqual({ x: 60, y: 90, w: 30, h: 15 });
+  });
+
+  it("image offsets shift position but not size", () => {
+    const off = imageOffsets({ w: 200, h: 100 }, CANVAS); // offY = 75
+    const r = projectGridRect(rect, CANVAS, off);
+    expect(r).toEqual({ x: 60, y: 90 + 75, w: 30, h: 15 });
+  });
+
+  it("projects an element onto the SAME frame as its outline point", () => {
+    // A point shared by the outline and an element's top-left must land in the
+    // same canvas px under both projections — this is the alignment guarantee.
+    const dims = { w: 200, h: 100 };
+    const shared: Pt = { x: 0.2, y: 0.3 };
+    const [seg] = projectOnImage(
+      [shared, { x: 0.9, y: 0.3 }, { x: 0.9, y: 0.5 }], dims, CANVAS,
+    );
+    const r = projectGridRect({ ...shared, w: 0.1, h: 0.05 }, CANVAS, imageOffsets(dims, CANVAS));
+    expect(r.x).toBeCloseTo(seg.x1);
+    expect(r.y).toBeCloseTo(seg.y1);
+  });
+
+  it("unprojectPoint inverts the position half (round-trip)", () => {
+    const off = imageOffsets({ w: 100, h: 250 }, CANVAS);
+    const px = projectGridRect(rect, CANVAS, off);
+    const back = unprojectPoint({ x: px.x, y: px.y }, CANVAS, off);
+    expect(back.x).toBeCloseTo(rect.x);
+    expect(back.y).toBeCloseTo(rect.y);
+  });
+});
+
+describe("gridLengthMeters", () => {
+  it("scales a grid fraction by metres-across-canvas", () => {
+    expect(gridLengthMeters(0.5, 8)).toBeCloseTo(4);
+    expect(gridLengthMeters(0.1, 12)).toBeCloseTo(1.2);
+  });
+  it("returns null for missing or non-finite inputs", () => {
+    expect(gridLengthMeters(null, 8)).toBeNull();
+    expect(gridLengthMeters(0.5, null)).toBeNull();
+    expect(gridLengthMeters(0.5, Infinity)).toBeNull();
+    expect(gridLengthMeters(undefined, undefined)).toBeNull();
+  });
+  it("round-trips with two-point calibration (scaleM = R·CANVAS/d)", () => {
+    // Two points d=150 canvas px apart known to be R=6 m → scaleM=12 m across canvas.
+    const d = 150, R = 6;
+    const scaleM = (R * CANVAS) / d;
+    expect(scaleM).toBeCloseTo(12);
+    // An element of that same pixel length reads back as R metres.
+    expect(gridLengthMeters(d / CANVAS, scaleM)).toBeCloseTo(R);
   });
 });

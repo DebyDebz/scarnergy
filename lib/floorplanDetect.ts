@@ -110,44 +110,33 @@ export interface ElementDraft {
   is_complete: false;
 }
 
-// Canvas geometry — must match ElementPlacer / FloorPlanViewer.
+// Canvas geometry — must match ElementPlacer / FloorPlanReview.
 const CANVAS = 300;
-const PADDING = 12;
-const INNER = CANVAS - PADDING * 2;
 
 // On-canvas thickness (px) per element kind — matches the manual palette sizes.
+// Stored normalised (px / CANVAS) so it renders to the same on-canvas thickness.
 const THICKNESS: Record<DetectedElement['kind'], number> = { wall: 8, window: 10, door: 12 };
 
 /**
  * Convert a detected room's elements into building_elements insert rows.
  *
- * ElementPlacer renders the boundary polygon re-fit to the canvas (bbox -> INNER,
- * centred via `fitLines`) and renders elements at `grid_* * CANVAS` rotated around
- * their centre. Detected elements are segment endpoints in the same normalised
- * space as the polygon, so we apply the *same* fit transform to both endpoints,
- * then express the segment as the rotated rectangle ElementPlacer expects
- * (centre, length, angle). Walls land on the polygon edges and openings on the
- * walls — aligned by construction. Names are 1-indexed per kind ("Wall-01",
- * "Door-01", "Window-01"); the "Door"/"Window" prefix drives the UI mapping.
+ * grid_* are stored in the SAME normalised, image-relative frame as the room's
+ * polygon (`floor_plan_points`): detected endpoints are already px/max(w,h), so
+ * we keep them as-is and express each segment as the rotated rectangle the UI
+ * expects (top-left, width=length, height=thickness, angle). The render side
+ * (FloorPlanReview / ElementPlacer) projects grid_* through the image's
+ * contain-fit offsets — the identical transform applied to the outline — so
+ * walls land on the polygon edges and openings on the walls, on the photo, by
+ * construction. Names are 1-indexed per kind ("Wall-01", "Door-01",
+ * "Window-01"); the "Door"/"Window" prefix drives the UI mapping.
  */
 export function elementsToDrafts(
   room: DetectedRoom,
   zoneId: string,
   orgId: string,
 ): ElementDraft[] {
-  const xs = room.polygon.map(p => p.x);
-  const ys = room.polygon.map(p => p.y);
-  const minX = Math.min(...xs), maxX = Math.max(...xs);
-  const minY = Math.min(...ys), maxY = Math.max(...ys);
-  const rX = maxX - minX || 1, rY = maxY - minY || 1;
-  const scale = Math.min(INNER / rX, INNER / rY);
-  const offX = PADDING + (INNER - rX * scale) / 2;
-  const offY = PADDING + (INNER - rY * scale) / 2;
-  const fit = (x: number, y: number) => ({
-    x: offX + (x - minX) * scale,
-    y: offY + (y - minY) * scale,
-  });
   const round4 = (v: number) => parseFloat(v.toFixed(4));
+  const minLen = 4 / CANVAS; // ~4px floor, in normalised units
 
   const counts = { wall: 0, door: 0, window: 0 };
   return room.elements.map((el, i) => {
@@ -156,12 +145,12 @@ export function elementsToDrafts(
     const isWall = el.kind === 'wall';
     const label = isWall ? 'Wall' : el.kind === 'door' ? 'Door' : 'Window';
 
-    const a = fit(el.x1, el.y1);
-    const b = fit(el.x2, el.y2);
-    const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2;
-    const length = Math.max(Math.hypot(b.x - a.x, b.y - a.y), 4);
-    const thick = THICKNESS[el.kind];
-    const angle = Math.round((Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI);
+    // Endpoints already normalised image-relative (uniform px/max scale), so the
+    // centre, length and angle are computed directly in that frame.
+    const cx = (el.x1 + el.x2) / 2, cy = (el.y1 + el.y2) / 2;
+    const length = Math.max(Math.hypot(el.x2 - el.x1, el.y2 - el.y1), minLen);
+    const thick = THICKNESS[el.kind] / CANVAS;
+    const angle = Math.round((Math.atan2(el.y2 - el.y1, el.x2 - el.x1) * 180) / Math.PI);
 
     return {
       org_id: orgId,
@@ -169,11 +158,11 @@ export function elementsToDrafts(
       element_type: isWall ? 'gevel' : 'transparant_deel',
       name: `${label}-${n}`,
       orientation_deg: ((angle % 360) + 360) % 360,
-      // Top-left of the unrotated rect (ElementPlacer rotates around centre).
-      grid_x: round4((cx - length / 2) / CANVAS),
-      grid_y: round4((cy - thick / 2) / CANVAS),
-      grid_w: round4(length / CANVAS),
-      grid_h: round4(thick / CANVAS),
+      // Top-left of the unrotated rect (renderer rotates around centre).
+      grid_x: round4(cx - length / 2),
+      grid_y: round4(cy - thick / 2),
+      grid_w: round4(length),
+      grid_h: round4(thick),
       grid_rotation: angle,
       sort_order: i,
       is_active: true,

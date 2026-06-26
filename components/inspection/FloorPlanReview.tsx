@@ -3,7 +3,7 @@ import {
   View, Text, Image, TouchableOpacity, StyleSheet, ActivityIndicator,
 } from 'react-native';
 import { Zone, BuildingElement } from '../../lib/supabase';
-import { projectPointsOnImage, fitPointsToInner } from '../../lib/floorplanGeometry';
+import { projectPointsOnImage, fitPointsToInner, imageOffsets, gridLengthMeters } from '../../lib/floorplanGeometry';
 import { ClippedGrid } from './ClippedGrid';
 
 /**
@@ -18,7 +18,6 @@ const PRIMARY = '#1E3A5F';
 const CANVAS   = 300;
 const PADDING  = 12;
 const CELL_PX  = 20;
-const INNER    = CANVAS - PADDING * 2;
 
 // Element box colours per type (mirrors ElementPlacer palette intent).
 const TYPE_COLOR: Record<string, { bg: string; border: string }> = {
@@ -50,9 +49,13 @@ export function FloorPlanReview({ zone, elements, onMeasure }: Props) {
   const outlinePts = hasImage && imgDims
     ? projectPointsOnImage(zone.floor_plan_points, imgDims, CANVAS)
     : fitPointsToInner(zone.floor_plan_points, CANVAS, PADDING);
+  // Elements share the outline's frame: image-relative grid_* are shifted by the
+  // same contain-fit letterbox so they land on the photo (blank zones → {0,0}).
+  const { offX, offY } = hasImage && imgDims ? imageOffsets(imgDims, CANVAS) : { offX: 0, offY: 0 };
 
   const scaleM = zone.floor_plan_scale_m ?? null;
-  const cellM  = scaleM != null ? scaleM / (INNER / CELL_PX) : null;
+  // floor_plan_scale_m = metres across the full canvas width.
+  const cellM  = scaleM != null ? (CELL_PX / CANVAS) * scaleM : null;
   const placed = elements.filter(e => e.grid_x != null && e.grid_y != null);
 
   return (
@@ -85,7 +88,7 @@ export function FloorPlanReview({ zone, elements, onMeasure }: Props) {
 
         {/* Elements (tappable) */}
         {placed.map(el => {
-          const x = el.grid_x! * CANVAS, y = el.grid_y! * CANVAS;
+          const x = offX + el.grid_x! * CANVAS, y = offY + el.grid_y! * CANVAS;
           const w = Math.max((el.grid_w ?? 0.04) * CANVAS, 8);
           const h = Math.max((el.grid_h ?? 0.04) * CANVAS, 8);
           const col = TYPE_COLOR[el.element_type] ?? TYPE_COLOR.gevel;
@@ -104,15 +107,20 @@ export function FloorPlanReview({ zone, elements, onMeasure }: Props) {
           );
         })}
 
-        {/* Captured-value chips at each element centre (upright, non-blocking) */}
+        {/* Value chips at each element centre. Captured value when measured;
+            otherwise the scale-derived suggestion ("~1.20m") so the inspector
+            sees the plan's own measurement before capturing. */}
         {placed.map(el => {
-          const meters = primaryMeters(el);
-          if (!meters) return null;
-          const cx = (el.grid_x! + (el.grid_w ?? 0.04) / 2) * CANVAS;
-          const cy = (el.grid_y! + (el.grid_h ?? 0.04) / 2) * CANVAS;
+          const captured  = primaryMeters(el);
+          const suggested = captured == null ? gridLengthMeters(el.grid_w, scaleM) : null;
+          const label = captured ?? (suggested != null ? `~${suggested.toFixed(2)}m` : null);
+          if (!label) return null;
+          const cx = offX + (el.grid_x! + (el.grid_w ?? 0.04) / 2) * CANVAS;
+          const cy = offY + (el.grid_y! + (el.grid_h ?? 0.04) / 2) * CANVAS;
           return (
-            <View key={`c${el.id}`} pointerEvents="none" style={[styles.chip, { left: cx - 16, top: cy - 7 }]}>
-              <Text style={styles.chipTxt}>{meters}</Text>
+            <View key={`c${el.id}`} pointerEvents="none"
+              style={[styles.chip, suggested != null && styles.chipSuggested, { left: cx - 16, top: cy - 7 }]}>
+              <Text style={styles.chipTxt}>{label}</Text>
             </View>
           );
         })}
@@ -144,6 +152,7 @@ const styles = StyleSheet.create({
                 alignItems: 'center', justifyContent: 'center' },
   chip:       { position: 'absolute', backgroundColor: 'rgba(30,58,95,0.92)',
                 borderRadius: 4, paddingHorizontal: 3, paddingVertical: 1 },
+  chipSuggested: { backgroundColor: 'rgba(107,114,128,0.85)' },
   chipTxt:    { fontSize: 8, color: '#fff', fontWeight: '700' },
   infoRow:    { flexDirection: 'row', justifyContent: 'center', gap: 20, marginTop: 12 },
   infoTxt:    { fontSize: 12, color: '#6B7280' },

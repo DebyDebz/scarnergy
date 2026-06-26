@@ -152,7 +152,36 @@ Two stages were flagged as partial against the canonical flow spec and then addr
   header in session detail (`[id].tsx`). *Values appear on the plan after capture (refreshed on
   screen focus); live-during-capture readout still happens on the per-element screen.*
 
-## 9. Remaining / optional
+## 9. Accuracy pass — aligned geometry, true footprint, real scale (2026-06-26)
+
+Three compounding changes so the on-plan grid matches the uploaded plan's **shape** and
+its elements carry the plan's **measurements**:
+
+- **(A) One coordinate frame.** All geometry — outline, clipped grid, and placed elements —
+  is authored and rendered in a single image-relative frame, projected through the shared
+  contain-fit offsets (`lib/floorplanGeometry`: `imageOffsets` / `projectGridRect` /
+  `unprojectPoint`). Previously the outline was image-projected while elements were drawn in
+  bbox-fit space, so detected/placed elements floated off the walls. `ElementPlacer` now shows
+  the photo and places directly on it; `elementsToDrafts` stores `grid_*` in the same
+  normalised frame as `floor_plan_points`. *Existing `grid_*` rows re-render in the new frame
+  (accepted shift — they were mis-aligned before).*
+- **(C) Footprint-first detection** (`ai_server/cv/floorplan.py`). Full mode now derives the
+  zone footprint from the **outer boundary** (`_largest_polygon`) instead of trusting room
+  segmentation, which on real plans collapsed to a small interior fragment. The footprint is
+  **rectilinearised** (`_regularize` — near-axis edges snapped to H/V) and deskew is hardened
+  to fire only on genuine perspective. Room segmentation remains a fallback. CLI gains
+  `--annotate out.png` for visual regression.
+- **(B) Two-point scale calibration + auto-measure.** `floor_plan_scale_m` is **repurposed**
+  as *metres across the full canvas width* (cell size = `(CELL_PX/CANVAS)·scaleM` in
+  GridCanvas/FloorPlanViewer/FloorPlanReview). In Grid Analysis the inspector taps two points a
+  known distance apart and enters the length → `scaleM = R·CANVAS/d`; a numeric field remains as
+  a fallback. Element real length = `grid_w · scaleM` (`gridLengthMeters`): shown as a `~`
+  suggestion chip in `FloorPlanReview` and offered as a one-tap "from plan" fill on the matching
+  slot in `inspect.tsx` (never auto-written, so the measurement audit only records accepted
+  values). *No DB migration — `floor_plan_scale_m`'s meaning changed; prior values are
+  user-typed guesses overwritten on recalibration.*
+
+## 10. Remaining / optional
 - **Layer C** on-device walkthrough (C1–C6), now including the Stage 3 backdrop and Stage 6
   on-grid review.
 - Optional: clean removal of the now-dead Stage-6 `FloorPlanViewer` branch in `flow.tsx`.
