@@ -486,6 +486,14 @@ export function ElementPlacer({ zones, sessionId, onSaved }: Props) {
 
   return (
     <View style={styles.wrap}>
+      {/* Scrollable region: header, sub, zone tabs and canvas. Keeps the title
+          and instructions above the canvas (never overlapped) and lets the
+          canvas scroll into view on shorter screens instead of covering them. */}
+      <ScrollView
+        style={styles.scrollArea}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
       <Text style={styles.header}>Place Elements</Text>
       <Text style={styles.sub}>Tap a type below to add it, then drag to position.</Text>
 
@@ -579,6 +587,7 @@ export function ElementPlacer({ zones, sessionId, onSaved }: Props) {
         })}
       </View>
       </View>
+      </ScrollView>
 
       {/* ── Bottom controls — always visible ── */}
       <View style={styles.bottomControls}>
@@ -668,13 +677,19 @@ const styles = StyleSheet.create({
   wrap:           { flex: 1, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 0 },
   header:         { fontSize: 18, fontWeight: '700', color: PRIMARY, marginBottom: 2 },
   sub:            { fontSize: 12, color: '#6B7280', marginBottom: 8 },
+  scrollArea:     { flex: 1 },
+  // flexGrow keeps the canvas vertically centered when there's spare room;
+  // when space is tight the region scrolls instead of overflowing the header.
+  scrollContent:  { flexGrow: 1 },
   tabs:           { flexDirection: 'row', marginBottom: 8 },
   tab:            { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, backgroundColor: '#F3F4F6', marginRight: 8 },
   tabActive:      { backgroundColor: PRIMARY },
   tabTxt:         { fontSize: 13, color: '#374151' },
   tabTxtActive:   { color: '#fff', fontWeight: '600' },
-  // canvasWrap: fills remaining flex space, centers the canvas inside
-  canvasWrap:     { flex: 1, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
+  // canvasWrap: grows to centre the canvas when there's room, but keeps a
+  // minHeight so the fixed-size canvas is never compressed or clipped.
+  canvasWrap:     { flexGrow: 1, minHeight: CANVAS + 16,
+                    alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
   canvas:         { width: CANVAS, height: CANVAS,
                     backgroundColor: '#fafafa', borderRadius: 8, overflow: 'hidden',
                     borderWidth: 1, borderColor: '#E5E7EB' },

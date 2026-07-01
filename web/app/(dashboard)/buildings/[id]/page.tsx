@@ -21,11 +21,13 @@ import {
 
 interface Props { params: { id: string } }
 
-const DIRECTIONS: { key: BuildingFacadePhoto['direction']; label: string }[] = [
-  { key: 'voor',   label: 'Voorgevel'   },
-  { key: 'achter', label: 'Achtergevel' },
-  { key: 'links',  label: 'Linkergevel' },
-  { key: 'rechts', label: 'Rechtergevel'},
+// label = original Dutch term (kept for continuity); en = English translation
+// shown underneath. The `key` is a stored data value and must not change.
+const DIRECTIONS: { key: BuildingFacadePhoto['direction']; label: string; en: string }[] = [
+  { key: 'voor',   label: 'Voorgevel',   en: 'Front facade' },
+  { key: 'achter', label: 'Achtergevel', en: 'Rear facade'  },
+  { key: 'links',  label: 'Linkergevel', en: 'Left facade'  },
+  { key: 'rechts', label: 'Rechtergevel', en: 'Right facade' },
 ];
 
 export default async function BuildingDetailPage({ params }: Props) {
@@ -143,26 +145,32 @@ export default async function BuildingDetailPage({ params }: Props) {
       {/* ── Section 2 — Gevel Foto's ────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-gray-200">
         <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
-          <h2 className="font-semibold text-gray-900">Gevel Foto&apos;s buitenzijde</h2>
+          <h2 className="font-semibold text-gray-900">
+            Gevel Foto&apos;s buitenzijde
+            <span className="ml-2 font-normal text-gray-400 text-sm">Facade photos (exterior)</span>
+          </h2>
           <span className="text-xs text-gray-400">{facadePhotosRaw.length}/4 captured</span>
         </div>
         <div className="p-5 grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {DIRECTIONS.map(({ key, label }) => {
+          {DIRECTIONS.map(({ key, label, en }) => {
             const signedUrl = facadeByDir[key] ?? null;
             return (
               <div key={key} className="flex flex-col gap-1.5">
                 <div className={`aspect-[4/3] rounded-lg overflow-hidden border-2 ${signedUrl ? 'border-emerald-300' : 'border-dashed border-gray-200'} bg-gray-50 flex items-center justify-center`}>
                   {signedUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={signedUrl} alt={label} className="w-full h-full object-cover" />
+                    <img src={signedUrl} alt={en} className="w-full h-full object-cover" />
                   ) : (
                     <span className="text-2xl text-gray-300">📷</span>
                   )}
                 </div>
-                <p className={`text-xs text-center font-medium ${signedUrl ? 'text-emerald-700' : 'text-gray-400'}`}>
-                  {label}
-                  {signedUrl && <span className="ml-1 text-emerald-500">✓</span>}
-                </p>
+                <div className="text-center">
+                  <p className={`text-xs font-medium ${signedUrl ? 'text-emerald-700' : 'text-gray-400'}`}>
+                    {label}
+                    {signedUrl && <span className="ml-1 text-emerald-500">✓</span>}
+                  </p>
+                  <p className="text-[11px] text-gray-400">{en}</p>
+                </div>
               </div>
             );
           })}

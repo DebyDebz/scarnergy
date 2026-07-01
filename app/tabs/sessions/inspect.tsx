@@ -12,8 +12,6 @@ import { uploadImageToStorage } from "../../../lib/uploadImage";
 import { useBLE } from "../../../lib/BLEContext";
 import { useAuthStore } from "../../../store/authStore";
 import { GLMMeasurement } from "../../../hooks/useBLEDevice";
-import { FieldSelect } from "../../../components/ui/FieldSelect";
-import { FieldToggle } from "../../../components/ui/FieldToggle";
 import { elementTypeLabel } from "../../../lib/elementTypes";
 import {
   EMPTY_SWEEP, SweepState, addSweepSample,
@@ -579,12 +577,9 @@ export default function InspectScreen() {
         const num = parseFloat(raw);
         return !isNaN(num) && num > 0;
       });
-      const requiredDetailFields = (DETAIL_FIELDS[element.element_type] ?? [])
-        .filter(f => f.target !== 'opening' && !f.dependsOn);
-      const allDetailsFilled = requiredDetailFields.every(f => details[f.key] != null && details[f.key] !== '');
-      if (allSlotsFilled && allDetailsFilled) update.is_complete = true;
-      // Legacy: if no detail fields defined for this type, just require slots
-      if (allSlotsFilled && requiredDetailFields.length === 0) update.is_complete = true;
+      // Completion is measurement-only: an element is complete once all of its
+      // required measurement slots are filled (the DETAILS section was removed).
+      if (allSlotsFilled) update.is_complete = true;
 
       if (Object.keys(update).length > 0) {
         const { error } = await supabase
@@ -685,9 +680,7 @@ export default function InspectScreen() {
     const v = parseFloat(values[s.key] ?? "");
     return !isNaN(v) && v > 0;
   }).length;
-  const requiredDetails = (DETAIL_FIELDS[element.element_type] ?? []).filter(f => !f.dependsOn);
-  const filledDetails   = requiredDetails.filter(f => details[f.key] != null && details[f.key] !== '').length;
-  const isFullyComplete = filledCount === slots.length && filledDetails === requiredDetails.length;
+  const isFullyComplete = filledCount === slots.length;
 
   return (
     <KeyboardAvoidingView
@@ -891,55 +884,6 @@ export default function InspectScreen() {
           );
         })}
 
-        {/* ── Qualitative Details ── */}
-        {(DETAIL_FIELDS[element.element_type] ?? []).length > 0 && (
-          <View style={styles.detailSection}>
-            <Text style={styles.detailSectionLabel}>DETAILS</Text>
-            {(DETAIL_FIELDS[element.element_type] ?? []).map(field => {
-              // Conditional visibility: hide fields that depend on another field's value
-              if (field.dependsOn) {
-                const depVal = details[field.dependsOn.key];
-                if (depVal !== field.dependsOn.value) return null;
-              }
-              if (field.type === 'toggle') {
-                return (
-                  <FieldToggle
-                    key={field.key}
-                    label={field.label}
-                    value={!!details[field.key]}
-                    onChange={v => setDetails(prev => ({ ...prev, [field.key]: v }))}
-                  />
-                );
-              }
-              if (field.type === 'select' && field.options) {
-                return (
-                  <FieldSelect
-                    key={field.key}
-                    label={field.label}
-                    value={(details[field.key] as string) ?? null}
-                    options={field.options}
-                    onSelect={v => setDetails(prev => ({ ...prev, [field.key]: v }))}
-                  />
-                );
-              }
-              // number or text: inline TextInput row
-              return (
-                <View key={field.key} style={styles.detailInputRow}>
-                  <Text style={styles.detailInputLabel}>{field.label}</Text>
-                  <TextInput
-                    style={styles.detailInput}
-                    value={details[field.key] != null ? String(details[field.key]) : ''}
-                    onChangeText={v => setDetails(prev => ({ ...prev, [field.key]: field.type === 'number' ? parseFloat(v) || v : v }))}
-                    keyboardType={field.type === 'number' ? 'decimal-pad' : 'default'}
-                    placeholder={field.type === 'number' ? '0.00' : '…'}
-                    placeholderTextColor="#ccc"
-                  />
-                </View>
-              );
-            })}
-          </View>
-        )}
-
         {/* ── Photos ── */}
         <View style={styles.photoSection}>
           <Text style={styles.photoLabel}>PHOTOS</Text>
@@ -1082,21 +1026,6 @@ const styles = StyleSheet.create({
   livePreviewMode: { fontSize: 11, color: "#AAA" },
   flashLabel:     { fontSize: 12, color: "#1E8449", fontWeight: "700", marginTop: 6,
                     textAlign: "center" },
-
-  detailSection:        { backgroundColor: "#fff", borderRadius: 12, overflow: 'hidden',
-                          elevation: 1, shadowColor: "#000", shadowOpacity: 0.04, shadowRadius: 3 },
-  detailSectionLabel:   { fontSize: 11, fontWeight: "700", color: "#888",
-                          letterSpacing: 0.8, textTransform: "uppercase",
-                          paddingHorizontal: 16, paddingTop: 14, paddingBottom: 6 },
-  detailInputRow:       { flexDirection: 'row', alignItems: 'center',
-                          paddingVertical: 10, paddingHorizontal: 16,
-                          backgroundColor: '#fff',
-                          borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#e5e7eb' },
-  detailInputLabel:     { flex: 1, fontSize: 14, color: '#374151', fontWeight: '500' },
-  detailInput:          { fontSize: 14, fontWeight: '600', color: '#1E3A5F',
-                          borderWidth: 1, borderColor: '#dde', borderRadius: 6,
-                          paddingHorizontal: 10, paddingVertical: 6,
-                          minWidth: 100, textAlign: 'right' },
 
   photoSection:   { backgroundColor: "#fff", borderRadius: 12, padding: 14,
                     elevation: 1, shadowColor: "#000", shadowOpacity: 0.04, shadowRadius: 3 },
