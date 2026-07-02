@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { BleManager, Device } from "react-native-ble-plx";
+import { BleManager, Device, State as BleAdapterState } from "react-native-ble-plx";
 import { Platform, PermissionsAndroid } from "react-native";
 import Constants, { ExecutionEnvironment } from "expo-constants";
 import { supabase } from "../lib/supabase";
@@ -330,6 +330,28 @@ export function useBLEDevice() {
     }
   }, [setState, handleMeasurement, stopPolling]);
 
+  // Resolves once the BLE adapter reaches a terminal state. A freshly-constructed
+  // BleManager reports Unknown/Resetting for a few hundred ms — calling startDeviceScan
+  // during that window fails instantly ("scanning → error"). We subscribe with
+  // emitCurrentState so we get the state immediately if it's already known, and wait up
+  // to `timeoutMs` for it to settle to PoweredOn.
+  const waitForPoweredOn = (manager: BleManager, timeoutMs = 5_000): Promise<BleAdapterState> =>
+    new Promise(resolve => {
+      let settled = false;
+      const finish = (s: BleAdapterState) => {
+        if (settled) return;
+        settled = true;
+        sub.remove();
+        clearTimeout(timer);
+        resolve(s);
+      };
+      const sub = manager.onStateChange(s => {
+        // Unknown/Resetting are transient — keep waiting for a terminal state.
+        if (s !== BleAdapterState.Unknown && s !== BleAdapterState.Resetting) finish(s);
+      }, true);
+      const timer = setTimeout(() => finish(BleAdapterState.Unknown), timeoutMs);
+    });
+
   const scan = useCallback(async () => {
     if (isExpoGo) {
       setErrorMessage("Bluetooth is not available in Expo Go. Use a development build.");
@@ -341,7 +363,22 @@ export function useBLEDevice() {
     if (!manager) return;
 
     const granted = await requestPermissions();
-    if (!granted) { setErrorMessage("Bluetooth permissions denied"); return; }
+    if (!granted) { setErrorMessage("Bluetooth permissions denied"); setState("error"); return; }
+
+    // Ensure the adapter is actually on before scanning — otherwise startDeviceScan
+    // errors immediately and we bounce straight to the "error" state.
+    const adapterState = await waitForPoweredOn(manager);
+    if (adapterState !== BleAdapterState.PoweredOn) {
+      const msg =
+        adapterState === BleAdapterState.PoweredOff  ? "Bluetooth is turned off — enable it and try again."
+      : adapterState === BleAdapterState.Unauthorized ? "Bluetooth permission is denied for this app — enable it in Settings."
+      : adapterState === BleAdapterState.Unsupported  ? "This device does not support Bluetooth LE."
+      : `Bluetooth is not ready (state: ${adapterState}).`;
+      console.warn("[BLE] Adapter not ready:", adapterState);
+      setErrorMessage(msg);
+      setState("error");
+      return;
+    }
 
     setState("scanning");
     setErrorMessage(null);
@@ -349,6 +386,8 @@ export function useBLEDevice() {
 
     manager.startDeviceScan(null, { allowDuplicates: false }, async (error, device) => {
       if (error) {
+        console.warn("[BLE] Scan error:", error.message);
+        manager.stopDeviceScan();
         setErrorMessage(error.message);
         setState("error");
         return;

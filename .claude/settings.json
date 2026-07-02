@@ -11,7 +11,8 @@
       "Bash(python3 -c \"import json,sys; p=json.load\\(sys.stdin\\); print\\('version:', p['version']\\); print\\('exports:', json.dumps\\(list\\(\\(p.get\\('exports'\\) or {}\\).keys\\(\\)\\)[:10], indent=2\\)\\)\")",
       "Bash(pkill -f \"expo start --web\")",
       "Bash(docker compose *)",
-      "Bash(chmod +x /home/deborah/projects/ScanergyV2/start-web.sh)"
+      "Bash(chmod +x /home/deborah/projects/ScanergyV2/start-web.sh)",
+      "Bash(npx tsc *)"
     ]
   }
 }
