@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { Platform } from "react-native";
-import * as SecureStore from "expo-secure-store";
+import { getItemChunked, setItemChunked, removeItemChunked } from "./secureStore";
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
@@ -20,9 +20,12 @@ const supabaseStorage =
         removeItem: (key: string) => { localStorage.removeItem(key); return Promise.resolve(); },
       }
     : {
-        getItem:    (key: string) => SecureStore.getItemAsync(key),
-        setItem:    (key: string, value: string) => SecureStore.setItemAsync(key, value),
-        removeItem: (key: string) => SecureStore.deleteItemAsync(key),
+        // Chunked adapter: the Supabase session exceeds SecureStore's ~2048-byte
+        // single-value limit, so we split it across keychain entries. See
+        // lib/secureStore.ts. Legacy single-value sessions are read as a fallback.
+        getItem:    (key: string) => getItemChunked(key),
+        setItem:    (key: string, value: string) => setItemChunked(key, value),
+        removeItem: (key: string) => removeItemChunked(key),
       };
 
 const DEV_JWT = process.env.EXPO_PUBLIC_DEV_JWT;

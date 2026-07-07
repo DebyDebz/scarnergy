@@ -11,6 +11,7 @@
     },
     "ios": {
       "bundleIdentifier": "com.krontivaafrica.scarnergyapp",
+      "buildNumber": "13",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSBluetoothAlwaysUsageDescription": "This app uses Bluetooth to connect to and communicate with your GLM device.",
@@ -19,6 +20,7 @@
     },
     "android": {
       "package": "com.krontivaafrica.scarnergyapp",
+      "versionCode": 13,
       "permissions": [
         "android.permission.BLUETOOTH",
         "android.permission.BLUETOOTH_ADMIN",
@@ -45,7 +47,8 @@
           "modes": [],
           "bluetoothAlwaysPermission": "Allow $(PRODUCT_NAME) to connect to your GLM Bluetooth device."
         }
-      ]
+      ],
+      "@sentry/react-native"
     ],
     "owner": "fabricelaba"
   }

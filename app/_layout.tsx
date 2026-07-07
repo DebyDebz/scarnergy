@@ -20,15 +20,18 @@ import { useAuthStore } from "../store/authStore";
 import { BLEProvider } from "../lib/BLEContext";
 import { installErrorHandlers, reportError } from "../lib/errorLog";
 import { ErrorOverlay } from "../components/ui/ErrorOverlay";
+import { initSentry, captureException, wrapWithSentry } from "../lib/sentry";
 
-// Install the global JS error/rejection handlers as early as possible — at module
-// load, before any component mounts — so startup failures are captured too.
+// Initialize the native crash reporter first (it installs its own global
+// handlers), then chain our in-app JS handlers on top. Both run at module load,
+// before any component mounts, so startup failures are captured too.
+initSentry();
 installErrorHandlers();
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
   state = { error: null };
   static getDerivedStateFromError(e: Error) { return { error: e.message }; }
-  componentDidCatch(e: Error) { reportError(e, "error"); }
+  componentDidCatch(e: Error) { reportError(e, "error"); captureException(e); }
   render() {
     if (this.state.error) {
       return (
@@ -52,7 +55,7 @@ const DEV_PROFILE = {
   is_active: true,
 };
 
-export default function RootLayout() {
+function RootLayout() {
   const { session, loading, loadProfile } = useAuthStore();
   const router   = useRouter();
   const segments = useSegments();
@@ -100,3 +103,7 @@ export default function RootLayout() {
     </ErrorBoundary>
   );
 }
+
+// Wrap the root with Sentry so it can hook the app's lifecycle and touch events
+// onto crash reports. No-op if Sentry init was skipped (no DSN / Expo Go).
+export default wrapWithSentry(RootLayout);
