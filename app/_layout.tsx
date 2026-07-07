@@ -18,10 +18,17 @@ if (Platform.OS === "web") {
 }
 import { useAuthStore } from "../store/authStore";
 import { BLEProvider } from "../lib/BLEContext";
+import { installErrorHandlers, reportError } from "../lib/errorLog";
+import { ErrorOverlay } from "../components/ui/ErrorOverlay";
+
+// Install the global JS error/rejection handlers as early as possible — at module
+// load, before any component mounts — so startup failures are captured too.
+installErrorHandlers();
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
   state = { error: null };
   static getDerivedStateFromError(e: Error) { return { error: e.message }; }
+  componentDidCatch(e: Error) { reportError(e, "error"); }
   render() {
     if (this.state.error) {
       return (
@@ -89,6 +96,7 @@ export default function RootLayout() {
       <BLEProvider>
         <Slot />
       </BLEProvider>
+      <ErrorOverlay />
     </ErrorBoundary>
   );
 }

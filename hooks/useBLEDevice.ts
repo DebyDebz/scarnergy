@@ -87,8 +87,19 @@ export function useBLEDevice() {
 
   useEffect(() => {
     if (isExpoGo) return;
-    managerRef.current = new BleManager();
-    return () => { managerRef.current?.destroy(); };
+    // Guard the native BleManager construction: on iOS this eagerly invokes the
+    // native `createClient` (a void TurboModule method). If it throws, surface it
+    // as a visible error state instead of letting an uncaught throw bubble up.
+    try {
+      managerRef.current = new BleManager();
+    } catch (e: any) {
+      console.error("[BLE] BleManager init failed:", e?.message ?? e, e);
+      setErrorMessage(`Bluetooth init failed: ${e?.message ?? e}`);
+      setState("error");
+    }
+    return () => {
+      try { managerRef.current?.destroy(); } catch { /* manager may be null / already torn down */ }
+    };
   }, []);
 
   const requestPermissions = async (): Promise<boolean> => {
