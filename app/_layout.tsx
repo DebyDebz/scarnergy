@@ -17,6 +17,7 @@ if (Platform.OS === "web") {
   };
 }
 import { useAuthStore } from "../store/authStore";
+import { supabaseConfigError } from "../lib/supabase";
 import { BLEProvider } from "../lib/BLEContext";
 import { installErrorHandlers, reportError } from "../lib/errorLog";
 import { ErrorOverlay } from "../components/ui/ErrorOverlay";
@@ -63,6 +64,7 @@ function RootLayout() {
 
   useEffect(() => {
     setMounted(true);
+    if (supabaseConfigError) return; // config screen is shown; don't hit the backend
     if (DEV_BYPASS_AUTH) {
       useAuthStore.setState({ profile: DEV_PROFILE, loading: false });
       return;
@@ -79,6 +81,7 @@ function RootLayout() {
 
   useEffect(() => {
     if (!mounted) return;
+    if (supabaseConfigError) return;
     if (loading) return;
     if (DEV_BYPASS_AUTH) {
       if (segments[0] !== "tabs") router.replace("/tabs");
@@ -93,6 +96,15 @@ function RootLayout() {
     if (!session && !inAuth)     router.replace("/auth/sign-in");
     else if (session && !inTabs) router.replace("/tabs");
   }, [mounted, session, loading, segments]);
+
+  if (supabaseConfigError) {
+    return (
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: 24, backgroundColor: "#fff" }}>
+        <Text style={{ color: "#b91c1c", fontSize: 16, fontWeight: "700", marginBottom: 8 }}>Configuration error</Text>
+        <Text style={{ color: "#333", fontSize: 13, textAlign: "center" }}>{supabaseConfigError}</Text>
+      </View>
+    );
+  }
 
   return (
     <ErrorBoundary>

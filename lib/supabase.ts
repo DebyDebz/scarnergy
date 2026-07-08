@@ -5,12 +5,17 @@ import { getItemChunked, setItemChunked, removeItemChunked } from "./secureStore
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
-if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-  throw new Error(
-    '[Supabase] EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY must be set.\n' +
-    'Run: cd scarnergy-app && npm start  (the prestart hook auto-detects the backend IP)'
-  );
-}
+// Missing config must NOT throw here: this module is imported during app
+// bootstrap, and a module-scope throw kills the app before the first frame
+// (builds 13/14 SIGSEGV'd at launch while native marshaled exactly this
+// error). Export the problem instead; the root layout renders a readable
+// configuration-error screen.
+export const supabaseConfigError: string | null =
+  !SUPABASE_URL || !SUPABASE_ANON_KEY
+    ? '[Supabase] EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY must be set.\n' +
+      'Dev: npm start (the prestart hook auto-detects the backend IP).\n' +
+      'Release: set them in the eas.json build profile env.'
+    : null;
 
 const supabaseStorage =
   Platform.OS === "web"
@@ -37,8 +42,10 @@ function devFetch(input: RequestInfo | URL, init?: RequestInit) {
 }
 
 export const supabase = createClient(
-  SUPABASE_URL,
-  SUPABASE_ANON_KEY,
+  // Fallbacks keep createClient from throwing when config is missing; the
+  // config-error screen prevents any real request from being made.
+  SUPABASE_URL ?? "http://supabase-config-missing.invalid",
+  SUPABASE_ANON_KEY ?? "supabase-config-missing",
   {
     auth: {
       storage: supabaseStorage,
