@@ -108,6 +108,7 @@ export default function SessionDetailScreen() {
               });
               if (fnErr) throw fnErr;
               loadSession();
+              router.push({ pathname: "/tabs/sessions/results", params: { id: sessionId } });
             } catch (fnEx: any) {
               // Edge function unavailable in local dev — fall back to the
               // close_inspection_session RPC which still computes all totals.
@@ -116,7 +117,10 @@ export default function SessionDetailScreen() {
                 p_session_id: sessionId,
               });
               if (rpcErr) Alert.alert("Error", rpcErr.message);
-              else loadSession();
+              else {
+                loadSession();
+                router.push({ pathname: "/tabs/sessions/results", params: { id: sessionId } });
+              }
             } finally {
               setClosing(false);
             }
@@ -371,9 +375,17 @@ export default function SessionDetailScreen() {
               <View style={styles.footer}>
 
 {session.status === "completed" && (
-                  <View style={styles.completedBanner}>
-                    <Text style={styles.completedBannerText}>✓  Session Completed</Text>
-                  </View>
+                  <>
+                    <View style={styles.completedBanner}>
+                      <Text style={styles.completedBannerText}>✓  Session Completed</Text>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.resultsBtn}
+                      onPress={() => router.push({ pathname: "/tabs/sessions/results", params: { id: sessionId ?? "" } })}
+                    >
+                      <Text style={styles.resultsBtnText}>⚡  Energy Results</Text>
+                    </TouchableOpacity>
+                  </>
                 )}
 
                 <TouchableOpacity style={styles.exportBtn} onPress={exportXML}>
@@ -507,6 +519,8 @@ const styles = StyleSheet.create({
 
   completedBanner:     { backgroundColor: "#D5F0E3", borderRadius: 12, padding: 18, alignItems: "center" },
   completedBannerText: { color: "#1E8449", fontSize: 15, fontWeight: "700" },
+  resultsBtn:          { backgroundColor: "#1E8449", borderRadius: 12, padding: 16, alignItems: "center" },
+  resultsBtnText:      { color: "#fff", fontSize: 15, fontWeight: "700" },
   exportBtn:           { backgroundColor: "#2E86C1", borderRadius: 12, padding: 16, alignItems: "center" },
   exportBtnText:       { color: "#fff", fontSize: 15, fontWeight: "700" },
 
