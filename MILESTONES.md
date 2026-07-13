@@ -31,11 +31,11 @@ Status key: ✅ Done · 🔨 Partial · ❌ Not started
 
 | Task | File(s) | Status |
 |---|---|---|
-| "New Session" button + creation form | `app/tabs/sessions/index.tsx` | ❌ |
-| Session creation calls PostgREST insert | `app/tabs/sessions/index.tsx` | ❌ |
-| "Close Session" button in session detail | `app/tabs/sessions/[id].tsx` | ❌ |
-| Wire `session_close` edge function to close button | `app/tabs/sessions/[id].tsx` | ❌ |
-| Pause / resume session state | `app/tabs/sessions/[id].tsx` | ❌ |
+| "New Session" button + creation form | `app/tabs/sessions/index.tsx` | ✅ |
+| Session creation calls PostgREST insert | `app/tabs/sessions/index.tsx` | ✅ |
+| "Close Session" button in session detail | `app/tabs/sessions/[id].tsx` | ✅ |
+| Wire `session_close` edge function to close button | `app/tabs/sessions/[id].tsx` | ✅ (RPC fallback for local dev) |
+| Pause / resume session state | `app/tabs/sessions/[id].tsx` | ✅ |
 
 ---
 
@@ -43,13 +43,17 @@ Status key: ✅ Done · 🔨 Partial · ❌ Not started
 
 **Goal:** Inspector drills from building → zone → element → opening, with measurement capture at element level.
 
-| Task | File(s) to create | Status |
+> Superseded by the **unified inspection flow** (see `docs/UNIFIED_FLOORPLAN_FLOW.md`):
+> buildings → start inspection → staged flow (`flow.tsx`) → floor plan (`floorplan.tsx`)
+> → element inspect (`inspect.tsx`) → facade photos.
+
+| Task | File(s) | Status |
 |---|---|---|
-| Building detail screen — zones list | `app/tabs/buildings/[id].tsx` | ❌ |
-| Zone detail screen — elements list | `app/tabs/buildings/[bid]/zones/[zid].tsx` | ❌ |
-| Building element detail — openings + MeasurementInput | `app/tabs/buildings/[bid]/zones/[zid]/elements/[eid].tsx` | ❌ |
-| Link measurement rows to `element_id` / `opening_id` on insert | `app/tabs/sessions/[id].tsx` | ❌ |
-| Tap a building card → opens building detail (not sessions list) | `app/tabs/buildings.tsx` | ❌ |
+| Zones list per session/building | `app/tabs/sessions/[id].tsx` (zone tabs) | ✅ |
+| Elements list per zone | `app/tabs/sessions/[id].tsx` | ✅ |
+| Element detail — openings + MeasurementInput | `app/tabs/sessions/inspect.tsx` | ✅ |
+| Link measurement rows to `element_id` on insert | `app/tabs/sessions/inspect.tsx` | ✅ |
+| Tap a building card → sessions / start inspection | `app/tabs/buildings.tsx` | ✅ |
 
 ---
 
@@ -75,10 +79,10 @@ Status key: ✅ Done · 🔨 Partial · ❌ Not started
 
 | Task | File(s) | Status |
 |---|---|---|
-| POST to `/ai/energy` after session closes | `app/tabs/sessions/[id].tsx` or edge fn | ❌ |
-| Energy label result screen | `app/tabs/sessions/[id]/result.tsx` | ❌ |
-| Anomaly list with drill-down explanation | `app/tabs/sessions/[id].tsx` | ❌ |
-| Display confidence score alongside label | result screen | ❌ |
+| Compute labels after session closes | `session_close` edge fn → `energy_label_estimate` → `compute_zone_energy_label` | ✅ |
+| Energy label result screen | `app/tabs/sessions/results.tsx` | ✅ |
+| Anomaly list with drill-down to element | `app/tabs/sessions/results.tsx` | ✅ |
+| Display confidence alongside label | results screen shows data-coverage % (labels are rule-based; replace with real confidence when the §9 NTA 8800 engine lands) | ✅ |
 
 ---
 
@@ -88,10 +92,10 @@ Status key: ✅ Done · 🔨 Partial · ❌ Not started
 
 | Task | File(s) | Status |
 |---|---|---|
-| Sign-up / registration screen | `app/auth/sign-up.tsx` | ❌ |
-| Password reset / forgot-password screen | `app/auth/reset.tsx` | ❌ |
-| Profile / settings screen (change name, sign out) | `app/tabs/profile.tsx` | ❌ |
-| Role-aware tab visibility (supervisor sees all orgs) | `app/tabs/_layout.tsx` | ❌ |
+| Sign-up / registration screen | `app/auth/sign-up.tsx` | ❌ (users are provisioned by admins for now) |
+| Password reset / forgot-password screen | `app/auth/forgot-password.tsx` (email → recovery code → new password) | ✅ |
+| Profile / settings screen (change name, password, sign out) | `app/tabs/profile.tsx` | ✅ |
+| Role-aware tab visibility | `app/tabs/_layout.tsx` (GLM tab hidden for supervisors) | ✅ |
 
 ---
 
@@ -130,8 +134,8 @@ Status key: ✅ Done · 🔨 Partial · ❌ Not started
 
 | Task | Notes | Status |
 |---|---|---|
-| End-to-end test: BLE → insert → realtime → mobile re-render | | ❌ |
-| Offline sync stress test (`useSyncQueue`) | drop network mid-session | ❌ |
+| End-to-end test: BLE → insert → realtime → mobile re-render | `__tests__/blePipeline.e2e.test.ts` (real decoder/dispatch/merge, faked network edge) | ✅ |
+| Offline sync stress test (`useSyncQueue`) | `__tests__/syncQueue.test.ts` — drop mid-drain, retry cap, 50-op stress, concurrent-drain coalescing | ✅ |
 | RLS policy tests pass in CI | `supabase/migrations/rls_tests.sql` exists | 🔨 |
 | API smoke tests cover all Kong routes | `supabase/api_tests.http` exists | 🔨 |
 | AI model retrain pipeline documented | `ai_server/models/train_models.py` exists | 🔨 |
