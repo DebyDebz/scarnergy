@@ -16,7 +16,7 @@ import { elementTypeLabel } from "../../../lib/elementTypes";
 import {
   EMPTY_SWEEP, SweepState, addSweepSample,
   thicknessFromFaces, thicknessFromSweep, isUsableThickness,
-} from "../../../lib/thickness";
+} from "@scarnergy/opname-calc";
 import { gridLengthMeters } from "../../../lib/floorplanGeometry";
 
 // ── Types ─────────────────────────────────────────────────────────────────────

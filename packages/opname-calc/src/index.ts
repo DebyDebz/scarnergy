@@ -9,3 +9,4 @@
 
 export * from './units';
 export * from './geometry';
+export * from './thickness';
