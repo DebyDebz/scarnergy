@@ -23,16 +23,17 @@ The Phase 0/1 work from `docs/CALC_TASK_CHECKLIST.md` exists in the working
 tree but is **uncommitted** (this repo learned the hard way that uncommitted
 work doesn't ship — EAS builds from git HEAD).
 
-- [ ] Commit the workspace package `packages/opname-calc` (units, geometry) and
+- [x] Commit the workspace package `packages/opname-calc` (units, geometry) and
       the root `workspaces` change in `package.json`.
-- [ ] Commit the restored test harness + tests: `__tests__/opnameCalc.test.ts`,
+- [x] Commit the restored test harness + tests: `__tests__/opnameCalc.test.ts`,
       `__tests__/vabiExport.golden.test.ts`, `__tests__/fixtures/`,
       `__tests__/__snapshots__/`, plus the ts-jest config migration.
-- [ ] Commit the web/mobile import updates (`web/lib/calc.ts`,
+- [x] Commit the web/mobile import updates (`web/lib/calc.ts`,
       `web/lib/vabiXml.ts`, `lib/vabiExport.ts`, `web/next.config.mjs`,
       `tsconfig.json`).
-- **Verify gate:** clean `git status` for calc files · `npm test` green ·
-  `cd web && npx next build` ok.
+- **Verify gate:** ✅ 2026-07-13 — banked as commits b0affd5…9c580fa (incl. M4/M5/M8
+  mobile features, thickness move, exporter collapse) · `npm test` green (88) ·
+  `next build` ok · clean `git status`.
 
 ---
 
