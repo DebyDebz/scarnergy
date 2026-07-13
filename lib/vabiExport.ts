@@ -6,6 +6,7 @@
  */
 
 import type { BuildingElement, Opening, Zone } from './supabase';
+import { r2, toCardinal, floorId, floorName } from '@scarnergy/opname-calc';
 
 // ── Session / Building types needed by buildVabiXml ──────────────────────────
 
@@ -31,26 +32,8 @@ export interface VabiOrgInfo {
 
 // ── Mapping helpers ───────────────────────────────────────────────────────────
 
-export function toCardinal(deg: number | null): string {
-  if (deg == null) return '';
-  const d = ((deg % 360) + 360) % 360;
-  const dirs = [
-    'Noord', 'Noord-Oost', 'Oost', 'Zuid-Oost',
-    'Zuid', 'Zuid-West', 'West', 'Noord-West',
-  ];
-  return dirs[Math.round(d / 45) % 8];
-}
-
-export function floorId(level: number): string {
-  return level === 0 ? 'Bg' : `V${level}`;
-}
-
-export function floorName(level: number): string {
-  if (level === 0) return 'Begane grond';
-  if (level === 1) return 'Eerste verdieping';
-  if (level === 2) return 'Tweede verdieping / zolder';
-  return `Verdieping ${level}`;
-}
+// toCardinal / floorId / floorName now come from @scarnergy/opname-calc
+// (shared with the web app — single source of truth).
 
 export function openingTypeVabi(t: string | null): string {
   switch ((t ?? '').toLowerCase()) {
@@ -132,8 +115,7 @@ export const esc = (v: unknown): string =>
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 
-export const r2 = (n: number | null | undefined): number | null =>
-  n != null ? Number(n.toFixed(2)) : null;
+// r2 now comes from @scarnergy/opname-calc (shared rounding primitive).
 
 // ── XML indenter helper ───────────────────────────────────────────────────────
 

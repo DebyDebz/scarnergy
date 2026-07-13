@@ -1,4 +1,12 @@
 {
   "compilerOptions": {},
-  "extends": "expo/tsconfig.base"
+  "extends": "expo/tsconfig.base",
+  "exclude": [
+    "node_modules",
+    "web",
+    "supabase/functions",
+    "ai_server",
+    "ble_bridge",
+    "esp32_firmware"
+  ]
 }
