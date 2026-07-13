@@ -1,24 +1,28 @@
 /**
- * VABI XML export utilities — pure TypeScript, no platform dependencies.
- * Shared between mobile (Expo) and can also be referenced by the web API route.
+ * VABI XML export — the single shared builder for mobile and web.
+ *
+ * Collapsed from lib/vabiExport.ts (mobile) and web/lib/vabiXml.ts in calc
+ * Phase 1. The mobile builder was the richer superset (Notities, extra
+ * NL/EN mapping synonyms, multiline project header) and its output is locked
+ * by __tests__/vabiExport.golden.test.ts, so it is the canonical format; the
+ * one web-only feature (Vloer <Perimeter>) is folded in.
  *
  * Spec: docs/vabi_xml_format.md — VabiProject versie 3.0
  */
 
-import type { BuildingElement, Opening, Zone } from './supabase';
-import { r2, toCardinal, floorId, floorName } from '@scarnergy/opname-calc';
+import { r2 } from './units';
+import { toCardinal, floorId, floorName } from './geometry';
 
-// ── Session / Building types needed by buildVabiXml ──────────────────────────
+// ── Structural input types ────────────────────────────────────────────────────
+// Only the fields the builder actually reads, all optional except identifiers,
+// so both apps' row types (lib/supabase.ts and web/lib/types.ts) satisfy them
+// without casts.
 
 export interface VabiSessionInfo {
-  id: string;
-  session_code: string;
-  status: string;
-  started_at: string | null;
-  inspector_name: string;
   building_address: string;
   building_city: string;
-  building_id: string;
+  inspector_name: string;
+  started_at: string | null;
 }
 
 export interface VabiBuildingInfo {
@@ -30,12 +34,62 @@ export interface VabiOrgInfo {
   name?: string | null;
 }
 
+export interface VabiZone {
+  floor_level: number;
+  gross_area_m2?: number | null;
+}
+
+export interface VabiElement {
+  id: string;
+  name: string;
+  element_type: string;
+  description?: string | null;
+  construction_type?: string | null;
+  insulation_type?: string | null;
+  installation_type?: string | null;
+  fuel_type?: string | null;
+  orientation_deg?: number | null;
+  tilt_deg?: number | null;
+  length_mm?: number | null;
+  width_mm?: number | null;
+  height_mm?: number | null;
+  area_m2?: number | null;
+  rc_value?: number | null;
+  efficiency?: number | null;
+  capacity_kw?: number | null;
+  nokhoogte_m?: number | null;
+  bodemisolatie?: boolean | null;
+  brand?: string | null;
+  model_nr?: string | null;
+  cv_klasse?: string | null;
+  parent_element_id?: string | null;
+  perimeter_m?: number | null;
+  dikte_vloer_boven_mm?: number | null;
+  dikte_vloer_onder_mm?: number | null;
+  dikte_muren_mm?: number | null;
+  notes?: string | null;
+}
+
+export interface VabiOpening {
+  id: string;
+  element_id?: string | null;
+  opening_type?: string | null;
+  width_mm?: number | null;
+  height_mm?: number | null;
+  area_m2?: number | null;
+  glazing_type?: string | null;
+  frame_type?: string | null;
+  has_shading?: boolean | null;
+  shading_type?: string | null;
+  thermisch_onderbroken?: boolean | null;
+  overstek_m?: number | null;
+  belemmering?: string | null;
+  notes?: string | null;
+}
+
 // ── Mapping helpers ───────────────────────────────────────────────────────────
 
-// toCardinal / floorId / floorName now come from @scarnergy/opname-calc
-// (shared with the web app — single source of truth).
-
-export function openingTypeVabi(t: string | null): string {
+export function openingTypeVabi(t: string | null | undefined): string {
   switch ((t ?? '').toLowerCase()) {
     case 'door':    return 'Deur';
     case 'skylight': return 'Raam';
@@ -43,7 +97,7 @@ export function openingTypeVabi(t: string | null): string {
   }
 }
 
-export function frameMatVabi(f: string | null): string {
+export function frameMatVabi(f: string | null | undefined): string {
   if (!f) return '';
   const lower = f.toLowerCase();
   if (lower.includes('aluminium') || lower.includes('aluminum') || lower.includes('metaal') || lower.includes('metal')) return 'Metaal';
@@ -52,7 +106,7 @@ export function frameMatVabi(f: string | null): string {
   return f;
 }
 
-export function glazingVabi(g: string | null): string {
+export function glazingVabi(g: string | null | undefined): string {
   if (!g) return '';
   const lower = g.toLowerCase().replace(/\s/g, '');
   if (lower.includes('triple') || lower.includes('drievoudig')) return 'Triple';
@@ -64,7 +118,7 @@ export function glazingVabi(g: string | null): string {
   return g;
 }
 
-export function installTypeVabi(t: string | null, name: string): string {
+export function installTypeVabi(t: string | null | undefined, name: string): string {
   if (!t) {
     const n = name.toLowerCase();
     if (n.includes('ventilat')) return 'Ventilatie';
@@ -83,7 +137,7 @@ export function installTypeVabi(t: string | null, name: string): string {
   return 'Verwarming';
 }
 
-export function gevelpositie(el: BuildingElement): string {
+export function gevelpositie(el: VabiElement): string {
   const combined = `${el.description ?? ''} ${el.construction_type ?? ''} ${el.name}`.toLowerCase();
   if (combined.includes('voor') || combined.includes('front')) return 'Voorgevel';
   if (combined.includes('achter') || combined.includes('rear') || combined.includes('back')) return 'Achtergevel';
@@ -92,7 +146,7 @@ export function gevelpositie(el: BuildingElement): string {
   return '';
 }
 
-export function grenztAan(el: BuildingElement): string {
+export function grenztAan(el: VabiElement): string {
   const src = `${el.description ?? ''} ${el.construction_type ?? ''}`.toLowerCase();
   if (src.includes('kruipruimte') || src.includes('crawl')) return 'Kruipruimte';
   if (src.includes('onverwarmd') || src.includes('unheated')) return 'Aangrenzende onverwarmde ruimte';
@@ -101,7 +155,7 @@ export function grenztAan(el: BuildingElement): string {
   return 'Buitenlucht';
 }
 
-export function dakType(el: BuildingElement): string {
+export function dakType(el: VabiElement): string {
   const combined = `${el.construction_type ?? ''} ${el.name}`.toLowerCase();
   if (combined.includes('plat') || combined.includes('flat') || (el.tilt_deg != null && el.tilt_deg < 5)) return 'PlatDak';
   if (combined.includes('zadel') || combined.includes('saddle') || combined.includes('gable')) return 'Zadeldak';
@@ -115,8 +169,6 @@ export const esc = (v: unknown): string =>
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 
-// r2 now comes from @scarnergy/opname-calc (shared rounding primitive).
-
 // ── XML indenter helper ───────────────────────────────────────────────────────
 
 function indent(s: string, n: number): string {
@@ -129,17 +181,17 @@ export function buildVabiXml(
   session: VabiSessionInfo,
   org: VabiOrgInfo,
   building: VabiBuildingInfo,
-  zones: Zone[],
-  elements: BuildingElement[],
-  openings: Opening[],
+  zones: VabiZone[],
+  elements: VabiElement[],
+  openings: VabiOpening[],
 ): string {
   const today = new Date().toISOString().slice(0, 10);
   const surveyDate = session.started_at ? new Date(session.started_at).toISOString().slice(0, 10) : today;
 
   // Index openings by element_id
-  const openingsByElement: Record<string, Opening[]> = {};
+  const openingsByElement: Record<string, VabiOpening[]> = {};
   for (const o of openings) {
-    ((openingsByElement as any)[o.element_id] ??= []).push(o);
+    if (o.element_id) (openingsByElement[o.element_id] ??= []).push(o);
   }
 
   // Bucket elements by type
@@ -149,7 +201,7 @@ export function buildVabiXml(
   const installaties = elements.filter(e => e.element_type === 'installatie');
 
   // Index dakkapellen by parent dak id
-  const dakkapellenByParent: Record<string, BuildingElement[]> = {};
+  const dakkapellenByParent: Record<string, VabiElement[]> = {};
   for (const dk of elements.filter(e => e.element_type === 'dakkapel')) {
     if (dk.parent_element_id) (dakkapellenByParent[dk.parent_element_id] ??= []).push(dk);
   }
@@ -157,7 +209,7 @@ export function buildVabiXml(
   const totalArea = zones.reduce((s, z) => s + (z.gross_area_m2 ?? 0), 0);
 
   // Group zones by floor level for Verdiepingen
-  const byLevel = zones.reduce<Record<number, Zone[]>>((acc, z) => {
+  const byLevel = zones.reduce<Record<number, VabiZone[]>>((acc, z) => {
     (acc[z.floor_level] ??= []).push(z);
     return acc;
   }, {});
@@ -256,6 +308,9 @@ export function buildVabiXml(
       (el.area_m2 != null ? `  <Oppervlakte>${r2(el.area_m2)}</Oppervlakte>\n` : '') +
       `  <Vloerisolatie>${el.insulation_type ? 'true' : 'false'}</Vloerisolatie>\n` +
       `  <Bodemisolatie>${el.bodemisolatie ?? false}</Bodemisolatie>\n` +
+      // Perimeter carried over from the web builder in the Phase 1 collapse
+      // (the mobile builder never emitted it for floors).
+      (el.perimeter_m != null ? `  <Perimeter>${el.perimeter_m}</Perimeter>\n` : '') +
       (el.rc_value != null ? `  <Rc>${el.rc_value}</Rc>\n` : '') +
       (el.notes ? `  <Notities>${esc(el.notes)}</Notities>\n` : '') +
       `</Vloer>`

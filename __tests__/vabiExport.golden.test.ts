@@ -12,7 +12,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { buildVabiXml } from '../lib/vabiExport';
+import { buildVabiXml } from '../packages/opname-calc/src';
 import type { BuildingElement, Opening, Zone } from '../lib/supabase';
 
 const session = {

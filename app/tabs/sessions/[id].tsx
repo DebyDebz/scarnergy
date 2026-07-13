@@ -6,7 +6,7 @@ import {
 import { useLocalSearchParams, useRouter, useNavigation } from "expo-router";
 import { supabase, SessionSummary, Zone, BuildingElement, Opening } from "../../../lib/supabase";
 import { useBLE } from "../../../lib/BLEContext";
-import { buildVabiXml } from "../../../lib/vabiExport";
+import { buildVabiXml } from "@scarnergy/opname-calc";
 import { elementTypeLabel } from "../../../lib/elementTypes";
 import { FloorPlanReview } from "../../../components/inspection/FloorPlanReview";
 
