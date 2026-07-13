@@ -5,6 +5,13 @@ import { Platform, Text, View, LogBox } from "react-native";
 LogBox.ignoreLogs([
   '"shadow*" style props are deprecated',
   "props.pointerEvents is deprecated",
+  // Benign auth noise: supabase-js console.error's an expired refresh token on
+  // cold start, then clears the session itself — the user just signs in again.
+  // Same patterns as IGNORED_ERROR_PATTERNS in lib/errorLog.ts.
+  /invalid refresh token/i,
+  /refresh token not found/i,
+  /auth session missing/i,
+  /auto refresh tick failed/i,
 ]);
 
 // LogBox only covers native; filter the same noisy warnings from the web console.
