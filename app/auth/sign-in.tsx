@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, KeyboardAvoidingView, Platform } from "react-native";
+import { useRouter } from "expo-router";
 import { useAuthStore } from "../../store/authStore";
 
 export default function SignIn() {
   const { signIn } = useAuthStore();
+  const router = useRouter();
   const [email,    setEmail]    = useState("");
   const [password, setPassword] = useState("");
   const [loading,  setLoading]  = useState(false);
@@ -33,6 +35,10 @@ export default function SignIn() {
           onPress={handleSignIn} disabled={loading}>
           <Text style={styles.buttonText}>{loading ? "Signing in..." : "Sign In"}</Text>
         </TouchableOpacity>
+        <TouchableOpacity style={styles.forgotBtn}
+          onPress={() => router.push("/auth/forgot-password")} disabled={loading}>
+          <Text style={styles.forgotText}>Forgot password?</Text>
+        </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
   );
@@ -48,4 +54,6 @@ const styles = StyleSheet.create({
   button:         { height: 50, backgroundColor: "#1E3A5F", borderRadius: 8, alignItems: "center", justifyContent: "center", marginTop: 8 },
   buttonDisabled: { opacity: 0.6 },
   buttonText:     { color: "#FFF", fontSize: 16, fontWeight: "700" },
+  forgotBtn:      { alignItems: "center", marginTop: 16 },
+  forgotText:     { color: "#2E86C1", fontSize: 14, fontWeight: "600" },
 });
