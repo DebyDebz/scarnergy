@@ -52,35 +52,37 @@ work doesn't ship — EAS builds from git HEAD).
 Target file for most of this: `web/app/(dashboard)/buildings/[id]/page.tsx`
 and new components in `web/components/elements/`.
 
-- [ ] **Group zone elements by type with counts.** Replace the flat elements
-      table with sections/cards per `element_type`: Gevels, Daken, Vloeren,
-      Installaties, each with a count badge (AppSheet: "Gevels 8 · Daken 1 ·
-      Vloeren 1 · Installaties 3"). Use `lib/elementTypes.ts` labels.
-- [ ] **Gevel rows**: show Positie, Huidige Orientatiecode (derive cardinal
-      from `orientation_deg` via `@scarnergy/opname-calc` `toCardinal`),
-      Bruto Oppervlakte, Hoogte, Breedte.
-- [ ] **Transparante Delen detail** (expandable per opening): Type Deel,
-      Materiaal (`frame_type`), Glastype (`glazing_type`), Hoogte/Breedte,
-      Bruto + Netto Oppervlakte, Zonwering (`has_shading`/`shading_type`/
-      `shading_factor`), Overstek (`overstek_m`), Belemmering (`belemmering`),
-      Thermisch onderbroken (`thermisch_onderbroken`), U-values, g-value.
-      All columns exist since migrations 017–018.
-- [ ] **Dakkapellen nested under their Dak** using `parent_element_id`;
-      show per-dak Totaal Oppervlakte Gaten and Netto Dakoppervlak
-      (bruto − openings − dakkapel footprints) computed via
-      `@scarnergy/opname-calc` — same math as the VABI export, do not fork it.
-- [ ] **Installaties card**: Brand (`brand`), Model (`model_nr`),
-      CV-klasse (`cv_klasse`), fuel/installation type, efficiency,
-      capacity, year — currently only efficiency renders.
-- [ ] **Vloeren rows**: Perimeter (`perimeter_m`), Grenzend aan (parsed the
-      same way `lib/vabiExport.ts:185` `grenztAan()` does), oppervlakte.
-- [ ] **Notities en Foto's**: render element `notes` and `photo_urls`
-      (signed URLs, same pattern as facade photos on the building page).
-- [ ] **Session header parity** in
-      `web/app/(dashboard)/sessions/[id]/page.tsx`: add Duur
-      (completed_at − started_at) and Voorgevel Orientatie.
-- **Verify gate:** visual check against the AppSheet screenshots ·
-  no layout regressions on existing sections · standing regression rule.
+- [x] **Group zone elements by type with counts.** Replaced the flat elements
+      table with sections per `element_type`: Gevels, Daken, Vloeren,
+      Installaties (+ Overige fallback so nothing disappears), each with a
+      count badge — `web/components/elements/ElementTypeSections.tsx`.
+- [x] **Gevel rows**: Positie (`gevelpositie`), Orientatie (`toCardinal`),
+      Hoogte, Breedte, Bruto Oppervlakte, Rc, status — all via
+      `@scarnergy/opname-calc`.
+- [x] **Transparante Delen detail** (expandable per opening, now ALL openings
+      per element — the old view silently showed only one): Type Deel,
+      Materiaal, Glastype, Hoogte×Breedte, Bruto + Netto Oppervlakte,
+      Zonwering (+factor), Overstek, Belemmering, Thermisch onderbroken,
+      U kozijn/glas/totaal, g-waarde, notes.
+- [x] **Dakkapellen nested under their Dak** via `parent_element_id`; per-dak
+      Totaal Oppervlakte Gaten + Netto Dakoppervlak via new shared
+      `roofAreaBreakdown()` in `@scarnergy/opname-calc` (unit-tested, same
+      bruto formula as the VABI export — not forked).
+- [x] **Installaties card**: Merk, Model, CV-klasse, type, brandstof,
+      rendement, vermogen, bouwjaar.
+- [x] **Vloeren rows**: Perimeter, Grenzend aan (shared `grenztAan()`),
+      oppervlakte, vloer/bodemisolatie, Rc.
+- [x] **Notities en Foto's**: element `notes` + `photo_urls` signed from the
+      `inspection-photos` bucket (http entries as-is, `file:` fallbacks skipped).
+- [x] **Session header parity**: Duur (`fmtDuration`, completed − started) and
+      Voorgevel Orientatie (front-facade gevel → `toCardinal`) KPI cards in
+      `web/app/(dashboard)/sessions/[id]/page.tsx`.
+- **Verify gate:** ✅ 2026-07-14 — 91 tests green (incl. new roofAreaBreakdown
+  unit tests, goldens byte-identical) · mobile `tsc` clean · web `tsc` clean ·
+  `next build` ok · every rendered column verified queryable against the live
+  DB (elements/openings/sessions probes) · layout: existing sections untouched,
+  new sections reuse the card/table design system. Field-level parity follows
+  the spec above; final visual side-by-side vs the AppSheet screenshots: Deborah.
 
 ---
 

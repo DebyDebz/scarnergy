@@ -9,7 +9,8 @@ import { ExportButtons } from '@/components/sessions/ExportButtons';
 import { ElementsWithEdit } from '@/components/elements/ElementsWithEdit';
 import { ArrowLeft, TriangleAlert } from 'lucide-react';
 import type { SessionSummary, Measurement, UserProfile, Zone, BuildingElement, Opening } from '@/lib/types';
-import { fmtDate, fmtTime } from '@/lib/format';
+import { fmtDate, fmtTime, fmtDuration } from '@/lib/format';
+import { gevelpositie, toCardinal } from '@scarnergy/opname-calc';
 
 interface Props {
   params: { id: string };
@@ -77,6 +78,13 @@ export default async function SessionDetailPage({ params, searchParams }: Props)
 
   const canClose = (profile?.role === 'admin' || profile?.role === 'supervisor') && session.status === 'active';
 
+  // Voorgevel orientation: the front-facade gevel's orientation as a cardinal,
+  // derived the same way the VABI export does (gevelpositie + toCardinal).
+  const voorgevel = elements.find(
+    e => e.element_type === 'gevel' && gevelpositie(e) === 'Voorgevel' && e.orientation_deg != null,
+  );
+  const voorgevelOrientatie = voorgevel ? toCardinal(voorgevel.orientation_deg) : '—';
+
   return (
     <div className="space-y-6 max-w-5xl">
       <div>
@@ -118,15 +126,20 @@ export default async function SessionDetailPage({ params, searchParams }: Props)
         </div>
       )}
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
         {[
           { label: 'Started', value: fmtDate(session.started_at) },
           { label: 'Completed', value: fmtDate(session.completed_at) },
+          // AppSheet header parity (GAP.md W1): Duur + Voorgevel Orientatie
+          { label: 'Duur', en: 'Duration', value: fmtDuration(session.started_at, session.completed_at) },
+          { label: 'Voorgevel Orientatie', en: 'Front facade', value: voorgevelOrientatie },
           { label: 'Measurements', value: session.total_measurements },
           { label: 'Anomalies', value: session.anomaly_count },
-        ].map(({ label, value }) => (
+        ].map(({ label, en, value }: { label: string; en?: string; value: React.ReactNode }) => (
           <div key={label} className="bg-white border border-gray-200 rounded-xl p-4">
-            <p className="text-xs text-gray-500 mb-1">{label}</p>
+            <p className="text-xs text-gray-500 mb-1">
+              {label}{en && <span className="text-gray-400"> · {en}</span>}
+            </p>
             <p className="font-semibold text-gray-900">{value}</p>
           </div>
         ))}

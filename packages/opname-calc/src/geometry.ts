@@ -10,7 +10,7 @@
  * app-specific Supabase types.
  */
 
-import { mmToM } from './units';
+import { mmToM, r2 } from './units';
 
 // ── Orientation ───────────────────────────────────────────────────────────────
 
@@ -72,6 +72,58 @@ export interface ZoneLike {
 /** Sum of gross floor area across all zones. */
 export function totalZoneArea(zones: ZoneLike[]): number {
   return zones.reduce((sum, z) => sum + (z.gross_area_m2 ?? 0), 0);
+}
+
+// ── Roof area breakdown (AppSheet "Totaal Oppervlakte Gaten" / "Netto Dakoppervlak") ──
+
+/** Minimal shape of a dak / dakkapel element for roof-area math. */
+export interface RoofLike {
+  length_mm?: number | null;
+  width_mm?: number | null;
+}
+
+/**
+ * Dakkapel footprint in m² (breedte × diepte), using the same per-dimension
+ * r2 rounding the VABI export applies to dakkapel Breedte/Diepte.
+ */
+export function dakkapelFootprint(dk: RoofLike): number | null {
+  const b = dk.width_mm  != null ? r2(dk.width_mm  / 1000) : null;
+  const d = dk.length_mm != null ? r2(dk.length_mm / 1000) : null;
+  return b != null && d != null ? r2(b * d) : null;
+}
+
+export interface RoofAreaBreakdown {
+  /** Bruto = lengte × breedte (VABI <BrutoOppervlakte> formula), null when dims missing. */
+  bruto: number | null;
+  /** Totaal oppervlakte gaten: sum of opening areas in the roof plane. */
+  gaten: number;
+  /** Sum of dakkapel footprints on this roof. */
+  dakkapellen: number;
+  /** Netto dakoppervlak = bruto − gaten − dakkapellen (clamped ≥ 0). */
+  netto: number | null;
+}
+
+/**
+ * Roof area breakdown per the AppSheet reference: bruto (same math as the VABI
+ * export's <BrutoOppervlakte>), total opening ("gaten") area, dakkapel
+ * footprints, and the resulting netto dakoppervlak. Single source of truth —
+ * web UI, print report and future engine phases use this rather than
+ * re-deriving it.
+ */
+export function roofAreaBreakdown(
+  dak: RoofLike,
+  openings: OpeningLike[] = [],
+  dakkapellen: RoofLike[] = [],
+): RoofAreaBreakdown {
+  const lengte  = dak.length_mm != null ? r2(dak.length_mm / 1000) : null;
+  const breedte = dak.width_mm  != null ? r2(dak.width_mm  / 1000) : null;
+  const bruto   = lengte != null && breedte != null ? r2(lengte * breedte) : null;
+
+  const gaten = r2(openings.reduce((s, o) => s + (openingArea(o) ?? 0), 0)) ?? 0;
+  const dkSum = r2(dakkapellen.reduce((s, dk) => s + (dakkapelFootprint(dk) ?? 0), 0)) ?? 0;
+
+  const netto = bruto != null ? r2(Math.max(0, bruto - gaten - dkSum)) : null;
+  return { bruto, gaten, dakkapellen: dkSum, netto };
 }
 
 export interface FloorAreaRow {

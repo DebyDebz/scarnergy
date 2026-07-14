@@ -63,3 +63,32 @@ describe('geometry', () => {
     expect(rows[1].level).toBe(1);
   });
 });
+
+// ── Roof area breakdown (W1: Totaal Oppervlakte Gaten / Netto Dakoppervlak) ──
+
+import { roofAreaBreakdown, dakkapelFootprint } from '../packages/opname-calc/src';
+
+describe('roofAreaBreakdown', () => {
+  const dak = { length_mm: 7570, width_mm: 10400 }; // 7.57 × 10.4 = 78.73 (VABI bruto)
+
+  it('bruto matches the VABI <BrutoOppervlakte> formula', () => {
+    expect(roofAreaBreakdown(dak).bruto).toBeCloseTo(78.73, 2);
+    expect(roofAreaBreakdown({}).bruto).toBeNull();
+  });
+
+  it('netto = bruto − gaten − dakkapel footprints', () => {
+    const openings = [{ height_mm: 1000, width_mm: 1000 }];        // 1.00 gaten
+    const dakkapellen = [{ width_mm: 3210, length_mm: 1620 }];     // 3.21 × 1.62 = 5.20
+    const b = roofAreaBreakdown(dak, openings, dakkapellen);
+    expect(b.gaten).toBeCloseTo(1.0, 2);
+    expect(b.dakkapellen).toBeCloseTo(5.2, 2);
+    expect(b.netto).toBeCloseTo(78.73 - 1.0 - 5.2, 2);
+  });
+
+  it('clamps netto at zero and handles missing dims', () => {
+    const tiny = { length_mm: 1000, width_mm: 1000 }; // 1.00 bruto
+    const b = roofAreaBreakdown(tiny, [{ height_mm: 2000, width_mm: 2000 }]);
+    expect(b.netto).toBe(0);
+    expect(dakkapelFootprint({})).toBeNull();
+  });
+});

@@ -1,4 +1,3 @@
-import { Fragment } from 'react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { createClient } from '@/lib/supabase-server';
@@ -8,16 +7,14 @@ import { FloorPlanButton } from '@/components/buildings/FloorPlanButton';
 import { BuildingFloorPlanUpload } from '@/components/buildings/BuildingFloorPlanUpload';
 import { FloorPlanViewer } from '@/components/buildings/FloorPlanViewer';
 import { BuildingExportButtons } from '@/components/buildings/BuildingExportButtons';
-import { ArrowLeft, ChevronDown, TriangleAlert } from 'lucide-react';
+import { ElementTypeSections, type ElementWithRelations } from '@/components/elements/ElementTypeSections';
+import { ArrowLeft, ChevronDown } from 'lucide-react';
 import type {
   BuildingSummary, Zone, SessionSummary,
   BuildingElement, Opening, BuildingFacadePhoto,
 } from '@/lib/types';
 import { fmtDate } from '@/lib/format';
-import {
-  areaByFloor, totalZoneArea, fmtArea,
-  fmtEfficiencyPct, fmtMeters, mmToM, openingArea,
-} from '@/lib/calc';
+import { areaByFloor, totalZoneArea, fmtArea } from '@/lib/calc';
 
 interface Props { params: { id: string } }
 
@@ -88,18 +85,51 @@ export default async function BuildingDetailPage({ params }: Props) {
     openings = (openRes.data ?? []).filter((o: any) => elIds.has(o.element_id));
   }
 
-  const openingByElement = openings.reduce<Record<string, Opening>>((acc, o) => {
-    acc[(o as any).element_id] = o;
+  // ALL openings per element (the old view showed only one) + dakkapellen
+  // nested under their parent dak — AppSheet parity (GAP.md W1).
+  const openingsByElement = openings.reduce<Record<string, Opening[]>>((acc, o) => {
+    const key = (o as any).element_id as string;
+    (acc[key] ??= []).push(o);
     return acc;
   }, {});
+  const dakkapellenByParent = elements
+    .filter(e => e.element_type === 'dakkapel' && e.parent_element_id)
+    .reduce<Record<string, BuildingElement[]>>((acc, dk) => {
+      (acc[dk.parent_element_id as string] ??= []).push(dk);
+      return acc;
+    }, {});
 
-  type ZoneWithElements = Zone & { elements: (BuildingElement & { opening: Opening | null })[] };
+  type ZoneWithElements = Zone & { elements: ElementWithRelations[] };
   const zonesWithElements: ZoneWithElements[] = zones.map((z: Zone) => ({
     ...z,
     elements: elements
       .filter(e => e.zone_id === z.id)
-      .map(e => ({ ...e, opening: openingByElement[e.id] ?? null })),
+      .map(e => ({
+        ...e,
+        openings: openingsByElement[e.id] ?? [],
+        dakkapellen: dakkapellenByParent[e.id] ?? [],
+      })),
   }));
+
+  // Sign element photos (inspection-photos bucket). Entries are storage paths;
+  // http(s) entries are used as-is and file:// mobile-local fallbacks skipped.
+  const elementPhotoUrls: Record<string, string[]> = {};
+  await Promise.all(
+    elements
+      .filter(e => (e.photo_urls ?? []).length > 0)
+      .map(async e => {
+        const urls = await Promise.all(
+          (e.photo_urls ?? []).map(async p => {
+            if (p.startsWith('http')) return p;
+            if (p.startsWith('file:')) return null;
+            const { data } = await supabase.storage.from('inspection-photos').createSignedUrl(p, 3600);
+            return data?.signedUrl ?? null;
+          })
+        );
+        const signed = urls.filter((u): u is string => !!u);
+        if (signed.length > 0) elementPhotoUrls[e.id] = signed;
+      })
+  );
 
   const hasFacadePhotos = facadePhotosRaw.length > 0;
   const hasFloorPlans   = zones.some((z: Zone) => z.floor_plan_image_url);
@@ -259,71 +289,7 @@ export default async function BuildingDetailPage({ params }: Props) {
                   <FloorPlanViewer zone={zone as Zone} imageUrl={floorPlanUrls[zone.id]} width={320} />
                 )}
 
-                {zone.elements.length > 0 ? (
-                  <div className="rounded-lg border border-gray-100 overflow-hidden">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="text-left text-gray-500 bg-gray-50 border-b border-gray-100">
-                          <th className="px-4 py-2 font-medium">Name</th>
-                          <th className="px-4 py-2 font-medium">Type</th>
-                          <th className="px-4 py-2 font-medium">Dimensions</th>
-                          <th className="px-4 py-2 font-medium">Rc</th>
-                          <th className="px-4 py-2 font-medium">U</th>
-                          <th className="px-4 py-2 font-medium">Efficiency</th>
-                          <th className="px-4 py-2 font-medium">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-50">
-                        {zone.elements.map(el => {
-                          const dims = [
-                            el.length_mm ? `${el.length_mm}mm` : null,
-                            el.width_mm  ? `${el.width_mm}mm`  : null,
-                            el.height_mm ? `${el.height_mm}mm` : null,
-                          ].filter(Boolean).join(' × ');
-                          const op = el.opening;
-                          return (
-                            <Fragment key={el.id}>
-                              <tr className="hover:bg-gray-50">
-                                <td className="px-4 py-2 font-medium text-gray-900">{el.name}</td>
-                                <td className="px-4 py-2 text-gray-500 capitalize">{el.element_type}</td>
-                                <td className="px-4 py-2 text-gray-500 font-mono">{dims || '—'}</td>
-                                <td className="px-4 py-2 text-gray-700">{el.rc_value ?? '—'}</td>
-                                <td className="px-4 py-2 text-gray-700">{el.u_value ?? '—'}</td>
-                                <td className="px-4 py-2 text-gray-700">{fmtEfficiencyPct(el.efficiency)}</td>
-                                <td className="px-4 py-2">
-                                  {!el.is_complete ? (
-                                    <span className="inline-flex items-center gap-1 text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded font-medium text-xs">
-                                      <TriangleAlert className="w-3 h-3" /> incomplete
-                                    </span>
-                                  ) : (
-                                    <span className="text-emerald-600 font-medium">✓</span>
-                                  )}
-                                </td>
-                              </tr>
-                              {op && (
-                                <tr className="bg-indigo-50/40">
-                                  <td className="px-4 py-1.5 pl-8 text-gray-500" colSpan={3}>
-                                    <span className="text-indigo-400 mr-1.5">↳</span>
-                                    <span className="capitalize font-medium text-gray-600">{op.opening_type}</span>
-                                    {op.name ? <span className="text-gray-400"> · {op.name}</span> : null}
-                                    <span className="text-gray-400 font-mono ml-2">
-                                      {fmtMeters(mmToM(op.width_mm))} × {fmtMeters(mmToM(op.height_mm))}
-                                    </span>
-                                  </td>
-                                  <td className="px-4 py-1.5 text-gray-600" colSpan={3}>
-                                    Opening area: <span className="font-medium text-gray-700">{fmtArea(openingArea(op))}</span>
-                                  </td>
-                                </tr>
-                              )}
-                            </Fragment>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <p className="text-xs text-gray-400 italic">No elements defined for this zone</p>
-                )}
+                <ElementTypeSections elements={zone.elements} photoUrls={elementPhotoUrls} />
               </div>
             </details>
           ))}
