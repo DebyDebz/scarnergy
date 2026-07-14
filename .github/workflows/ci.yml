@@ -1,0 +1,49 @@
+# Standing regression gate (docs/CALC_TASK_CHECKLIST.md + GAP.md):
+# mobile tsc clean · npm test green (incl. golden VABI fixtures byte-identical)
+# · web tsc clean · next build ok. A PR cannot merge with any gate red.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  mobile:
+    name: Mobile — tests + typecheck + goldens
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Typecheck (mobile app only — tsconfig excludes web/ and Deno fns)
+        run: npx tsc --noEmit
+      - name: Tests (includes golden VABI snapshot)
+        run: npm test -- --ci
+      - name: Golden fixtures byte-identical
+        run: git diff --exit-code -- __tests__/fixtures
+
+  web:
+    name: Web — typecheck + production build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    env:
+      # Build-time dummies: web reads Supabase env at request time, not build time.
+      NEXT_PUBLIC_SUPABASE_URL: http://ci-dummy.invalid
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-dummy
+      SUPABASE_SERVICE_ROLE_KEY: ci-dummy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npx next build

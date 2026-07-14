@@ -1,8 +1,8 @@
-# Web ↔ AppSheet Gap Checklist
+# Gap Checklist — Web ↔ AppSheet + Mobile
 
 **Source:** screen-by-screen comparison of the reference AppSheet app
 ("Opname app-sandboxV5", screenshots 2026-07-07) against the web app (`web/`),
-done 2026-07-09.
+done 2026-07-09. Mobile gaps tracked in section M below.
 
 **Companions:** `docs/CALC_ARCHITECTURE_PLAN.md`, `docs/CALC_TASK_CHECKLIST.md`,
 `docs/proposed_migration_calc_fields.sql`.
@@ -10,10 +10,20 @@ done 2026-07-09.
 **Overriding constraint:** existing functionality and design must keep working.
 Reuse the current design system (Tailwind cards/tables, Dutch title +
 English subtitle convention, existing components in `web/components/`).
-After every milestone: mobile `tsc` clean · `cd web && tsc` clean ·
-`next build` ok · `npm test` green (67 tests) · golden VABI fixtures unchanged.
 
-Legend: `[ ]` todo · file paths are exact.
+**Definition of done — an item may be ticked `[x]` ONLY when ALL of these hold:**
+1. 100% implemented — no partial/stub state;
+2. connected to the live backend/database (real queries, RLS-verified),
+   not mocked or hardcoded;
+3. existing functionality and design unchanged;
+4. standing regression rule green: mobile `tsc` clean · `cd web && tsc` clean ·
+   `next build` ok · `npm test` green · golden VABI fixtures byte-identical.
+   Enforced automatically by CI (`.github/workflows/ci.yml`) on every PR.
+
+Tick items with the date and gate evidence. This file is the single tracker:
+work that isn't ticked here is not done, no matter what a chat log says.
+
+Legend: `[ ]` todo · `[x]` done · file paths are exact.
 
 ---
 
@@ -148,19 +158,62 @@ For orientation — these AppSheet features exist on the web today:
 - Sessions list/detail, measurements live feed, energy label badges
 - Grenst-aan capture (mobile) + VABI `<GrenztAan>` export — `lib/vabiExport.ts`
 
-mobile 
-Calc refactor — the two mobile-relevant phases
-Phase 1 remainder: move lib/thickness.ts into @scarnergy/opname-calc, then the big one — collapse the mobile and web VABI exporters (lib/vabiExport.ts vs web/lib/vabiXml.ts) into one shared builder, verified byte-identical against the golden fixtures. Until then every export fix must be made twice.
-Phase 3 — on-site validation (mobile-specific, not started): offline-safe validators V-04, V-05, V-09, V-11 surfaced as blocking flags in inspect.tsx and at session close. Gated on the Phase 2 convention freeze with the AppSheet owner (§3.1 / §5.1 values), so it can't start yet.
-3. Schema follow-through when migration 024 lands (GAP.md W2)
-When proposed_migration_calc_fields.sql is applied, the mobile app needs: extended interfaces in lib/supabase.ts (kept in sync with web types), and a decision on whether inspectors capture the new NTA fields on-site — plafond_type, warmtecapaciteit classes, rekenhoogte override, rc_source provenance. If yes (likely — they're opname data), that's form additions in the inspect/zone screens.
+---
 
-4. Deferred product features
-Sign-up screen — deliberately skipped; users are admin-provisioned. Only build it if self-registration becomes a requirement.
-ESP32 provisioning screen (M7) in the device tab — write WiFi/MQTT credentials over BLE. Only matters when the hardware fleet scales beyond hand-flashed units.
-Results screen upgrade — when the Phase 4 §9 indicative-label engine replaces the rule-based heuristic, swap the data-coverage proxy for real confidence and keep the disclaimer wording.
-Rekenzone decision (GAP.md W4) — whichever option is chosen will ripple into mobile zone screens; nothing to do until it's frozen.
-5. Verification debt (not code, but real)
-On-device pass over today's features — forgot-password, profile, role-gated tabs, results screen have green tests and clean types, but haven't been exercised on a phone yet. Now that your dev client connects, this is quick.
-GoTrue recovery template — the forgot-password flow needs {{ .Token }} in the recovery email template on your self-hosted Supabase; without it, users get a link instead of a code. This is server config, and the flow is untestable until it's set.
-M8 leftovers that live outside the app: RLS tests wired into CI and API smoke tests across Kong routes.
+## M — Mobile gap checklist
+
+Same definition of done as above: ticked = 100% implemented, backend/DB-connected,
+existing functionality and design intact, all gates green.
+
+### Done
+
+- [x] **Calc Phase 1, mobile side**: `lib/thickness.ts` moved into
+      `@scarnergy/opname-calc`; mobile + web VABI exporters collapsed into one
+      shared builder (`packages/opname-calc/src/vabi.ts`); `lib/vabiExport.ts`
+      deleted, `web/lib/vabiXml.ts` reduced to a re-export shim.
+      ✅ 2026-07-13 · commits c8f61b5, 9c580fa · mobile golden **byte-identical** ·
+      88 tests · both `tsc` clean · `next build` ok.
+- [x] **M5 auth completeness**: forgot-password (`app/auth/forgot-password.tsx`,
+      email → 6-digit code → new password via `verifyOtp`), GoTrue recovery
+      template deployed (`supabase/templates/recovery.html`) and **verified
+      end-to-end** (real /recover call → rendered code in mailpit), profile/settings
+      tab (`app/tabs/profile.tsx`, writes `user_profiles`, reads `organisations`,
+      RLS-verified), role-aware tabs, password visibility toggle on sign-in.
+      ✅ 2026-07-13 · commits 3a10556, 1d9379d, 0337e67.
+- [x] **M4 energy results screen** (`app/tabs/sessions/results.tsx`): building
+      label (worst zone) + per-zone chips from `zones.energy_label`, data-coverage
+      bar from `building_elements`/`openings`, anomaly drill-down from
+      `measurements.is_anomaly` into inspect, recompute via `energy_label_estimate`
+      edge fn with `compute_zone_energy_label` RPC fallback, indicatief disclaimer;
+      wired from session close + completed-session detail.
+      ✅ 2026-07-13 · commit 85388a4.
+- [x] **M8 hardening, in-repo part**: sync-queue core extracted
+      (`lib/syncQueue.ts`) with app-wide drain coalescing (fixes double-insert
+      race on network restore), offline stress tests (mid-drain drop, retry cap,
+      50-op stress), BLE → insert → realtime → merge pipeline test with real
+      decoder/dispatch/merge. ✅ 2026-07-13 · commit cb58fa3.
+- [x] **CI gate enforcement**: `.github/workflows/ci.yml` runs all five standing
+      gates on every PR — red gate blocks merge. ✅ 2026-07-13.
+
+### Open
+
+- [ ] **On-device verification pass** (only human-executable): forgot-password
+      flow end-to-end on the phone, profile edits, role-gated tabs, results
+      screen render, VABI export **share** — the last unticked Phase 1 gate line.
+- [ ] **Phase 3 — offline on-site validators** V-04, V-05, V-09, V-11 as blocking
+      flags in `app/tabs/sessions/inspect.tsx` + session close; must work with
+      network off. **BLOCKED on** the Phase 2 conventions freeze (§3.1/§5.1 +
+      Rekenzone decision, see W4).
+- [ ] **Mobile follow-through when migration 024 lands** (pairs with W2): extend
+      `lib/supabase.ts` interfaces (sync with `web/lib/types.ts`) + capture forms
+      in inspect/zone screens for the new NTA fields — `plafond_type`,
+      warmtecapaciteit classes, isolatie dikte/λ + na-isolatie, kruipruimte
+      hoogte, PV params, tapwater segments, `rc_source` provenance.
+- [ ] **Results screen confidence upgrade**: replace the data-coverage proxy with
+      real confidence when the §9 engine (calc Phase 4) replaces the rule-based
+      heuristic; keep the disclaimer.
+- [ ] **M8 remainder**: RLS tests (`supabase/migrations/rls_tests.sql`) wired
+      into CI · API smoke tests across Kong routes.
+- [ ] **Deferred (decision needed before building)**: sign-up screen (users are
+      admin-provisioned today) · ESP32 provisioning screen (M7, when the
+      hardware fleet scales).
