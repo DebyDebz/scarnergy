@@ -66,11 +66,12 @@ interface Props {
 }
 
 // Per-type element counts shown under a rekenzone header, AppSheet-style.
+// DB enum values stay Dutch; display labels are English (lib/elementTypes.ts).
 const COUNT_TYPES: Array<{ type: string; singular: string; plural: string }> = [
-  { type: 'gevel',       singular: 'gevel',       plural: 'gevels' },
-  { type: 'dak',         singular: 'dak',         plural: 'daken' },
-  { type: 'vloer',       singular: 'vloer',       plural: 'vloeren' },
-  { type: 'installatie', singular: 'installatie', plural: 'installaties' },
+  { type: 'gevel',       singular: 'wall',         plural: 'walls' },
+  { type: 'dak',         singular: 'roof',         plural: 'roofs' },
+  { type: 'vloer',       singular: 'floor',        plural: 'floors' },
+  { type: 'installatie', singular: 'installation', plural: 'installations' },
 ];
 
 const NEW_REKENZONE = '__new__';
@@ -127,7 +128,7 @@ export function ZoneManager({ buildingId, zones, onZonesChange, onDrawZone, onCo
       data: zones.filter(z => z.rekenzone_id === rz.id),
     }));
     const loose = zones.filter(z => !z.rekenzone_id || !rekenzones.some(rz => rz.id === z.rekenzone_id));
-    if (loose.length) list.push({ key: 'none', title: 'Ongegroepeerd', data: loose });
+    if (loose.length) list.push({ key: 'none', title: 'Ungrouped', data: loose });
     return list.filter(s => s.data.length || s.key !== 'none');
   }, [rekenzones, zones]);
 
@@ -151,7 +152,7 @@ export function ZoneManager({ buildingId, zones, onZonesChange, onDrawZone, onCo
       .insert({ org_id: profile.org_id, building_id: buildingId, name, sort_order: rekenzones.length })
       .select().single();
     setCreatingRz(false);
-    if (error) { Alert.alert('Could not create rekenzone', error.message); return; }
+    if (error) { Alert.alert('Could not create calculation zone', error.message); return; }
     const rz = data as Rekenzone;
     setRekenzones([...rekenzones, rz]);
     setSelectedRekenzoneId(rz.id);
@@ -248,13 +249,13 @@ export function ZoneManager({ buildingId, zones, onZonesChange, onDrawZone, onCo
           />
           <View style={styles.rzSelect}>
             <FieldSelect
-              label="Rekenzone"
+              label="Calculation zone"
               value={selectedRekenzoneId || null}
-              placeholder="Geen"
+              placeholder="None"
               options={[
-                { value: '', label: 'Geen' },
+                { value: '', label: 'None' },
                 ...rekenzones.map(rz => ({ value: rz.id, label: rz.name })),
-                { value: NEW_REKENZONE, label: '+ Nieuwe rekenzone…' },
+                { value: NEW_REKENZONE, label: '+ New calculation zone…' },
               ]}
               onSelect={v => {
                 if (v === NEW_REKENZONE) { setNewRzMode(true); return; }
@@ -267,7 +268,7 @@ export function ZoneManager({ buildingId, zones, onZonesChange, onDrawZone, onCo
             <View style={styles.rowGap}>
               <TextInput
                 style={[styles.input, { flex: 1, marginBottom: 0 }]}
-                placeholder='Rekenzone naam (e.g. "A met airco")'
+                placeholder='Calculation zone name (e.g. "A with AC")'
                 value={newRzName}
                 onChangeText={setNewRzName}
                 returnKeyType="done"

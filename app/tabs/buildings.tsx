@@ -92,7 +92,7 @@ export default function BuildingsScreen() {
           const bagMeta = [
             item.bag_bouwjaar,
             item.bag_oppervlakte_m2 != null ? `${item.bag_oppervlakte_m2} m²` : null,
-            item.dbag_hoogte_m != null ? `hoogte ${item.dbag_hoogte_m} m` : null,
+            item.dbag_hoogte_m != null ? `height ${item.dbag_hoogte_m} m` : null,
             item.bag_gebruiksdoel,
           ].filter(Boolean).join(" · ");
 

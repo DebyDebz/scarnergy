@@ -239,7 +239,7 @@ export default function SessionDetailScreen() {
     for (const z of zones) {
       const rzId = z.rekenzone_id && rekenzones.some(r => r.id === z.rekenzone_id) ? z.rekenzone_id : null;
       if (rzId !== prevRz) {
-        zoneGroupLabels.set(z.id, rzId ? rekenzones.find(r => r.id === rzId)!.name : "Overig");
+        zoneGroupLabels.set(z.id, rzId ? rekenzones.find(r => r.id === rzId)!.name : "Other");
         prevRz = rzId;
       }
     }
