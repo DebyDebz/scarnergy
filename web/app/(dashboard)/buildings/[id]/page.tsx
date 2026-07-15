@@ -10,7 +10,7 @@ import { BuildingExportButtons } from '@/components/buildings/BuildingExportButt
 import { ElementTypeSections, type ElementWithRelations } from '@/components/elements/ElementTypeSections';
 import { ArrowLeft, ChevronDown } from 'lucide-react';
 import type {
-  BuildingSummary, Zone, SessionSummary,
+  BuildingSummary, Rekenzone, Zone, SessionSummary,
   BuildingElement, Opening, BuildingFacadePhoto,
 } from '@/lib/types';
 import { fmtDate } from '@/lib/format';
@@ -30,7 +30,7 @@ const DIRECTIONS: { key: BuildingFacadePhoto['direction']; label: string; en: st
 export default async function BuildingDetailPage({ params }: Props) {
   const supabase = await createClient();
 
-  const [buildingResult, zonesResult, sessionsResult, facadeResult] = await Promise.all([
+  const [buildingResult, zonesResult, sessionsResult, facadeResult, rekenzonesResult] = await Promise.all([
     supabase.from('building_summary').select('*').eq('id', params.id).single(),
     (supabase.from('zones') as any).select('*').eq('building_id', params.id).order('floor_level'),
     supabase.from('session_summary').select('*')
@@ -38,12 +38,15 @@ export default async function BuildingDetailPage({ params }: Props) {
       .order('started_at', { ascending: false }).limit(20),
     (supabase.from('building_facade_photos') as any)
       .select('*').eq('building_id', params.id).order('direction'),
+    (supabase.from('rekenzones') as any)
+      .select('*').eq('building_id', params.id).eq('is_active', true).order('sort_order'),
   ]);
 
   const building = (buildingResult as unknown as { data: BuildingSummary | null }).data;
   if (!building) notFound();
 
-  const zones    = (zonesResult   as unknown as { data: Zone[] | null }).data ?? [];
+  const zones      = (zonesResult   as unknown as { data: Zone[] | null }).data ?? [];
+  const rekenzones = (rekenzonesResult as unknown as { data: Rekenzone[] | null }).data ?? [];
   const sessions = (sessionsResult as unknown as { data: SessionSummary[] | null }).data ?? [];
   const facadePhotosRaw: BuildingFacadePhoto[] = (facadeResult as unknown as { data: BuildingFacadePhoto[] | null }).data ?? [];
 
@@ -137,6 +140,34 @@ export default async function BuildingDetailPage({ params }: Props) {
   // Derived floor-area aggregation (previously only in VABI export / print)
   const floorAreas = areaByFloor(zones);
   const totalArea  = totalZoneArea(zones);
+
+  // ── Rekenzones: per-type element counts + grouped zone accordion ──────────
+  // (AppSheet parity: Naam | Gevels | Daken | Vloeren | Installaties | Notities.
+  // Elements roll up via element.zone_id → zone.rekenzone_id.)
+  const rzZoneIds = new Map<string, Set<string>>(
+    rekenzones.map(rz => [rz.id, new Set(zones.filter(z => z.rekenzone_id === rz.id).map(z => z.id))])
+  );
+  const rzCountRows = rekenzones.map(rz => {
+    const zIds = rzZoneIds.get(rz.id)!;
+    const counts = { gevel: 0, dak: 0, vloer: 0, installatie: 0 } as Record<string, number>;
+    for (const e of elements) {
+      if (zIds.has(e.zone_id) && counts[e.element_type] !== undefined) counts[e.element_type]++;
+    }
+    return { rz, counts };
+  });
+
+  type ZoneGroup = { key: string; title: string | null; zones: typeof zonesWithElements };
+  const ungroupedZones = zonesWithElements.filter(
+    z => !z.rekenzone_id || !rekenzones.some(rz => rz.id === z.rekenzone_id)
+  );
+  const zoneGroups: ZoneGroup[] = rekenzones.length
+    ? [
+        ...rekenzones
+          .map(rz => ({ key: rz.id, title: rz.name, zones: zonesWithElements.filter(z => z.rekenzone_id === rz.id) }))
+          .filter(g => g.zones.length > 0),
+        ...(ungroupedZones.length ? [{ key: 'none', title: 'Ongegroepeerd', zones: ungroupedZones }] : []),
+      ]
+    : [{ key: 'all', title: null, zones: zonesWithElements }];
 
   return (
     <div className="space-y-6 max-w-5xl">
@@ -255,6 +286,45 @@ export default async function BuildingDetailPage({ params }: Props) {
         </div>
       )}
 
+      {/* ── Rekenzones (AppSheet parity) ────────────────────────────────── */}
+      {rekenzones.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200">
+          <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
+            <h2 className="font-semibold text-gray-900">
+              Rekenzones
+              <span className="ml-2 font-normal text-gray-400 text-sm">Calculation zones</span>
+            </h2>
+            <span className="bg-gray-200 text-gray-700 rounded-full px-2 py-0.5 text-[11px] font-semibold">
+              {rekenzones.length}
+            </span>
+          </div>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-xs text-gray-500 bg-gray-50 border-b border-gray-100 text-left">
+                <th className="px-5 py-3 font-medium">Naam</th>
+                <th className="px-5 py-3 font-medium">Gevels</th>
+                <th className="px-5 py-3 font-medium">Daken</th>
+                <th className="px-5 py-3 font-medium">Vloeren</th>
+                <th className="px-5 py-3 font-medium">Installaties</th>
+                <th className="px-5 py-3 font-medium">Notities</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {rzCountRows.map(({ rz, counts }) => (
+                <tr key={rz.id} className="hover:bg-gray-50">
+                  <td className="px-5 py-3 font-medium text-gray-800">{rz.name}</td>
+                  <td className="px-5 py-3 text-gray-700">Gevels ({counts.gevel})</td>
+                  <td className="px-5 py-3 text-gray-700">Daken ({counts.dak})</td>
+                  <td className="px-5 py-3 text-gray-700">Vloeren ({counts.vloer})</td>
+                  <td className="px-5 py-3 text-gray-700">Installaties ({counts.installatie})</td>
+                  <td className="px-5 py-3 text-gray-500">{rz.notes ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       {/* ── Zones & elements ────────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-gray-200">
         <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
@@ -263,7 +333,15 @@ export default async function BuildingDetailPage({ params }: Props) {
         </div>
         {/* Zone headers keep the existing FloorPlanButton for upload */}
         <div className="divide-y divide-gray-100">
-          {zonesWithElements.map(zone => (
+          {zoneGroups.map(group => (
+            <div key={group.key}>
+              {group.title && (
+                <div className="px-5 py-2 bg-gray-50 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                  {group.title}
+                </div>
+              )}
+              <div className="divide-y divide-gray-100">
+                {group.zones.map(zone => (
             <details key={zone.id} className="group">
               <summary className="flex items-center gap-3 px-5 py-3.5 cursor-pointer hover:bg-gray-50 list-none">
                 <ChevronDown className="w-4 h-4 text-gray-400 group-open:rotate-180 transition-transform" />
@@ -292,6 +370,9 @@ export default async function BuildingDetailPage({ params }: Props) {
                 <ElementTypeSections elements={zone.elements} photoUrls={elementPhotoUrls} />
               </div>
             </details>
+                ))}
+              </div>
+            </div>
           ))}
           {!zones.length && (
             <p className="px-5 py-6 text-sm text-gray-400 text-center">No zones defined</p>
