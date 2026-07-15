@@ -63,15 +63,18 @@ export default function SessionDetailScreen() {
     ]).then(([zonesRes, rzRes]) => {
       const rzList = (rzRes.data as Rekenzone[]) ?? [];
       const list = zonesRes.data ?? [];
-      // When rekenzones exist, order zone chips by rekenzone (ungrouped last);
-      // inside a group the floor_level order from the query is kept.
-      const grouped = rzList.length
+      // Group chips by rekenzone (ungrouped last; floor_level order kept
+      // inside a group) only when at least one zone is actually assigned —
+      // the same gate the VABI exporter uses, so UI and export agree.
+      const hasAssigned =
+        rzList.length > 0 && list.some(z => z.rekenzone_id && rzList.some(rz => rz.id === z.rekenzone_id));
+      const grouped = hasAssigned
         ? [
             ...rzList.flatMap(rz => list.filter(z => z.rekenzone_id === rz.id)),
             ...list.filter(z => !z.rekenzone_id || !rzList.some(rz => rz.id === z.rekenzone_id)),
           ]
         : list;
-      setRekenzones(rzList);
+      setRekenzones(hasAssigned ? rzList : []);
       setZones(grouped);
       if (grouped.length > 0) setSelectedZoneId(grouped[0].id);
     });
@@ -190,7 +193,7 @@ export default function SessionDetailScreen() {
     if (!session || !sessionId) return;
     try {
       const [zonesRes, buildingRes, orgRes, rekenzonesRes] = await Promise.all([
-        supabase.from("zones").select("*").eq("building_id", session.building_id).order("floor_level"),
+        supabase.from("zones").select("*").eq("building_id", session.building_id).eq("is_active", true).order("floor_level"),
         (supabase.from("buildings") as any).select("construction_year, building_type").eq("id", session.building_id).single(),
         (supabase.from("organisations") as any).select("name").single(),
         supabase.from("rekenzones").select("*").eq("building_id", session.building_id).eq("is_active", true).order("sort_order"),

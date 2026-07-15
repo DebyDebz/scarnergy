@@ -51,8 +51,10 @@ async function bagLookup(apiKey: string, postcode: string, huisnummer: string, p
     headers: { 'X-Api-Key': apiKey, Accept: 'application/hal+json', 'Accept-Crs': 'epsg:28992' },
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
-  // 404 = address not found in BAG; every other non-OK status is an outage.
-  if (res.status === 404) return null;
+  // 404 = address not found, 400 = params BAG rejects (e.g. a toevoeging that
+  // isn't a valid huisletter) — both mean "no match at this rung of the retry
+  // ladder", not an outage. Every other non-OK status is an outage.
+  if (res.status === 404 || res.status === 400) return null;
   if (!res.ok) throw new Error(`BAG API ${res.status}`);
   return mapBagAdressen(await res.json());
 }
@@ -92,7 +94,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   try {
     if (addition) {
       bagData = await bagLookup(apiKey, postcode, huisnummer, { huisnummertoevoeging: addition });
-      if (!bagData) bagData = await bagLookup(apiKey, postcode, huisnummer, { huisletter: addition });
+      // BAG stores single letters as huisletter, not toevoeging ("14a" vs "14-2").
+      if (!bagData && /^[a-zA-Z]$/.test(addition)) {
+        bagData = await bagLookup(apiKey, postcode, huisnummer, { huisletter: addition });
+      }
       if (!bagData) {
         bagData = await bagLookup(apiKey, postcode, huisnummer, {});
         if (bagData) warnings.push('toevoeging_genegeerd');
@@ -106,18 +111,25 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   if (!bagData) return NextResponse.json({ error: 'address_not_found' }, { status: 422 });
   warnings.push(...bagData.warnings);
 
-  // 3DBAG height — non-fatal: a miss caches the BAG data with hoogte NULL.
+  // 3DBAG height — non-fatal. When the service is down (as opposed to the
+  // attributes being genuinely absent), keep a previously cached height for
+  // the same pand rather than erasing it on a forced refresh.
   let hoogte: number | null = null;
   if (bagData.bag_pand_id) {
+    let dbagDown = false;
     try {
       const res = await fetch(`${DBAG_API_BASE}/NL.IMBAG.Pand.${bagData.bag_pand_id}`, {
         headers: { Accept: 'application/json' },
         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       });
       if (res.ok) hoogte = extract3dbagHeight(await res.json(), bagData.bag_pand_id);
-      else warnings.push('3dbag_unavailable');
+      else dbagDown = true;
     } catch {
+      dbagDown = true;
+    }
+    if (dbagDown) {
       warnings.push('3dbag_unavailable');
+      if (building.bag_pand_id === bagData.bag_pand_id) hoogte = building.dbag_hoogte_m;
     }
   }
 

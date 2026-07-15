@@ -77,6 +77,18 @@ describe('mapBagAdressen', () => {
     expect(out.bag_gebruiksdoel).toBe('woonfunctie, kantoorfunctie');
   });
 
+  it('maps null/empty/zero numerics to null instead of 0 (0 would violate the bouwjaar CHECK)', () => {
+    const out = mapBagAdressen(halResponse([adres({
+      oorspronkelijkBouwjaar: [null],
+      oppervlakte: 0,
+    })]))!;
+    expect(out.bag_bouwjaar).toBeNull();
+    expect(out.bag_oppervlakte_m2).toBeNull();
+
+    const out2 = mapBagAdressen(halResponse([adres({ oorspronkelijkBouwjaar: [''] })]))!;
+    expect(out2.bag_bouwjaar).toBeNull();
+  });
+
   it('null-safes missing fields', () => {
     const out = mapBagAdressen(halResponse([adres({
       oppervlakte: undefined,

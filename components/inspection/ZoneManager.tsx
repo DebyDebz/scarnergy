@@ -120,8 +120,10 @@ export function ZoneManager({ buildingId, zones, onZonesChange, onDrawZone, onCo
   const zonesWithPlan = zones.filter(z => z.floor_plan_points && z.floor_plan_points.length >= 3);
   const canContinue = zonesWithPlan.length > 0;
 
+  // Grouped list only when there are zones to group — with zero zones the
+  // FlatList branch keeps the "No zones yet" onboarding message reachable.
   const sections = useMemo(() => {
-    if (!rekenzones.length) return [];
+    if (!rekenzones.length || !zones.length) return [];
     const list = rekenzones.map(rz => ({
       key: rz.id,
       title: rz.name,
@@ -129,7 +131,7 @@ export function ZoneManager({ buildingId, zones, onZonesChange, onDrawZone, onCo
     }));
     const loose = zones.filter(z => !z.rekenzone_id || !rekenzones.some(rz => rz.id === z.rekenzone_id));
     if (loose.length) list.push({ key: 'none', title: 'Ungrouped', data: loose });
-    return list.filter(s => s.data.length || s.key !== 'none');
+    return list;
   }, [rekenzones, zones]);
 
   const countLine = (sectionZones: Zone[]): string => {
@@ -258,7 +260,13 @@ export function ZoneManager({ buildingId, zones, onZonesChange, onDrawZone, onCo
                 { value: NEW_REKENZONE, label: '+ New calculation zone…' },
               ]}
               onSelect={v => {
-                if (v === NEW_REKENZONE) { setNewRzMode(true); return; }
+                if (v === NEW_REKENZONE) {
+                  // Clear the previous choice so the zone can't silently
+                  // attach to it if the new rekenzone is never created.
+                  setSelectedRekenzoneId('');
+                  setNewRzMode(true);
+                  return;
+                }
                 setNewRzMode(false);
                 setSelectedRekenzoneId(v);
               }}

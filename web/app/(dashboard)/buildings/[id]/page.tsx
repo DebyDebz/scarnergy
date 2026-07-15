@@ -80,7 +80,7 @@ export default async function BuildingDetailPage({ params }: Props) {
   if (zoneIds.length > 0) {
     const [elemRes, openRes] = await Promise.all([
       (supabase.from('building_elements') as any)
-        .select('*').in('zone_id', zoneIds).order('sort_order'),
+        .select('*').in('zone_id', zoneIds).eq('is_active', true).order('sort_order'),
       (supabase.from('openings') as any)
         .select('*').eq('is_active', true),
     ]);
@@ -161,7 +161,11 @@ export default async function BuildingDetailPage({ params }: Props) {
   const ungroupedZones = zonesWithElements.filter(
     z => !z.rekenzone_id || !rekenzones.some(rz => rz.id === z.rekenzone_id)
   );
-  const zoneGroups: ZoneGroup[] = rekenzones.length
+  // Group the accordion only when a zone is actually assigned (same gate as
+  // the VABI exporter) — otherwise a lone "Ongegroepeerd" header would imply
+  // grouping the export doesn't apply.
+  const anyAssigned = ungroupedZones.length < zonesWithElements.length;
+  const zoneGroups: ZoneGroup[] = rekenzones.length && anyAssigned
     ? [
         ...rekenzones
           .map(rz => ({ key: rz.id, title: rz.name, zones: zonesWithElements.filter(z => z.rekenzone_id === rz.id) }))

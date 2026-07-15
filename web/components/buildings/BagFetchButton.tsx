@@ -31,20 +31,24 @@ export function BagFetchButton({ buildingId, hasData }: Props) {
     setLoading(true);
     setError('');
     setWarnings([]);
-    const res = await fetch(`/api/buildings/${buildingId}/bag`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ force: hasData }),
-    });
-    const data = await res.json().catch(() => ({}));
-    setLoading(false);
-
-    if (!res.ok) {
-      setError(ERROR_MESSAGES[data.error] ?? data.error ?? 'Ophalen mislukt');
-      return;
+    try {
+      const res = await fetch(`/api/buildings/${buildingId}/bag`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ force: hasData }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(ERROR_MESSAGES[data.error] ?? data.error ?? 'Ophalen mislukt');
+        return;
+      }
+      setWarnings(Array.isArray(data.warnings) ? data.warnings : []);
+      router.refresh();
+    } catch {
+      setError('Ophalen mislukt — controleer de verbinding');
+    } finally {
+      setLoading(false);
     }
-    setWarnings(Array.isArray(data.warnings) ? data.warnings : []);
-    router.refresh();
   }
 
   return (

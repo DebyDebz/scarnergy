@@ -46,18 +46,25 @@ export function mapBagAdressen(json: unknown): BagAddressData | null {
   if (panden.length > 1) warnings.push('meerdere_panden');
 
   const bouwjaarRaw = Array.isArray(a?.oorspronkelijkBouwjaar) ? a.oorspronkelijkBouwjaar[0] : a?.oorspronkelijkBouwjaar;
-  const bouwjaar = Number(bouwjaarRaw);
-  const oppervlakte = Number(a?.oppervlakte);
   const gebruiksdoelen = Array.isArray(a?.gebruiksdoelen) ? a.gebruiksdoelen.filter((g: unknown) => typeof g === 'string') : [];
 
   return {
     bag_pand_id: typeof panden[0] === 'string' ? panden[0] : null,
     bag_vbo_id: typeof a?.adresseerbaarObjectIdentificatie === 'string' ? a.adresseerbaarObjectIdentificatie : null,
-    bag_bouwjaar: Number.isFinite(bouwjaar) ? bouwjaar : null,
-    bag_oppervlakte_m2: Number.isFinite(oppervlakte) ? oppervlakte : null,
+    bag_bouwjaar: toPositiveNumber(bouwjaarRaw),
+    bag_oppervlakte_m2: toPositiveNumber(a?.oppervlakte),
     bag_gebruiksdoel: gebruiksdoelen.length ? gebruiksdoelen.join(', ') : null,
     warnings,
   };
+}
+
+// Number(null) and Number('') are 0, which would cache bogus zeros and — for
+// bouwjaar — violate migration 026's CHECK (BETWEEN 1000 AND 2100); neither
+// value is ever legitimately 0 in BAG data.
+function toPositiveNumber(v: unknown): number | null {
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 /**
