@@ -37,12 +37,21 @@ export interface VabiOrgInfo {
 export interface VabiZone {
   floor_level: number;
   gross_area_m2?: number | null;
+  id?: string;
+  rekenzone_id?: string | null;
+}
+
+export interface VabiRekenzone {
+  id: string;
+  name: string;
+  sort_order?: number | null;
 }
 
 export interface VabiElement {
   id: string;
   name: string;
   element_type: string;
+  zone_id?: string | null;
   description?: string | null;
   construction_type?: string | null;
   insulation_type?: string | null;
@@ -175,36 +184,24 @@ function indent(s: string, n: number): string {
   return s.split('\n').map(l => ' '.repeat(n) + l).join('\n');
 }
 
-// ── Main document builder ─────────────────────────────────────────────────────
+// ── Rekenzone block renderer ─────────────────────────────────────────────────
+// Renders one <Rekenzone> block from the zones/elements assigned to it.
+// Extracted verbatim from the single hardcoded "Zone A" block; the legacy
+// no-rekenzones path must stay byte-identical (locked by the golden test).
+// Installaties are NOT rendered here — they live at project level.
 
-export function buildVabiXml(
-  session: VabiSessionInfo,
-  org: VabiOrgInfo,
-  building: VabiBuildingInfo,
+function renderRekenzone(
+  attrId: string,
+  naam: string,
   zones: VabiZone[],
   elements: VabiElement[],
-  openings: VabiOpening[],
+  openingsByElement: Record<string, VabiOpening[]>,
+  dakkapellenByParent: Record<string, VabiElement[]>,
 ): string {
-  const today = new Date().toISOString().slice(0, 10);
-  const surveyDate = session.started_at ? new Date(session.started_at).toISOString().slice(0, 10) : today;
-
-  // Index openings by element_id
-  const openingsByElement: Record<string, VabiOpening[]> = {};
-  for (const o of openings) {
-    if (o.element_id) (openingsByElement[o.element_id] ??= []).push(o);
-  }
-
   // Bucket elements by type
-  const gevels       = elements.filter(e => e.element_type === 'gevel');
-  const vloeren      = elements.filter(e => e.element_type === 'vloer');
-  const daken        = elements.filter(e => e.element_type === 'dak');
-  const installaties = elements.filter(e => e.element_type === 'installatie');
-
-  // Index dakkapellen by parent dak id
-  const dakkapellenByParent: Record<string, VabiElement[]> = {};
-  for (const dk of elements.filter(e => e.element_type === 'dakkapel')) {
-    if (dk.parent_element_id) (dakkapellenByParent[dk.parent_element_id] ??= []).push(dk);
-  }
+  const gevels  = elements.filter(e => e.element_type === 'gevel');
+  const vloeren = elements.filter(e => e.element_type === 'vloer');
+  const daken   = elements.filter(e => e.element_type === 'dak');
 
   const totalArea = zones.reduce((s, z) => s + (z.gross_area_m2 ?? 0), 0);
 
@@ -356,6 +353,59 @@ export function buildVabiXml(
     );
   }).join('\n');
 
+  return (
+    `    <Rekenzone id="${esc(attrId)}">\n` +
+    `      <Naam>${esc(naam)}</Naam>\n` +
+    `      <Gebruiksoppervlakte>${r2(totalArea)}</Gebruiksoppervlakte>\n\n` +
+
+    (verdiepingenXml
+      ? `      <Verdiepingen>\n${indent(verdiepingenXml, 8)}\n      </Verdiepingen>\n\n`
+      : `      <Verdiepingen/>\n\n`) +
+
+    (gevelsXml
+      ? `      <Gevels>\n${indent(gevelsXml, 8)}\n      </Gevels>\n\n`
+      : `      <Gevels/>\n\n`) +
+
+    (vloerXml
+      ? `      <Vloeren>\n${indent(vloerXml, 8)}\n      </Vloeren>\n\n`
+      : `      <Vloeren/>\n\n`) +
+
+    (dakenXml
+      ? `      <Daken>\n${indent(dakenXml, 8)}\n      </Daken>\n\n`
+      : `      <Daken/>\n\n`) +
+
+    `    </Rekenzone>\n`
+  );
+}
+
+// ── Main document builder ─────────────────────────────────────────────────────
+
+export function buildVabiXml(
+  session: VabiSessionInfo,
+  org: VabiOrgInfo,
+  building: VabiBuildingInfo,
+  zones: VabiZone[],
+  elements: VabiElement[],
+  openings: VabiOpening[],
+  rekenzones?: VabiRekenzone[],
+): string {
+  const today = new Date().toISOString().slice(0, 10);
+  const surveyDate = session.started_at ? new Date(session.started_at).toISOString().slice(0, 10) : today;
+
+  // Index openings by element_id
+  const openingsByElement: Record<string, VabiOpening[]> = {};
+  for (const o of openings) {
+    if (o.element_id) (openingsByElement[o.element_id] ??= []).push(o);
+  }
+
+  const installaties = elements.filter(e => e.element_type === 'installatie');
+
+  // Index dakkapellen by parent dak id
+  const dakkapellenByParent: Record<string, VabiElement[]> = {};
+  for (const dk of elements.filter(e => e.element_type === 'dakkapel')) {
+    if (dk.parent_element_id) (dakkapellenByParent[dk.parent_element_id] ??= []).push(dk);
+  }
+
   // ── Installaties ─────────────────────────────────────────────────────────────
   const installXml = installaties.map(el => {
     const type = installTypeVabi(el.installation_type, el.name);
@@ -377,6 +427,10 @@ export function buildVabiXml(
     );
   }).join('\n');
 
+  const rekenzonesXml = renderRekenzone(
+    'A', 'Zone A - Volledig woning', zones, elements, openingsByElement, dakkapellenByParent,
+  );
+
   // ── Assemble ─────────────────────────────────────────────────────────────────
   return (
     `<?xml version="1.0" encoding="UTF-8"?>\n` +
@@ -394,27 +448,7 @@ export function buildVabiXml(
     `  </Gebouw>\n\n` +
 
     `  <Rekenzones>\n` +
-    `    <Rekenzone id="A">\n` +
-    `      <Naam>Zone A - Volledig woning</Naam>\n` +
-    `      <Gebruiksoppervlakte>${r2(totalArea)}</Gebruiksoppervlakte>\n\n` +
-
-    (verdiepingenXml
-      ? `      <Verdiepingen>\n${indent(verdiepingenXml, 8)}\n      </Verdiepingen>\n\n`
-      : `      <Verdiepingen/>\n\n`) +
-
-    (gevelsXml
-      ? `      <Gevels>\n${indent(gevelsXml, 8)}\n      </Gevels>\n\n`
-      : `      <Gevels/>\n\n`) +
-
-    (vloerXml
-      ? `      <Vloeren>\n${indent(vloerXml, 8)}\n      </Vloeren>\n\n`
-      : `      <Vloeren/>\n\n`) +
-
-    (dakenXml
-      ? `      <Daken>\n${indent(dakenXml, 8)}\n      </Daken>\n\n`
-      : `      <Daken/>\n\n`) +
-
-    `    </Rekenzone>\n` +
+    rekenzonesXml +
     `  </Rekenzones>\n\n` +
 
     (installXml
