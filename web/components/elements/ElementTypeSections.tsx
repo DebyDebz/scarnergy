@@ -4,6 +4,7 @@ import {
   toCardinal, gevelpositie, grenztAan, dakType,
   openingArea, roofAreaBreakdown,
   mmToM, r2, fmtArea, fmtMeters, fmtEfficiencyPct,
+  rekenhoogte, rcSourceLabel,
 } from '@scarnergy/opname-calc';
 
 /**
@@ -36,6 +37,27 @@ const SECTIONS: { type: string; nl: string; en: string }[] = [
 const SECTION_TYPES = new Set(SECTIONS.map(s => s.type));
 
 const jaNee = (v: boolean | null | undefined) => (v ? 'Ja' : 'Nee');
+
+// §6 Rc provenance badge (GAP W2): documented / observed / buildyear_forfait.
+const RC_SOURCE_STYLE: Record<string, string> = {
+  documented: 'bg-emerald-50 text-emerald-700',
+  observed: 'bg-sky-50 text-sky-700',
+  buildyear_forfait: 'bg-amber-50 text-amber-700',
+};
+
+function RcValue({ el }: { el: BuildingElement }) {
+  const label = rcSourceLabel(el.rc_source);
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      {el.rc_value ?? '—'}
+      {label && (
+        <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${RC_SOURCE_STYLE[el.rc_source!] ?? 'bg-gray-100 text-gray-600'}`}>
+          {label}
+        </span>
+      )}
+    </span>
+  );
+}
 
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -112,6 +134,10 @@ function TransparanteDelen({ openings }: { openings: Opening[] }) {
                 <Field label="U kozijn / glas / totaal"
                   value={[o.u_value_frame, o.u_value_glass, o.u_value_total].map(v => v ?? '—').join(' / ')} />
                 <Field label="g-waarde"    value={o.g_value ?? '—'} />
+                {/* Migration 024 forfait calc fields (§4.2/4.3) — distinct from the measured u_value/g_value above */}
+                <Field label="U glas (forfait)" value={o.u_glas ?? '—'} />
+                <Field label="g-waarde (forfait)" value={o.g_waarde ?? '—'} />
+                <Field label="F_sh" value={o.f_sh ?? '—'} />
               </dl>
               {o.notes && <p className="mt-2 text-[11px] text-gray-500 italic">{o.notes}</p>}
             </div>
@@ -128,6 +154,9 @@ function GevelRow({ el, urls }: { el: ElementWithRelations; urls: string[] }) {
   const hoogte     = mmToM(el.height_mm);
   const breedte    = mmToM(el.length_mm);
   const bruto      = el.area_m2 ?? (hoogte != null && breedte != null ? r2(hoogte * breedte) : null);
+  // §2.1: rekenhoogte = override ?? hoogte + dikte_vloerconstructie (300 mm forfait);
+  // rekenbreedte has no correction column — it is the stored breedte.
+  const rekenH = rekenhoogte(hoogte, el.dikte_vloerconstructie_mm, el.rekenhoogte_m_override);
   return (
     <div className="px-4 py-3">
       <div className="flex items-center gap-2 mb-2">
@@ -139,8 +168,17 @@ function GevelRow({ el, urls }: { el: ElementWithRelations; urls: string[] }) {
         <Field label="Orientatie"  value={orientatie || '—'} />
         <Field label="Hoogte"      value={fmtMeters(hoogte)} />
         <Field label="Breedte"     value={fmtMeters(breedte)} />
+        <Field label="Rekenhoogte" value={
+          <span className="inline-flex items-center gap-1.5">
+            {fmtMeters(rekenH)}
+            {el.rekenhoogte_m_override != null && (
+              <span className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold bg-violet-50 text-violet-700">override</span>
+            )}
+          </span>
+        } />
+        <Field label="Rekenbreedte" value={fmtMeters(breedte)} />
         <Field label="Bruto Oppervlakte" value={fmtArea(bruto)} />
-        <Field label="Rc"          value={el.rc_value ?? '—'} />
+        <Field label="Rc"          value={<RcValue el={el} />} />
       </dl>
       <TransparanteDelen openings={el.openings} />
       <NotesPhotos el={el} urls={urls} />
@@ -164,7 +202,7 @@ function DakRow({ el, urls }: { el: ElementWithRelations; urls: string[] }) {
         <Field label="Hoek"       value={el.tilt_deg != null ? `${el.tilt_deg}°` : '—'} />
         <Field label="Nokhoogte"  value={el.nokhoogte_m != null ? `${el.nokhoogte_m} m` : '—'} />
         <Field label="Bruto Oppervlakte" value={fmtArea(breakdown.bruto)} />
-        <Field label="Rc"         value={el.rc_value ?? '—'} />
+        <Field label="Rc"         value={<RcValue el={el} />} />
         <Field label="Totaal Oppervlakte Gaten" value={fmtArea(breakdown.gaten)} />
         <Field label="Opp. Dakkapellen" value={fmtArea(breakdown.dakkapellen)} />
         <Field label="Netto Dakoppervlak" value={<span className="text-indigo-700">{fmtArea(breakdown.netto)}</span>} />
@@ -206,7 +244,7 @@ function VloerRow({ el, urls }: { el: ElementWithRelations; urls: string[] }) {
         <Field label="Perimeter"     value={el.perimeter_m != null ? `${el.perimeter_m} m` : '—'} />
         <Field label="Vloerisolatie" value={jaNee(!!el.insulation_type)} />
         <Field label="Bodemisolatie" value={jaNee(el.bodemisolatie)} />
-        <Field label="Rc"            value={el.rc_value ?? '—'} />
+        <Field label="Rc"            value={<RcValue el={el} />} />
       </dl>
       <NotesPhotos el={el} urls={urls} />
     </div>

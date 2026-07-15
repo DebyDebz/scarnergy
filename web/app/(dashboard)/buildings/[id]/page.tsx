@@ -8,6 +8,8 @@ import { BuildingFloorPlanUpload } from '@/components/buildings/BuildingFloorPla
 import { FloorPlanViewer } from '@/components/buildings/FloorPlanViewer';
 import { BuildingExportButtons } from '@/components/buildings/BuildingExportButtons';
 import { BagPanel } from '@/components/buildings/BagPanel';
+import { MapPanel } from '@/components/buildings/MapPanel';
+import { ZoneEditButton } from '@/components/buildings/ZoneEditButton';
 import { ElementTypeSections, type ElementWithRelations } from '@/components/elements/ElementTypeSections';
 import { ArrowLeft, ChevronDown } from 'lucide-react';
 import type {
@@ -211,6 +213,9 @@ export default async function BuildingDetailPage({ params }: Props) {
       {/* ── BAG / 3DBAG registry data (GAP W3) ──────────────────────────── */}
       <BagPanel building={building} />
 
+      {/* ── Locatie / map (GAP W3) ──────────────────────────────────────── */}
+      <MapPanel building={building} />
+
       {/* ── Section 2 — Gevel Foto's ────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-gray-200">
         <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
@@ -362,6 +367,24 @@ export default async function BuildingDetailPage({ params }: Props) {
                 )}
                 <span className="ml-2">
                   <FloorPlanButton zone={zone as Zone} buildingId={params.id} />
+                </span>
+                <span className="ml-1">
+                  <ZoneEditButton
+                    zoneId={zone.id}
+                    zoneName={zone.name}
+                    ceilingHeightM={zone.ceiling_height_m}
+                    grossAreaM2={zone.gross_area_m2}
+                    description={zone.description}
+                    vloer={(() => {
+                      const v = zone.elements.find(e => e.element_type === 'vloer');
+                      return v ? {
+                        id: v.id,
+                        plafond_type: v.plafond_type,
+                        warmtecap_vloer_klasse: v.warmtecap_vloer_klasse,
+                        warmtecap_gevel_klasse: v.warmtecap_gevel_klasse,
+                      } : null;
+                    })()}
+                  />
                 </span>
               </summary>
 

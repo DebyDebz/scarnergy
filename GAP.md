@@ -88,25 +88,44 @@ and new components in `web/components/elements/`.
 
 ## W2 — Apply the drafted migration, then the calc-field UI
 
-Blocked on: reviewing `docs/proposed_migration_calc_fields.sql` (additive,
-idempotent — designed to be safe).
-
-- [ ] Move `docs/proposed_migration_calc_fields.sql` →
+- [x] Move `docs/proposed_migration_calc_fields.sql` →
       `supabase/migrations/024_calc_fields.sql` and apply it.
-- [ ] Regenerate/extend types: `lib/supabase.ts` interfaces and
+      ✅ 2026-07-15 — statement-identical to the reviewed draft (verified by
+      script) · dry-run in a rollback txn, then applied to the local stack ·
+      new columns probed queryable.
+- [x] Regenerate/extend types: `lib/supabase.ts` interfaces and
       `web/lib/types.ts` (keep both in sync).
-- [ ] **Verdieping/zone edit form** (web): Plafond (`plafond_type`),
+      ✅ 2026-07-15 — all 024 element/opening fields + `Zone.ceiling_height_m`/
+      `description` + `Building.latitude/longitude`, both apps in sync.
+- [x] **Verdieping/zone edit form** (web): Plafond (`plafond_type`),
       Warmtecapaciteit vloer (`warmtecap_vloer_klasse`), Warmtecapaciteit
       gevel (`warmtecap_gevel_klasse`), Hoogte, GebruiksOppervlakte, Notities,
       kJ_m2K (derived, read-only) — mirrors the AppSheet "BG" edit form.
-- [ ] **Gevel calc fields**: Rekenhoogte / Rekenbreedte display
+      ✅ 2026-07-15 — `web/components/buildings/ZoneEditButton.tsx` (pencil in
+      the zone accordion header) + new whitelisted `PATCH /api/zones/[id]`;
+      plafond/warmtecap write to the storey's vloer element (where 024 puts
+      them) via `/api/elements/[id]`. **Note:** kJ_m2K renders "—" until the
+      licensed §1.3 forfait table is transcribed (`opname-calculation-spec.md`
+      is not in the repo — calc Phase 2 gate with the owner); the lookup
+      plumbing (`warmtecapKJm2K` in `@scarnergy/opname-calc/nta`) is in place.
+- [x] **Gevel calc fields**: Rekenhoogte / Rekenbreedte display
       (`rekenhoogte_m_override`, `dikte_vloerconstructie_mm`, engine default
       300 mm per §2.1).
-- [ ] **Transparante Delen calc fields**: `u_glas`, `g_waarde`, `f_sh`.
-- [ ] **Rc provenance**: show `rc_source` (documented / observed /
+      ✅ 2026-07-15 — shared `rekenhoogte()` helper (override ?? hoogte +
+      dikte/1000, 300 mm forfait; unit-tested) rendered in GevelRow with an
+      "override" badge; both fields editable in ElementEditPanel.
+- [x] **Transparante Delen calc fields**: `u_glas`, `g_waarde`, `f_sh`.
+      ✅ 2026-07-15 — displayed as "(forfait)" fields next to the measured
+      U/g values in ElementTypeSections; editable via ElementEditPanel;
+      whitelisted in the openings API.
+- [x] **Rc provenance**: show `rc_source` (documented / observed /
       buildyear-forfait) as a small badge next to Rc values.
-- **Verify gate:** migration applies cleanly on a copy · existing mobile app
-  unaffected (columns nullable/additive) · standing regression rule.
+      ✅ 2026-07-15 — `RcValue` badge (emerald/sky/amber) in Gevel/Dak/Vloer
+      rows; `rc_source` selectable in ElementEditPanel.
+- **Verify gate:** ✅ 2026-07-15 — migration dry-run + applied cleanly ·
+  mobile unaffected (columns nullable/additive; mobile `tsc` clean) ·
+  standing regression rule green: 114 tests · goldens byte-identical ·
+  web `tsc` · `next build` ok.
 
 ---
 
@@ -128,9 +147,15 @@ idempotent — designed to be safe).
       106 tests green (11 new fixture-driven mapping tests). **Note:** live
       Kadaster fetch still needs `BAG_API_KEY` provisioned (free Kadaster
       self-service); route returns `bag_not_configured` until then.
-- [ ] **Map on the building/opname page**: embed (Google Maps iframe or
+- [x] **Map on the building/opname page**: embed (Google Maps iframe or
       Leaflet+OSM to avoid an API key) showing the geocoded address, matching
       the AppSheet header card.
+      ✅ 2026-07-15 — keyless OpenStreetMap embed (`MapPanel`) driven by the
+      existing `buildings.latitude/longitude` columns; "Locatie ophalen"
+      button → new `POST /api/buildings/[id]/geocode` using the keyless PDOK
+      Locatieserver (response shape live-verified) caching coords on the row.
+      Graceful empty state without coords; 502/422 on PDOK down/miss; no key
+      anywhere.
 - **Verify gate:** panel renders gracefully when the external API is down ·
   no server key leaks to the client · standing regression rule.
 

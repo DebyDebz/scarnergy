@@ -25,7 +25,11 @@ const DETAIL_FIELDS: Record<string, FieldDef[]> = {
     { key: 'insulation_type',   label: 'Isolatietype', type: 'select',
       options: ['Glaswol','Spouwvulling','PUR','EPS','Geen'] },
     { key: 'rc_value',          label: 'Rc (m²K/W)',   type: 'number' },
+    { key: 'rc_source',         label: 'Rc bron',      type: 'select',
+      options: ['documented','observed','buildyear_forfait'] },
     { key: 'u_value',           label: 'U (W/m²K)',    type: 'number' },
+    { key: 'dikte_vloerconstructie_mm', label: 'Dikte vloerconstructie (mm)', type: 'number' },
+    { key: 'rekenhoogte_m_override',    label: 'Rekenhoogte override (m)',    type: 'number' },
     { key: 'notes',             label: 'Notities',     type: 'text' },
   ],
   transparant_deel: [
@@ -42,6 +46,9 @@ const DETAIL_FIELDS: Record<string, FieldDef[]> = {
       dependsOn: { key: 'has_shading', value: true } },
     { key: 'overstek_m',            label: 'Overstek (m)',         type: 'number', target: 'opening' },
     { key: 'belemmering',           label: 'Belemmering',          type: 'text',   target: 'opening' },
+    { key: 'u_glas',                label: 'U glas forfait (W/m²K)', type: 'number', target: 'opening' },
+    { key: 'g_waarde',              label: 'g-waarde forfait',     type: 'number', target: 'opening' },
+    { key: 'f_sh',                  label: 'F_sh schaduwfactor',   type: 'number', target: 'opening' },
     { key: 'notes',                 label: 'Notities',             type: 'text',   target: 'opening' },
   ],
   vloer: [
@@ -51,6 +58,8 @@ const DETAIL_FIELDS: Record<string, FieldDef[]> = {
       options: ['Geen','Glaswol','PUR','EPS','Kurk'] },
     { key: 'bodemisolatie', label: 'Bodemisolatie',  type: 'toggle' },
     { key: 'rc_value',      label: 'Rc (m²K/W)',     type: 'number' },
+    { key: 'rc_source',     label: 'Rc bron',        type: 'select',
+      options: ['documented','observed','buildyear_forfait'] },
     { key: 'notes',         label: 'Notities',       type: 'text' },
   ],
   dak: [
@@ -61,6 +70,8 @@ const DETAIL_FIELDS: Record<string, FieldDef[]> = {
     { key: 'insulation_type',   label: 'Isolatietype',   type: 'select',
       options: ['Glaswol','PUR','EPS','Geen'] },
     { key: 'rc_value',          label: 'Rc (m²K/W)',     type: 'number' },
+    { key: 'rc_source',         label: 'Rc bron',        type: 'select',
+      options: ['documented','observed','buildyear_forfait'] },
     { key: 'notes',             label: 'Notities',       type: 'text' },
   ],
   installatie: [

@@ -104,6 +104,7 @@ export interface Building {
   house_number: string; postal_code: string; city: string;
   building_type: string; construction_year: number; gross_floor_area_m2: number;
   is_active: boolean;
+  latitude: number | null; longitude: number | null;
   // BAG / 3DBAG cache (migration 026) — written by the web API route,
   // display-only on mobile via the normal buildings/building_summary reads.
   bag_pand_id: string | null; bag_vbo_id: string | null;
@@ -119,6 +120,7 @@ export interface Rekenzone {
 export interface Zone {
   id: string; building_id: string; zone_code: string; name: string;
   floor_level: number; gross_area_m2: number; energy_label: string | null;
+  ceiling_height_m: number | null; description: string | null;
   rekenzone_id: string | null;
   is_active: boolean;
   floor_plan_points: Array<{ x: number; y: number }> | null;
@@ -155,6 +157,24 @@ export interface BuildingElement {
   grid_x: number | null; grid_y: number | null;
   grid_w: number | null; grid_h: number | null;
   grid_rotation: number | null;
+  // Migration 024 — Phase 2 calc fields (all nullable/defaulted, additive)
+  dikte_vloerconstructie_mm: number | null;
+  rekenhoogte_m_override: number | null;
+  warmtecap_vloer_klasse: string | null;
+  warmtecap_gevel_klasse: string | null;
+  plafond_type: string | null;
+  rc_source: string | null;
+  isolatie_dikte_mm: number | null;
+  isolatie_lambda: number | null;
+  na_isolatie: boolean;
+  na_isolatie_jaar: number | null;
+  kruipruimte_hoogte_m: number | null;
+  pv_aantal_panelen: number | null;
+  pv_wp_per_paneel: number | null;
+  pv_orientatie_deg: number | null;
+  pv_hellingshoek_deg: number | null;
+  pv_beschaduwing_klasse: string | null;
+  tapwater_segments: Record<string, number[]> | null;
 }
 export interface Opening {
   id: string; org_id: string; element_id: string; opening_type: string;
@@ -168,6 +188,10 @@ export interface Opening {
   overstek_m: number;
   belemmering: string | null;
   notes: string | null;
+  // Migration 024 — Phase 2 calc fields (§4.2/4.3)
+  u_glas: number | null;
+  g_waarde: number | null;
+  f_sh: number | null;
 }
 export interface InspectionSession {
   id: string; org_id: string; building_id: string; inspector_id: string;

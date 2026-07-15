@@ -33,11 +33,13 @@ const zones: Zone[] = [
     id: 'z0', building_id: 'bld-1', zone_code: 'Z01', name: 'Begane grond',
     floor_level: 0, gross_area_m2: 74.11, energy_label: null, rekenzone_id: null, is_active: true,
     floor_plan_points: null, floor_plan_scale_m: null, floor_plan_image_url: null,
+    ceiling_height_m: null, description: null,
   },
   {
     id: 'z1', building_id: 'bld-1', zone_code: 'Z02', name: 'Eerste verdieping',
     floor_level: 1, gross_area_m2: 67.38, energy_label: null, rekenzone_id: null, is_active: true,
     floor_plan_points: null, floor_plan_scale_m: null, floor_plan_image_url: null,
+    ceiling_height_m: null, description: null,
   },
 ];
 
@@ -53,6 +55,12 @@ const el = (o: Partial<BuildingElement>): BuildingElement => ({
   dikte_vloer_onder_mm: null, dikte_muren_mm: null, photo_urls: [],
   is_complete: true, is_active: true, sort_order: 0, notes: null,
   grid_x: null, grid_y: null, grid_w: null, grid_h: null, grid_rotation: null,
+  dikte_vloerconstructie_mm: null, rekenhoogte_m_override: null,
+  warmtecap_vloer_klasse: null, warmtecap_gevel_klasse: null, plafond_type: null,
+  rc_source: null, isolatie_dikte_mm: null, isolatie_lambda: null,
+  na_isolatie: false, na_isolatie_jaar: null, kruipruimte_hoogte_m: null,
+  pv_aantal_panelen: null, pv_wp_per_paneel: null, pv_orientatie_deg: null,
+  pv_hellingshoek_deg: null, pv_beschaduwing_klasse: null, tapwater_segments: null,
   ...o,
 });
 
@@ -79,6 +87,7 @@ const openings: Opening[] = [
     frame_type: 'metaal', g_value: null, u_value_frame: null, u_value_glass: null,
     u_value_total: 2.8, has_shading: true, shading_type: 'Knikarmscherm', shading_factor: null,
     thermisch_onderbroken: false, overstek_m: 0, belemmering: null, notes: null,
+    u_glas: null, g_waarde: null, f_sh: null,
   },
 ];
 

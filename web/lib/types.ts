@@ -37,6 +37,8 @@ export interface Building {
   building_type: string;
   construction_year: number;
   gross_floor_area_m2: number;
+  latitude: number | null;
+  longitude: number | null;
   // BAG / 3DBAG cache (migration 026) — raw registry values, distinct from
   // the manual construction_year / gross_floor_area_m2 above.
   bag_pand_id: string | null;
@@ -64,6 +66,8 @@ export interface Zone {
   name: string;
   floor_level: number;
   gross_area_m2: number;
+  ceiling_height_m: number | null;
+  description: string | null;
   energy_label: string | null;
   rekenzone_id: string | null;
   floor_plan_image_url: string | null;
@@ -109,6 +113,24 @@ export interface BuildingElement {
   is_active: boolean;
   sort_order: number;
   notes: string | null;
+  // Migration 024 — Phase 2 calc fields (all nullable/defaulted, additive)
+  dikte_vloerconstructie_mm: number | null;
+  rekenhoogte_m_override: number | null;
+  warmtecap_vloer_klasse: string | null;
+  warmtecap_gevel_klasse: string | null;
+  plafond_type: string | null;
+  rc_source: string | null;
+  isolatie_dikte_mm: number | null;
+  isolatie_lambda: number | null;
+  na_isolatie: boolean;
+  na_isolatie_jaar: number | null;
+  kruipruimte_hoogte_m: number | null;
+  pv_aantal_panelen: number | null;
+  pv_wp_per_paneel: number | null;
+  pv_orientatie_deg: number | null;
+  pv_hellingshoek_deg: number | null;
+  pv_beschaduwing_klasse: string | null;
+  tapwater_segments: Record<string, number[]> | null;
 }
 export interface Opening {
   id: string;
@@ -131,6 +153,10 @@ export interface Opening {
   overstek_m: number;
   belemmering: string | null;
   notes: string | null;
+  // Migration 024 — Phase 2 calc fields (§4.2/4.3)
+  u_glas: number | null;
+  g_waarde: number | null;
+  f_sh: number | null;
 }
 export interface InspectionSession {
   id: string;
