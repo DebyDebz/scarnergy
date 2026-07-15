@@ -112,12 +112,22 @@ idempotent — designed to be safe).
 
 ## W3 — Net-new integrations
 
-- [ ] **BAG / 3DBAG panel** on the building page: BAG Bouwjaar, BAG Opp,
+- [x] **BAG / 3DBAG panel** on the building page: BAG Bouwjaar, BAG Opp,
       3dbag hoogte, BAG Gebruiksdoel, BAG Pand ID. Server-side Next API route
       calling the Kadaster BAG API + 3dbag.nl by address/postcode; cache the
       result on the building row (needs a small additive migration for the
       cached fields + fetched_at). Feeds validations V-01/02/03 in the calc
       plan (Phase 4 there).
+      ✅ 2026-07-15 — migration 026 (bag_* columns + building_summary recreate,
+      applied to local stack) · `POST /api/buildings/[id]/bag` (30-day cache,
+      huisletter/toevoeging retry ladder, non-fatal 3DBAG height) ·
+      `BagPanel`/`BagFetchButton` on the building page · mobile shows the
+      cached line via `building_summary` (display-only, offline-safe) ·
+      both W3 gates verified: panel reads DB columns only (renders with API
+      down; graceful 422/502/503) and `grep BAG_API_KEY web/.next/static` clean ·
+      106 tests green (11 new fixture-driven mapping tests). **Note:** live
+      Kadaster fetch still needs `BAG_API_KEY` provisioned (free Kadaster
+      self-service); route returns `bag_not_configured` until then.
 - [ ] **Map on the building/opname page**: embed (Google Maps iframe or
       Leaflet+OSM to avoid an API key) showing the geocoded address, matching
       the AppSheet header card.
@@ -136,14 +146,23 @@ idempotent — designed to be safe).
       lookup screens; add filter chips on the element sections instead
       (filter by grenzend-aan / by orientation). Revisit only if inspectors
       ask for the reverse-lookup views.
-- [ ] **DECISION NEEDED (with AppSheet/calc owner):** Rekenzone grouping.
+- [x] **DECISION MADE + IMPLEMENTED (option a):** Rekenzone grouping.
       AppSheet: Rekenzone ("A met airco") contains multiple Verdiepingen
-      (BG/V1/V2) plus gevels/daken/vloeren/installaties. Current schema:
-      `zones` == one floor; no grouping layer above it. Options:
-      (a) add `rekenzone` table + `zones.rekenzone_id` (additive),
-      (b) keep zones-as-floors and tag elements with a rekenzone label,
-      (c) accept the flat model. Must be frozen before calc Phase 2
-      (same gate as `docs/CALC_TASK_CHECKLIST.md` Phase 2).
+      (BG/V1/V2) plus gevels/daken/vloeren/installaties.
+      ✅ 2026-07-15 — migration 025 (`rekenzones` table + nullable
+      `zones.rekenzone_id`, RLS 4-policy block, rls_tests TEST 4b; applied to
+      local stack) · VABI exporter iterates `<Rekenzone>` blocks when zones
+      are assigned, **legacy no-rekenzones output byte-identical** (strict-
+      equality test + untouched golden snapshot; new grouped golden
+      `vabi.rekenzones.golden.xml`) · mobile: rekenzone create/pick in
+      ZoneManager, grouped zone list with per-type counts, grouped session
+      zone chips · web: Rekenzones table (Naam | Gevels | Daken | Vloeren |
+      Installaties | Notities) + rekenzone-grouped zones accordion ·
+      all five gates green. This unfreezes the calc Phase 2 Rekenzone
+      convention (§3.1/§5.1 number freeze still pending with owner).
+      Remaining VABI semantics to confirm with calc owner: per-block
+      Gebruiksoppervlakte = Σ member-zone areas; unassigned zones emit a
+      trailing "Overige zones" block; `<Verdieping id>` repeats across blocks.
 - **Verify gate:** standing regression rule.
 
 ---
@@ -204,8 +223,8 @@ existing functionality and design intact, all gates green.
       screen render, VABI export **share** — the last unticked Phase 1 gate line.
 - [ ] **Phase 3 — offline on-site validators** V-04, V-05, V-09, V-11 as blocking
       flags in `app/tabs/sessions/inspect.tsx` + session close; must work with
-      network off. **BLOCKED on** the Phase 2 conventions freeze (§3.1/§5.1 +
-      Rekenzone decision, see W4).
+      network off. **BLOCKED on** the Phase 2 conventions freeze (§3.1/§5.1 —
+      Rekenzone decision resolved 2026-07-15, see W4: option a implemented).
 - [ ] **Mobile follow-through when migration 024 lands** (pairs with W2): extend
       `lib/supabase.ts` interfaces (sync with `web/lib/types.ts`) + capture forms
       in inspect/zone screens for the new NTA fields — `plafond_type`,
