@@ -184,6 +184,15 @@ function indent(s: string, n: number): string {
   return s.split('\n').map(l => ' '.repeat(n) + l).join('\n');
 }
 
+// Rekenzone letter ids: A, B, … Z, AA, AB, …
+function rzLetter(i: number): string {
+  let s = '';
+  for (let n = i; n >= 0; n = Math.floor(n / 26) - 1) {
+    s = String.fromCharCode(65 + (n % 26)) + s;
+  }
+  return s;
+}
+
 // ── Rekenzone block renderer ─────────────────────────────────────────────────
 // Renders one <Rekenzone> block from the zones/elements assigned to it.
 // Extracted verbatim from the single hardcoded "Zone A" block; the legacy
@@ -427,9 +436,69 @@ export function buildVabiXml(
     );
   }).join('\n');
 
-  const rekenzonesXml = renderRekenzone(
-    'A', 'Zone A - Volledig woning', zones, elements, openingsByElement, dakkapellenByParent,
-  );
+  // Rekenzone grouping is active only when rekenzones are supplied AND at
+  // least one zone is assigned to one; otherwise the legacy single-"Zone A"
+  // document is emitted byte-identically (locked by the golden test).
+  const rzSorted = (rekenzones ?? [])
+    .slice()
+    .sort((a, b) => ((a.sort_order ?? 0) - (b.sort_order ?? 0)) || a.name.localeCompare(b.name));
+  const rzIds = new Set(rzSorted.map(r => r.id));
+  const grouped = rzSorted.length > 0 &&
+    zones.some(z => z.rekenzone_id != null && rzIds.has(z.rekenzone_id));
+
+  let rekenzonesXml: string;
+  if (!grouped) {
+    rekenzonesXml = renderRekenzone(
+      'A', 'Zone A - Volledig woning', zones, elements, openingsByElement, dakkapellenByParent,
+    );
+  } else {
+    const zonesByRz = new Map<string, VabiZone[]>();
+    const looseZones: VabiZone[] = [];
+    const rzByZoneId = new Map<string, string>();
+    for (const z of zones) {
+      if (z.rekenzone_id && rzIds.has(z.rekenzone_id)) {
+        (zonesByRz.get(z.rekenzone_id) ?? zonesByRz.set(z.rekenzone_id, []).get(z.rekenzone_id)!).push(z);
+        if (z.id) rzByZoneId.set(z.id, z.rekenzone_id);
+      } else {
+        looseZones.push(z);
+      }
+    }
+
+    // Elements land in their zone's rekenzone (element → zone → rekenzone,
+    // so an element can never straddle two rekenzones). A dakkapel is only
+    // ever rendered nested under its parent dak, so it follows the parent
+    // even if its own zone was assigned elsewhere.
+    const elementsByRz = new Map<string, VabiElement[]>();
+    const looseElements: VabiElement[] = [];
+    for (const e of elements) {
+      const rzId = e.zone_id ? rzByZoneId.get(e.zone_id) : undefined;
+      if (rzId) {
+        (elementsByRz.get(rzId) ?? elementsByRz.set(rzId, []).get(rzId)!).push(e);
+      } else {
+        looseElements.push(e);
+      }
+    }
+
+    // Only gevel/vloer/dak render inside a Rekenzone block (installaties are
+    // project-level, dakkapellen nest under their dak), so loose installaties
+    // or dakkapellen alone must not force an "Overige zones" block.
+    const rendersInBlock = (e: VabiElement) =>
+      e.element_type === 'gevel' || e.element_type === 'vloer' || e.element_type === 'dak';
+
+    const blocks: Array<{ naam: string; zs: VabiZone[]; els: VabiElement[] }> = [];
+    for (const rz of rzSorted) {
+      const zs = zonesByRz.get(rz.id) ?? [];
+      const els = elementsByRz.get(rz.id) ?? [];
+      if (zs.length || els.some(rendersInBlock)) blocks.push({ naam: rz.name, zs, els });
+    }
+    if (looseZones.length || looseElements.some(rendersInBlock)) {
+      blocks.push({ naam: 'Overige zones', zs: looseZones, els: looseElements });
+    }
+
+    rekenzonesXml = blocks
+      .map((b, i) => renderRekenzone(rzLetter(i), b.naam, b.zs, b.els, openingsByElement, dakkapellenByParent))
+      .join('');
+  }
 
   // ── Assemble ─────────────────────────────────────────────────────────────────
   return (
