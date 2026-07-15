@@ -48,6 +48,12 @@ SELECT COUNT(*) AS visible_zones,
        bool_and(org_id = '00000000-0000-0000-0000-000000000001') AS all_correct_org
 FROM zones;
 
+-- ─── TEST 4b: Rekenzones follow building org ──────────────────────────
+SELECT 'TEST 4b: Rekenzone org isolation' AS test_name;
+SELECT COUNT(*) AS visible_rekenzones,
+       bool_and(org_id = '00000000-0000-0000-0000-000000000001') AS all_correct_org
+FROM rekenzones;
+
 -- ─── TEST 5: Measurements scoped to inspector ─────────────────────────
 -- (no measurements exist yet, but the policy should allow select)
 SELECT 'TEST 5: Measurements table accessible' AS test_name;

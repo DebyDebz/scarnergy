@@ -31,12 +31,12 @@ const building = { construction_year: 1974, building_type: 'Vrijstaande woning' 
 const zones: Zone[] = [
   {
     id: 'z0', building_id: 'bld-1', zone_code: 'Z01', name: 'Begane grond',
-    floor_level: 0, gross_area_m2: 74.11, energy_label: null, is_active: true,
+    floor_level: 0, gross_area_m2: 74.11, energy_label: null, rekenzone_id: null, is_active: true,
     floor_plan_points: null, floor_plan_scale_m: null, floor_plan_image_url: null,
   },
   {
     id: 'z1', building_id: 'bld-1', zone_code: 'Z02', name: 'Eerste verdieping',
-    floor_level: 1, gross_area_m2: 67.38, energy_label: null, is_active: true,
+    floor_level: 1, gross_area_m2: 67.38, energy_label: null, rekenzone_id: null, is_active: true,
     floor_plan_points: null, floor_plan_scale_m: null, floor_plan_image_url: null,
   },
 ];

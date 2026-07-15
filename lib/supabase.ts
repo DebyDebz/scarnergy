@@ -74,6 +74,7 @@ export type Database = {
       user_profiles:       { Row: UserProfile };
       ble_devices:         { Row: BleDevice };
       buildings:           { Row: Building };
+      rekenzones:          { Row: Rekenzone };
       zones:               { Row: Zone };
       building_elements:   { Row: BuildingElement };
       openings:            { Row: Opening };
@@ -104,9 +105,15 @@ export interface Building {
   building_type: string; construction_year: number; gross_floor_area_m2: number;
   is_active: boolean;
 }
+export interface Rekenzone {
+  id: string; org_id: string; building_id: string; name: string;
+  description: string | null; notes: string | null;
+  sort_order: number; is_active: boolean;
+}
 export interface Zone {
   id: string; building_id: string; zone_code: string; name: string;
   floor_level: number; gross_area_m2: number; energy_label: string | null;
+  rekenzone_id: string | null;
   is_active: boolean;
   floor_plan_points: Array<{ x: number; y: number }> | null;
   floor_plan_scale_m: number | null;
