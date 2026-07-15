@@ -39,11 +39,18 @@ export async function GET(
   };
 
   // Zones, elements, openings
-  const zonesRes = await (supabase.from('zones') as any)
-    .select('*')
-    .eq('building_id', buildingId)
-    .eq('is_active', true)
-    .order('floor_level');
+  const [zonesRes, rekenzonesRes] = await Promise.all([
+    (supabase.from('zones') as any)
+      .select('*')
+      .eq('building_id', buildingId)
+      .eq('is_active', true)
+      .order('floor_level'),
+    (supabase.from('rekenzones') as any)
+      .select('*')
+      .eq('building_id', buildingId)
+      .eq('is_active', true)
+      .order('sort_order'),
+  ]);
 
   const zones: Zone[] = zonesRes.data ?? [];
   const zoneIds = zones.map(z => z.id);
@@ -63,7 +70,7 @@ export async function GET(
     openings = (opRes.data ?? []).filter((o: any) => elIds.has(o.element_id));
   }
 
-  const xml = buildVabiXml(session, org, building, zones, elements, openings);
+  const xml = buildVabiXml(session, org, building, zones, elements, openings, rekenzonesRes.data ?? []);
 
   const ref      = building.reference_code ?? buildingId.slice(0, 8);
   const filename = `${ref}_VABI.xml`.replace(/[^a-zA-Z0-9_.-]/g, '_');

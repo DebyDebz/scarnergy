@@ -4,7 +4,7 @@ import {
   ActivityIndicator, ScrollView, Alert, Share,
 } from "react-native";
 import { useLocalSearchParams, useRouter, useNavigation } from "expo-router";
-import { supabase, SessionSummary, Zone, BuildingElement, Opening } from "../../../lib/supabase";
+import { supabase, SessionSummary, Rekenzone, Zone, BuildingElement, Opening } from "../../../lib/supabase";
 import { useBLE } from "../../../lib/BLEContext";
 import { buildVabiXml } from "@scarnergy/opname-calc";
 import { elementTypeLabel } from "../../../lib/elementTypes";
@@ -20,6 +20,7 @@ export default function SessionDetailScreen() {
   const [sessionLoading,  setSessionLoading]  = useState(true);
   const [sessionError,    setSessionError]    = useState<string | null>(null);
   const [zones,           setZones]           = useState<Zone[]>([]);
+  const [rekenzones,      setRekenzones]      = useState<Rekenzone[]>([]);
   const [selectedZoneId,  setSelectedZoneId]  = useState<string | null>(null);
   const [elements,        setElements]        = useState<BuildingElement[]>([]);
   const [elementsLoading, setElementsLoading] = useState(false);
@@ -46,17 +47,34 @@ export default function SessionDetailScreen() {
 
   useEffect(() => {
     if (!session?.building_id) return;
-    supabase
-      .from("zones")
-      .select("*")
-      .eq("building_id", session.building_id)
-      .eq("is_active", true)
-      .order("floor_level", { ascending: true })
-      .then(({ data }) => {
-        const list = data ?? [];
-        setZones(list);
-        if (list.length > 0) setSelectedZoneId(list[0].id);
-      });
+    Promise.all([
+      supabase
+        .from("zones")
+        .select("*")
+        .eq("building_id", session.building_id)
+        .eq("is_active", true)
+        .order("floor_level", { ascending: true }),
+      supabase
+        .from("rekenzones")
+        .select("*")
+        .eq("building_id", session.building_id)
+        .eq("is_active", true)
+        .order("sort_order", { ascending: true }),
+    ]).then(([zonesRes, rzRes]) => {
+      const rzList = (rzRes.data as Rekenzone[]) ?? [];
+      const list = zonesRes.data ?? [];
+      // When rekenzones exist, order zone chips by rekenzone (ungrouped last);
+      // inside a group the floor_level order from the query is kept.
+      const grouped = rzList.length
+        ? [
+            ...rzList.flatMap(rz => list.filter(z => z.rekenzone_id === rz.id)),
+            ...list.filter(z => !z.rekenzone_id || !rzList.some(rz => rz.id === z.rekenzone_id)),
+          ]
+        : list;
+      setRekenzones(rzList);
+      setZones(grouped);
+      if (grouped.length > 0) setSelectedZoneId(grouped[0].id);
+    });
   }, [session?.building_id]);
 
   const loadElements = useCallback(() => {
@@ -171,10 +189,11 @@ export default function SessionDetailScreen() {
   const exportXML = useCallback(async () => {
     if (!session || !sessionId) return;
     try {
-      const [zonesRes, buildingRes, orgRes] = await Promise.all([
+      const [zonesRes, buildingRes, orgRes, rekenzonesRes] = await Promise.all([
         supabase.from("zones").select("*").eq("building_id", session.building_id).order("floor_level"),
         (supabase.from("buildings") as any).select("construction_year, building_type").eq("id", session.building_id).single(),
         (supabase.from("organisations") as any).select("name").single(),
+        supabase.from("rekenzones").select("*").eq("building_id", session.building_id).eq("is_active", true).order("sort_order"),
       ]);
 
       const allZones: Zone[] = zonesRes.data ?? [];
@@ -200,6 +219,7 @@ export default function SessionDetailScreen() {
         allZones,
         allElements,
         allOpenings,
+        rekenzonesRes.data ?? [],
       );
 
       const filename = `${session.session_code}_VABI.xml`;
@@ -210,6 +230,20 @@ export default function SessionDetailScreen() {
   }, [session, sessionId]);
 
   // ── Render ────────────────────────────────────────────────────────────────
+
+  // Zone chips: label chip-groups by rekenzone (first zone of each group
+  // carries the label). Empty map when no rekenzones exist → chips unchanged.
+  const zoneGroupLabels = new Map<string, string>();
+  if (rekenzones.length) {
+    let prevRz: string | null | undefined;
+    for (const z of zones) {
+      const rzId = z.rekenzone_id && rekenzones.some(r => r.id === z.rekenzone_id) ? z.rekenzone_id : null;
+      if (rzId !== prevRz) {
+        zoneGroupLabels.set(z.id, rzId ? rekenzones.find(r => r.id === rzId)!.name : "Overig");
+        prevRz = rzId;
+      }
+    }
+  }
 
   if (sessionLoading) return <ActivityIndicator style={styles.loader} color="#1E3A5F" />;
   if (sessionError)   return <Text style={styles.error}>{sessionError}</Text>;
@@ -271,6 +305,9 @@ export default function SessionDetailScreen() {
           >
             {zones.map(z => (
               <View key={z.id} style={styles.zoneChipGroup}>
+                {zoneGroupLabels.has(z.id) && (
+                  <Text style={styles.zoneGroupLabel}>{zoneGroupLabels.get(z.id)!.toUpperCase()}</Text>
+                )}
                 <TouchableOpacity
                   style={[styles.zoneChip, selectedZoneId === z.id && styles.zoneChipActive]}
                   onPress={() => setSelectedZoneId(z.id)}
@@ -485,6 +522,8 @@ const styles = StyleSheet.create({
   zonePicker:          { backgroundColor: "#fff", borderBottomWidth: 1, borderBottomColor: "#EEE" },
   zoneScroll:          { paddingHorizontal: 12, paddingVertical: 10, gap: 8 },
   zoneChipGroup:       { flexDirection: "row", alignItems: "center", gap: 4 },
+  zoneGroupLabel:      { fontSize: 10, fontWeight: "700", color: "#9CA3AF",
+                         letterSpacing: 0.5, marginLeft: 4, marginRight: 2 },
   zoneChip:            { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20,
                          backgroundColor: "#F0F4F8", borderWidth: 1, borderColor: "#DDE" },
   zoneChipActive:      { backgroundColor: "#1E3A5F", borderColor: "#1E3A5F" },
