@@ -285,6 +285,7 @@ services:
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ${ANON_KEY}
       SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
       AI_SERVER_URL: http://ai_server:8001
+      BAG_API_KEY: ${BAG_API_KEY}
       GRAFANA_URL: http://localhost:3001
     volumes:
       - ../web:/app

@@ -7,6 +7,7 @@ import { FloorPlanButton } from '@/components/buildings/FloorPlanButton';
 import { BuildingFloorPlanUpload } from '@/components/buildings/BuildingFloorPlanUpload';
 import { FloorPlanViewer } from '@/components/buildings/FloorPlanViewer';
 import { BuildingExportButtons } from '@/components/buildings/BuildingExportButtons';
+import { BagPanel } from '@/components/buildings/BagPanel';
 import { ElementTypeSections, type ElementWithRelations } from '@/components/elements/ElementTypeSections';
 import { ArrowLeft, ChevronDown } from 'lucide-react';
 import type {
@@ -202,6 +203,9 @@ export default async function BuildingDetailPage({ params }: Props) {
           </div>
         ))}
       </div>
+
+      {/* ── BAG / 3DBAG registry data (GAP W3) ──────────────────────────── */}
+      <BagPanel building={building} />
 
       {/* ── Section 2 — Gevel Foto's ────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-gray-200">

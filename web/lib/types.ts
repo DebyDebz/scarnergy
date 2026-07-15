@@ -37,6 +37,15 @@ export interface Building {
   building_type: string;
   construction_year: number;
   gross_floor_area_m2: number;
+  // BAG / 3DBAG cache (migration 026) — raw registry values, distinct from
+  // the manual construction_year / gross_floor_area_m2 above.
+  bag_pand_id: string | null;
+  bag_vbo_id: string | null;
+  bag_bouwjaar: number | null;
+  bag_oppervlakte_m2: number | null;
+  bag_gebruiksdoel: string | null;
+  dbag_hoogte_m: number | null;
+  bag_fetched_at: string | null;
 }
 export interface Rekenzone {
   id: string;

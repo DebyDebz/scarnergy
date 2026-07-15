@@ -104,6 +104,12 @@ export interface Building {
   house_number: string; postal_code: string; city: string;
   building_type: string; construction_year: number; gross_floor_area_m2: number;
   is_active: boolean;
+  // BAG / 3DBAG cache (migration 026) — written by the web API route,
+  // display-only on mobile via the normal buildings/building_summary reads.
+  bag_pand_id: string | null; bag_vbo_id: string | null;
+  bag_bouwjaar: number | null; bag_oppervlakte_m2: number | null;
+  bag_gebruiksdoel: string | null; dbag_hoogte_m: number | null;
+  bag_fetched_at: string | null;
 }
 export interface Rekenzone {
   id: string; org_id: string; building_id: string; name: string;
