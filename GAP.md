@@ -163,14 +163,25 @@ and new components in `web/components/elements/`.
 
 ## W4 — Nice-to-haves / decisions
 
-- [ ] **"Sla op als Standaard"** for Transparante Delen: new small table
+- [x] **"Sla op als Standaard"** for Transparante Delen: new small table
       (e.g. `element_defaults`: org_id, element_kind, payload JSONB) + a
       "save as default" action and a "apply default" picker on the add/edit
       form. Additive migration.
-- [ ] **Grenst-aan & Orientatie reference screens**: do NOT clone the AppSheet
+      ✅ 2026-07-15 — migration 027 (`element_defaults`, UNIQUE(org,kind),
+      RLS 4-policy block; applied to local stack) · GET/PUT
+      `/api/element-defaults` (org-scoped upsert) · "Standaard toepassen" /
+      "Sla op als standaard" in ElementEditPanel (works for every element
+      kind, incl. Transparante Delen); applied payloads re-filter through the
+      form's known keys + the API whitelists. ElementEditPanel is now
+      reachable: per-element pencil on the building page element sections.
+- [x] **Grenst-aan & Orientatie reference screens**: do NOT clone the AppSheet
       lookup screens; add filter chips on the element sections instead
       (filter by grenzend-aan / by orientation). Revisit only if inspectors
       ask for the reverse-lookup views.
+      ✅ 2026-07-15 — grenzend-aan + orientatie chips above the element
+      sections (`ElementTypeSections`, now a client component); a filter only
+      constrains the element types it describes; no selection → render
+      identical to before.
 - [x] **DECISION MADE + IMPLEMENTED (option a):** Rekenzone grouping.
       AppSheet: Rekenzone ("A met airco") contains multiple Verdiepingen
       (BG/V1/V2) plus gevels/daken/vloeren/installaties.
@@ -250,16 +261,43 @@ existing functionality and design intact, all gates green.
       flags in `app/tabs/sessions/inspect.tsx` + session close; must work with
       network off. **BLOCKED on** the Phase 2 conventions freeze (§3.1/§5.1 —
       Rekenzone decision resolved 2026-07-15, see W4: option a implemented).
-- [ ] **Mobile follow-through when migration 024 lands** (pairs with W2): extend
+      **Additionally blocked (found 2026-07-16):** V-04/05/09/11 are referenced
+      only by ID in the repo — their definitions live in the licensed
+      `opname-calculation-spec.md` §10 which is not in the repo. Both the
+      definitions and the §3.1/§5.1 numbers must come from the calc owner
+      before these can be built.
+- [x] **Mobile follow-through when migration 024 lands** (pairs with W2): extend
       `lib/supabase.ts` interfaces (sync with `web/lib/types.ts`) + capture forms
       in inspect/zone screens for the new NTA fields — `plafond_type`,
       warmtecapaciteit classes, isolatie dikte/λ + na-isolatie, kruipruimte
       hoogte, PV params, tapwater segments, `rc_source` provenance.
+      ✅ 2026-07-16 — interfaces were synced with W2; DETAIL_FIELDS extended
+      per element type (gevel/vloer/dak: isolatie dikte/λ, na-isolatie(+jaar),
+      rc_source; gevel: dikte_vloerconstructie; vloer: kruipruimte hoogte when
+      grenzend aan kruipruimte + the storey's plafond/warmtecap classes — same
+      vloer-element carrier as the web zone form; installatie: PV params for
+      ZonnePanelen, tapwater segments for Tapwater) · new collapsed-by-default
+      DETAILS section in inspect.tsx (measurement-first flow + completion
+      logic untouched) · tapwater text ⇄ JSONB round-trip in `lib/tapwater.ts`
+      (unit-tested) · mobile `tsc` clean, 120 tests green.
 - [ ] **Results screen confidence upgrade**: replace the data-coverage proxy with
       real confidence when the §9 engine (calc Phase 4) replaces the rule-based
       heuristic; keep the disclaimer.
-- [ ] **M8 remainder**: RLS tests (`supabase/migrations/rls_tests.sql`) wired
+- [x] **M8 remainder**: RLS tests (`supabase/migrations/rls_tests.sql`) wired
       into CI · API smoke tests across Kong routes.
+      ✅ 2026-07-16 — rls_tests.sql rewritten into a real harness (one txn as
+      the `authenticated` role with simulated JWT claims — the old suite's
+      SET LOCAL was a no-op and the superuser bypassed RLS entirely; explicit
+      PASS/FAIL per test; TEST 10's invalid UUID fixed to the seed zone) ·
+      `scripts/db_check.sh` applies the full 001→027 chain to a fresh
+      supabase/postgres behind a documented auth/storage shim, validated
+      green end-to-end in a fresh container (11/11 PASS, energy label E from
+      seed) · new CI `db` job runs it on every PR (same image as the local
+      stack) · `scripts/api_smoke.sh` probes the Kong routes read-only —
+      5/5 green against the live stack, and it caught a real bug: realtime's
+      tenant health needs a Bearer token, so the web health dashboard
+      mis-reported realtime as down (fixed in
+      `web/app/api/health/realtime/route.ts`).
 - [ ] **Deferred (decision needed before building)**: sign-up screen (users are
       admin-provisioned today) · ESP32 provisioning screen (M7, when the
       hardware fleet scales).
