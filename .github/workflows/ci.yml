@@ -1,6 +1,7 @@
 # Standing regression gate (docs/CALC_TASK_CHECKLIST.md + GAP.md):
 # mobile tsc clean · npm test green (incl. golden VABI fixtures byte-identical)
-# · web tsc clean · next build ok. A PR cannot merge with any gate red.
+# · web tsc clean · next build ok · full migration chain + RLS tests green on a
+# fresh supabase/postgres (GAP M8). A PR cannot merge with any gate red.
 name: CI
 
 on:
@@ -25,6 +26,29 @@ jobs:
         run: npm test -- --ci
       - name: Golden fixtures byte-identical
         run: git diff --exit-code -- __tests__/fixtures
+
+  db:
+    name: DB — migrations + RLS tests (GAP M8)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # Same image as the local stack (supabase_db), so CI == dev behaviour.
+        image: public.ecr.aws/supabase/postgres:15.8.1.085
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply full migration chain + run RLS suite
+        run: bash scripts/db_check.sh
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
 
   web:
     name: Web — typecheck + production build
