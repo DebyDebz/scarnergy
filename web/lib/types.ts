@@ -59,6 +59,13 @@ export interface Rekenzone {
   sort_order: number;
   is_active: boolean;
 }
+export interface ElementDefault {
+  id: string;
+  org_id: string;
+  element_kind: string;
+  payload: Record<string, unknown>;
+  updated_at: string;
+}
 export interface Zone {
   id: string;
   building_id: string;
@@ -233,6 +240,7 @@ export type Database = {
       user_profiles:       TableDef<UserProfile>;
       ble_devices:         TableDef<BleDevice, Omit<BleDevice, 'id'>>;
       buildings:           TableDef<Building>;
+      element_defaults:    TableDef<ElementDefault>;
       rekenzones:          TableDef<Rekenzone>;
       zones:               TableDef<Zone>;
       building_elements:   TableDef<BuildingElement>;

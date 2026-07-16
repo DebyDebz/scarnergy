@@ -1,4 +1,8 @@
-import { ChevronDown, TriangleAlert } from 'lucide-react';
+'use client';
+import { useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { ChevronDown, Pencil, TriangleAlert } from 'lucide-react';
+import { ElementEditPanel } from './ElementEditPanel';
 import type { BuildingElement, Opening } from '@/lib/types';
 import {
   toCardinal, gevelpositie, grenztAan, dakType,
@@ -302,22 +306,88 @@ const ROW_BY_TYPE: Record<string, (p: { el: ElementWithRelations; urls: string[]
   installatie: InstallatieRow,
 };
 
+// Filter chip row (GAP W4): filter by grenzend-aan / orientation instead of
+// cloning the AppSheet reverse-lookup screens. No selection → identical render.
+function ChipRow({ label, options, active, onToggle }: {
+  label: string; options: string[]; active: string | null; onToggle: (v: string) => void;
+}) {
+  if (options.length < 2) return null;
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap">
+      <span className="text-[11px] text-gray-400">{label}</span>
+      {options.map(o => (
+        <button
+          key={o}
+          onClick={() => onToggle(o)}
+          className={`rounded-full px-2 py-0.5 text-[11px] font-medium border ${
+            active === o
+              ? 'bg-indigo-600 border-indigo-600 text-white'
+              : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+          }`}
+        >
+          {o}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function ElementTypeSections({ elements, photoUrls }: Props) {
+  const router = useRouter();
+  const [editing, setEditing] = useState<ElementWithRelations | null>(null);
+  const [grenstFilter, setGrenstFilter] = useState<string | null>(null);
+  const [orientFilter, setOrientFilter] = useState<string | null>(null);
+
   // Dakkapellen render nested under their parent dak, never as a top-level row.
   const topLevel = elements.filter(e => e.element_type !== 'dakkapel');
-  const leftover = topLevel.filter(e => !SECTION_TYPES.has(e.element_type));
+
+  const grenstOptions = useMemo(
+    () => Array.from(new Set(topLevel.filter(e => ['gevel', 'vloer'].includes(e.element_type)).map(e => grenztAan(e)))).sort(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [elements],
+  );
+  const orientOptions = useMemo(
+    () => Array.from(new Set(topLevel
+      .filter(e => ['gevel', 'dak'].includes(e.element_type))
+      .map(e => toCardinal(e.orientation_deg))
+      .filter(Boolean))).sort(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [elements],
+  );
+
+  // Filters only constrain the types they describe; other types stay visible.
+  const passes = (e: ElementWithRelations) => {
+    if (grenstFilter && ['gevel', 'vloer'].includes(e.element_type) && grenztAan(e) !== grenstFilter) return false;
+    if (orientFilter && ['gevel', 'dak'].includes(e.element_type) && toCardinal(e.orientation_deg) !== orientFilter) return false;
+    return true;
+  };
+  const visible = topLevel.filter(passes);
+  const leftover = visible.filter(e => !SECTION_TYPES.has(e.element_type));
 
   const sections = [
-    ...SECTIONS.map(s => ({ ...s, items: topLevel.filter(e => e.element_type === s.type) })),
+    ...SECTIONS.map(s => ({ ...s, items: visible.filter(e => e.element_type === s.type) })),
     { type: '_other', nl: 'Overige elementen', en: 'Other', items: leftover },
   ].filter(s => s.items.length > 0);
 
-  if (sections.length === 0) {
+  if (topLevel.length === 0) {
     return <p className="text-xs text-gray-400 italic">No elements defined for this zone</p>;
   }
 
   return (
     <div className="space-y-3">
+      {(grenstOptions.length > 1 || orientOptions.length > 1) && (
+        <div className="space-y-1.5">
+          <ChipRow label="Grenzend aan" options={grenstOptions} active={grenstFilter}
+                   onToggle={v => setGrenstFilter(cur => (cur === v ? null : v))} />
+          <ChipRow label="Orientatie" options={orientOptions} active={orientFilter}
+                   onToggle={v => setOrientFilter(cur => (cur === v ? null : v))} />
+        </div>
+      )}
+
+      {sections.length === 0 && (
+        <p className="text-xs text-gray-400 italic">No elements match the active filters</p>
+      )}
+
       {sections.map(section => (
         <div key={section.type} className="rounded-lg border border-gray-100 overflow-hidden">
           <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100 flex items-center gap-2">
@@ -330,11 +400,31 @@ export function ElementTypeSections({ elements, photoUrls }: Props) {
           <div className="divide-y divide-gray-50">
             {section.items.map(el => {
               const Row = ROW_BY_TYPE[el.element_type] ?? GenericRow;
-              return <Row key={el.id} el={el} urls={photoUrls[el.id] ?? []} />;
+              return (
+                <div key={el.id} className="relative group/row">
+                  <button
+                    onClick={() => setEditing(el)}
+                    className="absolute right-3 top-3 p-1 rounded hover:bg-gray-100 text-gray-300 hover:text-gray-600"
+                    title="Element bewerken"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                  <Row el={el} urls={photoUrls[el.id] ?? []} />
+                </div>
+              );
             })}
           </div>
         </div>
       ))}
+
+      {editing && (
+        <ElementEditPanel
+          element={editing}
+          opening={editing.element_type === 'transparant_deel' ? (editing.openings[0] ?? null) : null}
+          onClose={() => setEditing(null)}
+          onSaved={() => router.refresh()}
+        />
+      )}
     </div>
   );
 }

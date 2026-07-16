@@ -124,6 +124,45 @@ export function ElementEditPanel({ element, opening, onClose, onSaved }: Props) 
   const set = (key: string, val: string | boolean | number) =>
     setValues(prev => ({ ...prev, [key]: val }));
 
+  // "Sla op als Standaard" (GAP W4): per-org default payload per element kind.
+  // Applying merges the saved values into the form (only keys this form knows);
+  // saving happens through the normal whitelisted PATCH, so the payload can
+  // never write columns the API does not allow.
+  const [defaultsMsg, setDefaultsMsg] = useState('');
+
+  const applyDefault = async () => {
+    if (!element) return;
+    setDefaultsMsg('');
+    const res = await fetch(`/api/element-defaults?kind=${element.element_type}`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.payload == null) {
+      setDefaultsMsg(res.ok ? 'Nog geen standaard opgeslagen voor dit type' : 'Standaard laden mislukt');
+      return;
+    }
+    const known = new Set((DETAIL_FIELDS[element.element_type] ?? []).map(f => f.key));
+    setValues(prev => {
+      const merged = { ...prev };
+      for (const [k, v] of Object.entries(data.payload as Record<string, unknown>)) {
+        if (known.has(k) && (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean')) {
+          merged[k] = v;
+        }
+      }
+      return merged;
+    });
+    setDefaultsMsg('Standaard toegepast — controleer en sla op');
+  };
+
+  const saveAsDefault = async () => {
+    if (!element) return;
+    setDefaultsMsg('');
+    const res = await fetch('/api/element-defaults', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ element_kind: element.element_type, payload: values }),
+    });
+    setDefaultsMsg(res.ok ? 'Opgeslagen als standaard voor de organisatie' : 'Standaard opslaan mislukt');
+  };
+
   const handleSave = () => {
     if (!element) return;
     startTransition(async () => {
@@ -255,6 +294,21 @@ export function ElementEditPanel({ element, opening, onClose, onSaved }: Props) 
           {error && (
             <p className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>
           )}
+          <div className="flex items-center gap-2 text-xs">
+            <button
+              onClick={applyDefault}
+              className="px-2.5 py-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50"
+            >
+              Standaard toepassen
+            </button>
+            <button
+              onClick={saveAsDefault}
+              className="px-2.5 py-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50"
+            >
+              Sla op als standaard
+            </button>
+            {defaultsMsg && <span className="text-gray-400">{defaultsMsg}</span>}
+          </div>
           <div className="flex gap-2">
             <button
               onClick={onClose}
