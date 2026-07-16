@@ -18,6 +18,9 @@ import {
   thicknessFromFaces, thicknessFromSweep, isUsableThickness,
 } from "@scarnergy/opname-calc";
 import { gridLengthMeters } from "../../../lib/floorplanGeometry";
+import { parseTapwaterSegments, formatTapwaterSegments } from "../../../lib/tapwater";
+import { FieldSelect } from "../../../components/ui/FieldSelect";
+import { FieldToggle } from "../../../components/ui/FieldToggle";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -97,6 +100,19 @@ const DETAIL_FIELDS: Record<string, DetailField[]> = {
     { key: 'dikte_vloer_onder_mm', label: 'Floor thickness below (mm)', type: 'number' },
     { key: 'dikte_muren_mm',       label: 'Adjacent wall thickness (mm)', type: 'number' },
     { key: 'perimeter_m',          label: 'Perimeter (m)',             type: 'number' },
+    // Migration 024 NTA fields (GAP M / §2.1 + §6)
+    { key: 'dikte_vloerconstructie_mm', label: 'Floor construction thickness (mm)', type: 'number' },
+    { key: 'isolatie_dikte_mm',    label: 'Insulation thickness (mm)', type: 'number' },
+    { key: 'isolatie_lambda',      label: 'Insulation λ (W/mK)',       type: 'number' },
+    { key: 'na_isolatie',          label: 'Retrofit insulation',       type: 'toggle' },
+    { key: 'na_isolatie_jaar',     label: 'Retrofit year',             type: 'number',
+      dependsOn: { key: 'na_isolatie', value: true } },
+    { key: 'rc_source',            label: 'Rc source',                 type: 'select',
+      options: [
+        { value: 'documented',        label: 'Documented' },
+        { value: 'observed',          label: 'Observed' },
+        { value: 'buildyear_forfait', label: 'Build-year forfait' },
+      ] },
   ],
   transparant_deel: [
     { key: 'opening_type',          label: 'Type',                 type: 'select', target: 'opening',
@@ -147,6 +163,37 @@ const DETAIL_FIELDS: Record<string, DetailField[]> = {
       ] },
     { key: 'bodemisolatie', label: 'Ground insulation', type: 'toggle' },
     { key: 'perimeter_m',   label: 'Perimeter (m)',   type: 'number' },
+    // Migration 024 NTA fields (§5.2 + §6 + §1.3 — the storey's vloer element
+    // carries the plafond/warmtecapaciteit classes, same as the web zone form)
+    { key: 'kruipruimte_hoogte_m', label: 'Crawl space height (m)', type: 'number',
+      dependsOn: { key: 'description', value: 'Kruipruimte' } },
+    { key: 'isolatie_dikte_mm',    label: 'Insulation thickness (mm)', type: 'number' },
+    { key: 'isolatie_lambda',      label: 'Insulation λ (W/mK)',       type: 'number' },
+    { key: 'na_isolatie',          label: 'Retrofit insulation',       type: 'toggle' },
+    { key: 'na_isolatie_jaar',     label: 'Retrofit year',             type: 'number',
+      dependsOn: { key: 'na_isolatie', value: true } },
+    { key: 'rc_source',            label: 'Rc source',                 type: 'select',
+      options: [
+        { value: 'documented',        label: 'Documented' },
+        { value: 'observed',          label: 'Observed' },
+        { value: 'buildyear_forfait', label: 'Build-year forfait' },
+      ] },
+    { key: 'plafond_type',         label: 'Ceiling type (storey)',     type: 'select',
+      options: [
+        { value: 'gesloten', label: 'Closed' },
+        { value: 'open',     label: 'Open' },
+        { value: 'overig',   label: 'Other' },
+      ] },
+    { key: 'warmtecap_vloer_klasse', label: 'Heat capacity — floor',   type: 'select',
+      options: [
+        { value: 'licht', label: 'Light' },
+        { value: 'zwaar', label: 'Heavy' },
+      ] },
+    { key: 'warmtecap_gevel_klasse', label: 'Heat capacity — facade',  type: 'select',
+      options: [
+        { value: 'licht', label: 'Light' },
+        { value: 'zwaar', label: 'Heavy' },
+      ] },
   ],
   dakkapel: [
     { key: 'description', label: 'Name / description', type: 'text' },
@@ -166,6 +213,18 @@ const DETAIL_FIELDS: Record<string, DetailField[]> = {
         { value: 'PUR',     label: 'PUR' },
         { value: 'EPS',     label: 'EPS' },
         { value: 'Geen',    label: 'None' },
+      ] },
+    // Migration 024 NTA fields (§6)
+    { key: 'isolatie_dikte_mm',    label: 'Insulation thickness (mm)', type: 'number' },
+    { key: 'isolatie_lambda',      label: 'Insulation λ (W/mK)',       type: 'number' },
+    { key: 'na_isolatie',          label: 'Retrofit insulation',       type: 'toggle' },
+    { key: 'na_isolatie_jaar',     label: 'Retrofit year',             type: 'number',
+      dependsOn: { key: 'na_isolatie', value: true } },
+    { key: 'rc_source',            label: 'Rc source',                 type: 'select',
+      options: [
+        { value: 'documented',        label: 'Documented' },
+        { value: 'observed',          label: 'Observed' },
+        { value: 'buildyear_forfait', label: 'Build-year forfait' },
       ] },
   ],
   installatie: [
@@ -191,6 +250,20 @@ const DETAIL_FIELDS: Record<string, DetailField[]> = {
         { value: 'Stadsverwarming',label: 'District heating' },
         { value: 'Biomassa',       label: 'Biomass' },
       ] },
+    // Migration 024 NTA fields — PV params (§7.3), only for solar panels
+    { key: 'pv_aantal_panelen',   label: 'Number of PV panels', type: 'number',
+      dependsOn: { key: 'installation_type', value: 'ZonnePanelen' } },
+    { key: 'pv_wp_per_paneel',    label: 'Wp per panel',        type: 'number',
+      dependsOn: { key: 'installation_type', value: 'ZonnePanelen' } },
+    { key: 'pv_orientatie_deg',   label: 'PV orientation (°)',  type: 'number',
+      dependsOn: { key: 'installation_type', value: 'ZonnePanelen' } },
+    { key: 'pv_hellingshoek_deg', label: 'PV tilt (°)',         type: 'number',
+      dependsOn: { key: 'installation_type', value: 'ZonnePanelen' } },
+    { key: 'pv_beschaduwing_klasse', label: 'PV shading class', type: 'text',
+      dependsOn: { key: 'installation_type', value: 'ZonnePanelen' } },
+    // Tapwater pipe segments (§7.1) — parsed to JSONB via lib/tapwater
+    { key: 'tapwater_segments',   label: 'Pipe segments per room', type: 'text',
+      dependsOn: { key: 'installation_type', value: 'Tapwater' } },
   ],
 };
 
@@ -239,6 +312,8 @@ export default function InspectScreen() {
   const [details,       setDetails]       = useState<Record<string, string | boolean | number>>({});
   // Opening record for transparant_deel elements
   const [openingId,     setOpeningId]     = useState<string | null>(null);
+  // NTA details accordion (collapsed by default — measurement flow first)
+  const [showDetails,   setShowDetails]   = useState(false);
 
   const activeSlotRef = useRef<SlotKey | null>(null);
   // setActiveSlotSync keeps the ref in sync IMMEDIATELY so BLE callbacks that
@@ -353,7 +428,9 @@ export default function InspectScreen() {
           const initialDetails: Record<string, string | boolean | number> = {};
           for (const f of elementFields) {
             const v = rest[f.key];
-            if (v != null) initialDetails[f.key] = v;
+            if (v == null) continue;
+            // tapwater_segments is JSONB in the DB but edited as one text line
+            initialDetails[f.key] = f.key === 'tapwater_segments' ? formatTapwaterSegments(v) : v;
           }
           setDetails(initialDetails);
           // Load existing photos: generate signed URLs for storage paths
@@ -568,7 +645,15 @@ export default function InspectScreen() {
       const elementDetailFields = (DETAIL_FIELDS[element.element_type] ?? []).filter(f => f.target !== 'opening');
       for (const f of elementDetailFields) {
         const v = details[f.key];
-        if (v != null && v !== '') update[f.key] = v;
+        if (v == null || v === '') continue;
+        if (f.key === 'tapwater_segments' && typeof v === 'string') {
+          update[f.key] = parseTapwaterSegments(v);   // JSONB column — parse the text line
+        } else if (f.type === 'number' && typeof v === 'string') {
+          const n = parseFloat(v.replace(',', '.'));
+          if (Number.isFinite(n)) update[f.key] = n;
+        } else {
+          update[f.key] = v;
+        }
       }
 
       const allSlotsFilled = slots.every(s => {
@@ -909,6 +994,60 @@ export default function InspectScreen() {
           </ScrollView>
         </View>
 
+        {/* ── NTA details (collapsed by default — measurement-first flow stays primary;
+               fields persist through the existing saveElement paths) ── */}
+        {(DETAIL_FIELDS[element.element_type] ?? []).length > 0 && (
+          <View style={styles.detailsSection}>
+            <TouchableOpacity
+              style={styles.detailsToggle}
+              onPress={() => setShowDetails(v => !v)}
+            >
+              <Text style={styles.photoLabel}>DETAILS</Text>
+              <Text style={styles.detailsToggleHint}>
+                {showDetails ? "hide ▲" : "show ▼"}
+              </Text>
+            </TouchableOpacity>
+
+            {showDetails && (DETAIL_FIELDS[element.element_type] ?? []).map(f => {
+              if (f.dependsOn && details[f.dependsOn.key] !== f.dependsOn.value) return null;
+              if (f.type === 'toggle') {
+                return (
+                  <FieldToggle
+                    key={f.key}
+                    label={f.label}
+                    value={!!details[f.key]}
+                    onChange={v => setDetails(prev => ({ ...prev, [f.key]: v }))}
+                  />
+                );
+              }
+              if (f.type === 'select') {
+                return (
+                  <FieldSelect
+                    key={f.key}
+                    label={f.label}
+                    value={details[f.key] != null ? String(details[f.key]) : null}
+                    options={f.options ?? []}
+                    onSelect={v => setDetails(prev => ({ ...prev, [f.key]: v }))}
+                  />
+                );
+              }
+              return (
+                <View key={f.key} style={styles.detailInputRow}>
+                  <Text style={styles.detailInputLabel}>{f.label}</Text>
+                  <TextInput
+                    style={styles.detailInput}
+                    value={details[f.key] != null ? String(details[f.key]) : ''}
+                    onChangeText={v => setDetails(prev => ({ ...prev, [f.key]: v }))}
+                    keyboardType={f.type === 'number' ? 'decimal-pad' : 'default'}
+                    placeholder={f.key === 'tapwater_segments' ? 'badkamer: 4.77, 2.39; keuken: 0.2' : f.type === 'number' ? '0' : '…'}
+                    placeholderTextColor="#CCC"
+                  />
+                </View>
+              );
+            })}
+          </View>
+        )}
+
         {/* ── Save ── */}
         <TouchableOpacity
           style={[styles.saveBtn, saving && styles.saveBtnDisabled]}
@@ -1027,6 +1166,18 @@ const styles = StyleSheet.create({
   flashLabel:     { fontSize: 12, color: "#1E8449", fontWeight: "700", marginTop: 6,
                     textAlign: "center" },
 
+  detailsSection: { backgroundColor: "#fff", borderRadius: 12, paddingVertical: 6,
+                    marginTop: 12, borderWidth: 1, borderColor: "#EBEBEB", overflow: "hidden" },
+  detailsToggle:  { flexDirection: "row", justifyContent: "space-between", alignItems: "center",
+                    paddingHorizontal: 14, paddingVertical: 8 },
+  detailsToggleHint: { fontSize: 11, color: "#2E86C1", fontWeight: "600" },
+  detailInputRow: { flexDirection: "row", alignItems: "center", gap: 10,
+                    paddingHorizontal: 16, paddingVertical: 8,
+                    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e7eb" },
+  detailInputLabel: { flex: 1, fontSize: 14, color: "#374151", fontWeight: "500" },
+  detailInput:    { minWidth: 120, maxWidth: 180, borderWidth: 1, borderColor: "#D1D5DB",
+                    borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6,
+                    fontSize: 14, color: "#111827", textAlign: "right" },
   photoSection:   { backgroundColor: "#fff", borderRadius: 12, padding: 14,
                     elevation: 1, shadowColor: "#000", shadowOpacity: 0.04, shadowRadius: 3 },
   photoLabel:     { fontSize: 11, fontWeight: "700", color: "#888",
