@@ -203,6 +203,30 @@ and new components in `web/components/elements/`.
 
 ---
 
+## W5 — Follow-ups from AppSheet screenshot parity checks (2026-07-17)
+
+Source: side-by-side of four AppSheet screens (Rekenzones Read only, Dak
+Details, Grenst aan Readonly, mobile session detail) against the current apps.
+
+- [x] **Commit the dak grenzend-aan parity fix**: `Grenzend aan` field on
+      DakRow + daks included in the grenzend-aan filter chips
+      (`web/components/elements/ElementTypeSections.tsx`).
+      ✅ 2026-07-20.
+- [ ] **Rekenzone detail drill-down** (web): the AppSheet "Rekenzones Read only"
+      screen pools ALL member elements of a rekenzone (across its verdiepingen)
+      into consolidated Daken/Gevels/Vloeren/Installaties tables. Web today has
+      the counts row + per-verdieping tables only. Build: click-through from a
+      Rekenzones table row → consolidated element sections, reusing the existing
+      row components (GevelRow/DakRow/VloerRow/InstallatieRow) — read-only, no
+      schema change.
+- [ ] **Deferred pending inspector demand** (W4 decision stands): building-wide
+      grenst-aan / orientatie reverse-lookup views with aggregate counts
+      (AppSheet "Grenst aan Readonly"). Chips cover the question per verdieping;
+      revisit only if inspectors ask for the pooled view.
+- **Verify gate:** standing regression rule.
+
+---
+
 ## Already covered (no action)
 
 For orientation — these AppSheet features exist on the web today:

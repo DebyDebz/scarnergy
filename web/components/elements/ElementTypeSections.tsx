@@ -205,6 +205,7 @@ function DakRow({ el, urls }: { el: ElementWithRelations; urls: string[] }) {
           value={`${fmtMeters(mmToM(el.length_mm))} × ${fmtMeters(mmToM(el.width_mm))}`} />
         <Field label="Hoek"       value={el.tilt_deg != null ? `${el.tilt_deg}°` : '—'} />
         <Field label="Nokhoogte"  value={el.nokhoogte_m != null ? `${el.nokhoogte_m} m` : '—'} />
+        <Field label="Grenzend aan" value={grenztAan(el)} />
         <Field label="Bruto Oppervlakte" value={fmtArea(breakdown.bruto)} />
         <Field label="Rc"         value={<RcValue el={el} />} />
         <Field label="Totaal Oppervlakte Gaten" value={fmtArea(breakdown.gaten)} />
@@ -342,7 +343,7 @@ export function ElementTypeSections({ elements, photoUrls }: Props) {
   const topLevel = elements.filter(e => e.element_type !== 'dakkapel');
 
   const grenstOptions = useMemo(
-    () => Array.from(new Set(topLevel.filter(e => ['gevel', 'vloer'].includes(e.element_type)).map(e => grenztAan(e)))).sort(),
+    () => Array.from(new Set(topLevel.filter(e => ['gevel', 'vloer', 'dak'].includes(e.element_type)).map(e => grenztAan(e)))).sort(),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [elements],
   );
@@ -357,7 +358,7 @@ export function ElementTypeSections({ elements, photoUrls }: Props) {
 
   // Filters only constrain the types they describe; other types stay visible.
   const passes = (e: ElementWithRelations) => {
-    if (grenstFilter && ['gevel', 'vloer'].includes(e.element_type) && grenztAan(e) !== grenstFilter) return false;
+    if (grenstFilter && ['gevel', 'vloer', 'dak'].includes(e.element_type) && grenztAan(e) !== grenstFilter) return false;
     if (orientFilter && ['gevel', 'dak'].includes(e.element_type) && toCardinal(e.orientation_deg) !== orientFilter) return false;
     return true;
   };
