@@ -212,13 +212,17 @@ Details, Grenst aan Readonly, mobile session detail) against the current apps.
       DakRow + daks included in the grenzend-aan filter chips
       (`web/components/elements/ElementTypeSections.tsx`).
       ✅ 2026-07-20.
-- [ ] **Rekenzone detail drill-down** (web): the AppSheet "Rekenzones Read only"
-      screen pools ALL member elements of a rekenzone (across its verdiepingen)
-      into consolidated Daken/Gevels/Vloeren/Installaties tables. Web today has
-      the counts row + per-verdieping tables only. Build: click-through from a
-      Rekenzones table row → consolidated element sections, reusing the existing
-      row components (GevelRow/DakRow/VloerRow/InstallatieRow) — read-only, no
-      schema change.
+- [x] **Rekenzone detail drill-down** (web): new route
+      `web/app/(dashboard)/buildings/[id]/rekenzones/[rekenzoneId]/page.tsx` —
+      Rekenzones table rows now link through; the page fetches the rekenzone's
+      zones (`zones.rekenzone_id`) then all `building_elements`/`openings` for
+      those zone ids and pools them into one flat list across every
+      verdieping, rendered via the existing `ElementTypeSections` (now with a
+      `readOnly` prop that hides the edit pencil/panel — matches the AppSheet
+      "Read only" screen; no new mutation path, no schema change). Direct
+      Supabase queries, same pattern as the building page.
+      ✅ 2026-07-20 · mobile+web tsc clean · 120 tests green · `next build` ok
+      (new route compiles, 292 B / 105 kB First Load JS).
 - [ ] **Deferred pending inspector demand** (W4 decision stands): building-wide
       grenst-aan / orientatie reverse-lookup views with aggregate counts
       (AppSheet "Grenst aan Readonly"). Chips cover the question per verdieping;

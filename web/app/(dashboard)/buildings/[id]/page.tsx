@@ -11,7 +11,7 @@ import { BagPanel } from '@/components/buildings/BagPanel';
 import { MapPanel } from '@/components/buildings/MapPanel';
 import { ZoneEditButton } from '@/components/buildings/ZoneEditButton';
 import { ElementTypeSections, type ElementWithRelations } from '@/components/elements/ElementTypeSections';
-import { ArrowLeft, ChevronDown } from 'lucide-react';
+import { ArrowLeft, ChevronDown, ChevronRight } from 'lucide-react';
 import type {
   BuildingSummary, Rekenzone, Zone, SessionSummary,
   BuildingElement, Opening, BuildingFacadePhoto,
@@ -325,7 +325,14 @@ export default async function BuildingDetailPage({ params }: Props) {
             <tbody className="divide-y divide-gray-50">
               {rzCountRows.map(({ rz, counts }) => (
                 <tr key={rz.id} className="hover:bg-gray-50">
-                  <td className="px-5 py-3 font-medium text-gray-800">{rz.name}</td>
+                  <td className="px-5 py-3 font-medium text-gray-800">
+                    <Link
+                      href={`/buildings/${params.id}/rekenzones/${rz.id}`}
+                      className="inline-flex items-center gap-1 text-indigo-600 hover:underline"
+                    >
+                      {rz.name} <ChevronRight className="w-3.5 h-3.5" />
+                    </Link>
+                  </td>
                   <td className="px-5 py-3 text-gray-700">Gevels ({counts.gevel})</td>
                   <td className="px-5 py-3 text-gray-700">Daken ({counts.dak})</td>
                   <td className="px-5 py-3 text-gray-700">Vloeren ({counts.vloer})</td>

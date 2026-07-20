@@ -30,6 +30,8 @@ interface Props {
   elements: ElementWithRelations[];
   /** element id → signed photo URLs (inspection-photos bucket) */
   photoUrls: Record<string, string[]>;
+  /** hides the edit pencil + panel — used by the read-only rekenzone drill-down (GAP W5) */
+  readOnly?: boolean;
 }
 
 const SECTIONS: { type: string; nl: string; en: string }[] = [
@@ -333,7 +335,7 @@ function ChipRow({ label, options, active, onToggle }: {
   );
 }
 
-export function ElementTypeSections({ elements, photoUrls }: Props) {
+export function ElementTypeSections({ elements, photoUrls, readOnly = false }: Props) {
   const router = useRouter();
   const [editing, setEditing] = useState<ElementWithRelations | null>(null);
   const [grenstFilter, setGrenstFilter] = useState<string | null>(null);
@@ -403,13 +405,15 @@ export function ElementTypeSections({ elements, photoUrls }: Props) {
               const Row = ROW_BY_TYPE[el.element_type] ?? GenericRow;
               return (
                 <div key={el.id} className="relative group/row">
-                  <button
-                    onClick={() => setEditing(el)}
-                    className="absolute right-3 top-3 p-1 rounded hover:bg-gray-100 text-gray-300 hover:text-gray-600"
-                    title="Element bewerken"
-                  >
-                    <Pencil className="w-3.5 h-3.5" />
-                  </button>
+                  {!readOnly && (
+                    <button
+                      onClick={() => setEditing(el)}
+                      className="absolute right-3 top-3 p-1 rounded hover:bg-gray-100 text-gray-300 hover:text-gray-600"
+                      title="Element bewerken"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                   <Row el={el} urls={photoUrls[el.id] ?? []} />
                 </div>
               );
@@ -418,7 +422,7 @@ export function ElementTypeSections({ elements, photoUrls }: Props) {
         </div>
       ))}
 
-      {editing && (
+      {!readOnly && editing && (
         <ElementEditPanel
           element={editing}
           opening={editing.element_type === 'transparant_deel' ? (editing.openings[0] ?? null) : null}
