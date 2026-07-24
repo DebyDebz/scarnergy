@@ -9,16 +9,16 @@ interface Props {
 }
 
 const ERROR_MESSAGES: Record<string, string> = {
-  bag_unavailable: 'BAG-service is momenteel niet bereikbaar',
-  address_not_found: 'Adres niet gevonden in de BAG',
-  bag_not_configured: 'BAG API-sleutel niet geconfigureerd',
+  bag_unavailable: 'BAG-service is momenteel niet bereikbaar (BAG service is currently unreachable)',
+  address_not_found: 'Adres niet gevonden in de BAG (Address not found in the BAG)',
+  bag_not_configured: 'BAG API-sleutel niet geconfigureerd (BAG API key not configured)',
 };
 
 const WARNING_MESSAGES: Record<string, string> = {
-  meerdere_verblijfsobjecten: 'Meerdere verblijfsobjecten op dit adres — eerste gebruikt',
-  meerdere_panden: 'Meerdere panden voor dit verblijfsobject — eerste gebruikt',
-  toevoeging_genegeerd: 'Huisnummertoevoeging niet gevonden — genegeerd',
-  '3dbag_unavailable': '3DBAG-hoogte niet beschikbaar',
+  meerdere_verblijfsobjecten: 'Meerdere verblijfsobjecten op dit adres — eerste gebruikt (Multiple residential units at this address — first one used)',
+  meerdere_panden: 'Meerdere panden voor dit verblijfsobject — eerste gebruikt (Multiple buildings for this unit — first one used)',
+  toevoeging_genegeerd: 'Huisnummertoevoeging niet gevonden — genegeerd (House number suffix not found — ignored)',
+  '3dbag_unavailable': '3DBAG-hoogte niet beschikbaar (3DBAG height not available)',
 };
 
 export function BagFetchButton({ buildingId, hasData }: Props) {
@@ -39,13 +39,13 @@ export function BagFetchButton({ buildingId, hasData }: Props) {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(ERROR_MESSAGES[data.error] ?? data.error ?? 'Ophalen mislukt');
+        setError(ERROR_MESSAGES[data.error] ?? data.error ?? 'Ophalen mislukt (Fetch failed)');
         return;
       }
       setWarnings(Array.isArray(data.warnings) ? data.warnings : []);
       router.refresh();
     } catch {
-      setError('Ophalen mislukt — controleer de verbinding');
+      setError('Ophalen mislukt — controleer de verbinding (Fetch failed — check your connection)');
     } finally {
       setLoading(false);
     }
@@ -61,7 +61,11 @@ export function BagFetchButton({ buildingId, hasData }: Props) {
         {loading
           ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
           : <RefreshCw className="w-3.5 h-3.5" />}
-        {hasData ? 'Vernieuwen' : 'Ophalen'}
+        {hasData ? (
+          <>Vernieuwen <span className="italic font-normal text-gray-500">(Refresh)</span></>
+        ) : (
+          <>Ophalen <span className="italic font-normal text-gray-500">(Fetch)</span></>
+        )}
       </button>
       {error && <p className="text-xs text-rose-600">{error}</p>}
       {warnings.map(w => (

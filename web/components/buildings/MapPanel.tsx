@@ -42,13 +42,15 @@ export function MapPanel({ building: b }: Props) {
               target="_blank" rel="noreferrer"
               className="text-indigo-600 hover:underline"
             >
-              Bekijk op OpenStreetMap
+              Bekijk op OpenStreetMap <span className="italic">(View on OpenStreetMap)</span>
             </a>
           </p>
         </div>
       ) : (
         <p className="px-5 py-6 text-sm text-gray-400">
           Nog geen coördinaten voor dit adres — haal de locatie op om de kaart te tonen.
+          <br />
+          <span className="italic">No coordinates for this address yet — fetch the location to show the map.</span>
         </p>
       )}
     </div>

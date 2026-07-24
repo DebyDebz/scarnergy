@@ -10,6 +10,7 @@ import {
   detectFloorPlan, FloorPlanDetection, DetectionUnavailableError,
 } from '../../lib/floorplanDetect';
 import { uploadImageToStorage } from '../../lib/uploadImage';
+import { PaintCanvas, isSketchAvailable } from './PaintCanvas';
 
 let ImagePicker: typeof import('expo-image-picker') | null = null;
 try { ImagePicker = require('expo-image-picker'); } catch { ImagePicker = null; }
@@ -101,11 +102,14 @@ export function FloorPlanImageUpload({ zoneId, zoneName, buildingId, onSaved, on
   // shared Grid Analysis stage (GridCanvas), so both image and no-image paths
   // finish Stage 2 the same way — no inline scale step.
   const [step,         setStep]         = useState<1 | 2>(1);
+  const [sketching,    setSketching]    = useState(false);
+  const [sketchDrawing, setSketchDrawing] = useState(false);
   const [imgUri,       setImgUri]       = useState<string | null>(null);
   const [imgMime,      setImgMime]      = useState<string>('image/jpeg');
   const [imgExt,       setImgExt]       = useState<string>('jpg');
   const [imgW,         setImgW]         = useState<number>(0);
   const [imgH,         setImgH]         = useState<number>(0);
+  const [imgLoadFailed, setImgLoadFailed] = useState(false);
   const [newZoneName,  setNewZoneName]  = useState('');
   const [points,       setPoints]       = useState<Point[]>([]);
   const [closed,       setClosed]       = useState(false);
@@ -142,11 +146,35 @@ export function FloorPlanImageUpload({ zoneId, zoneName, buildingId, onSaved, on
     setImgExt(['jpg', 'jpeg', 'png', 'webp'].includes(rawExt) ? rawExt : 'jpg');
     setPoints([]);
     setClosed(false);
+    setImgLoadFailed(false);
     setStep(2);
   };
 
   const skipImage = () => {
     setImgUri(null);
+    setStep(2);
+  };
+
+  // ─── Hand-drawn sketch: the sketch already IS the floor plan outline, so skip
+  // re-tracing it point-by-point — auto-close a full-canvas rectangle so the
+  // inspector only has to (optionally) name the zone and tap Save, the "draw
+  // then save" feel of a paint app. Undo still re-opens it for manual adjustment
+  // if the room isn't a perfect rectangle — nothing about step 2 changes. ───
+  const useSketch = (res: { uri: string; mime: string; ext: string; width: number; height: number }) => {
+    setImgUri(res.uri);
+    setImgMime(res.mime);
+    setImgW(res.width);
+    setImgH(res.height);
+    setImgExt(res.ext);
+    setPoints([
+      { x: 0, y: 0 },
+      { x: CANVAS, y: 0 },
+      { x: CANVAS, y: CANVAS },
+      { x: 0, y: CANVAS },
+    ]);
+    setClosed(true);
+    setSketching(false);
+    setImgLoadFailed(false);
     setStep(2);
   };
 
@@ -306,14 +334,18 @@ export function FloorPlanImageUpload({ zoneId, zoneName, buildingId, onSaved, on
   // ─── Render ────────────────────────────────────────────────────────────────
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView contentContainerStyle={styles.wrap} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={styles.wrap}
+        keyboardShouldPersistTaps="handled"
+        scrollEnabled={!sketchDrawing}
+      >
 
         {/* ── Step 1: Choose image ── */}
-        {step === 1 && (
+        {step === 1 && !sketching && (
           <View style={styles.stepSection}>
             <Text style={styles.stepTitle}>Upload Floor Plan Image</Text>
             <Text style={styles.stepSub}>
-              Upload a floor plan image and trace the zone boundary on it, or skip to draw the outline manually.
+              Upload a floor plan image and trace the zone boundary on it, sketch one by hand, or skip to draw the outline manually.
             </Text>
 
             <TouchableOpacity style={styles.imgBtn} onPress={() => pickImage('camera')}>
@@ -332,10 +364,36 @@ export function FloorPlanImageUpload({ zoneId, zoneName, buildingId, onSaved, on
               </View>
             </TouchableOpacity>
 
+            <TouchableOpacity style={styles.imgBtn} onPress={() => {
+              if (!isSketchAvailable) {
+                Alert.alert(
+                  'Dev build required',
+                  'Hand-drawn sketching is not available in Expo Go. Run the app with `expo run:ios` or install the EAS dev-client build to use this feature.',
+                );
+                return;
+              }
+              setSketching(true);
+            }}>
+              <Text style={styles.imgBtnIcon}>✏️</Text>
+              <View style={styles.imgBtnBody}>
+                <Text style={styles.imgBtnLabel}>Draw Floor Plan by Hand</Text>
+                <Text style={styles.imgBtnHint}>No floor plan? Sketch the layout yourself</Text>
+              </View>
+            </TouchableOpacity>
+
             <TouchableOpacity style={styles.skipBtn} onPress={skipImage}>
               <Text style={styles.skipBtnTxt}>Draw without image →</Text>
             </TouchableOpacity>
           </View>
+        )}
+
+        {/* ── Step 1 (sketch mode): freehand paint pad, then hand off to tracing ── */}
+        {step === 1 && sketching && (
+          <PaintCanvas
+            onDone={useSketch}
+            onCancel={() => setSketching(false)}
+            onDrawingChange={setSketchDrawing}
+          />
         )}
 
         {/* ── Step 2: Trace polygon ── */}
@@ -380,12 +438,24 @@ export function FloorPlanImageUpload({ zoneId, zoneName, buildingId, onSaved, on
               onResponderGrant={handleTap}
             >
               {/* Floor plan image background */}
-              {imgUri && (
+              {imgUri && !imgLoadFailed && (
                 <Image
                   source={{ uri: imgUri }}
                   style={styles.canvasImg}
                   resizeMode="contain"
+                  onError={(e) => {
+                    setImgLoadFailed(true);
+                    Alert.alert(
+                      'Preview failed to load',
+                      e.nativeEvent?.error || 'Could not display the image on the canvas. Try drawing or picking it again.',
+                    );
+                  }}
                 />
+              )}
+              {imgUri && imgLoadFailed && (
+                <View style={styles.imgErrBanner} pointerEvents="none">
+                  <Text style={styles.imgErrBannerTxt}>⚠ Preview image failed to load.</Text>
+                </View>
               )}
 
               {/* Grid lines (blank canvas mode only) */}
@@ -522,6 +592,9 @@ const styles = StyleSheet.create({
                     borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8, overflow: 'hidden' },
   canvasClosed:   { backgroundColor: 'rgba(30,58,95,0.04)', borderColor: PRIMARY },
   canvasImg:      { position: 'absolute', top: 0, left: 0, width: CANVAS, height: CANVAS },
+  imgErrBanner:   { position: 'absolute', top: 0, left: 0, right: 0, backgroundColor: '#FEF3C7',
+                    borderBottomWidth: 1, borderColor: '#F59E0B', paddingVertical: 6, paddingHorizontal: 10 },
+  imgErrBannerTxt:{ fontSize: 11, color: '#92400E', textAlign: 'center' },
 
   gridLine:       { position: 'absolute', backgroundColor: '#f0f0f0' },
   gridV:          { width: 1, height: CANVAS },

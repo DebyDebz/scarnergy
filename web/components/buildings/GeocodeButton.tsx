@@ -9,8 +9,8 @@ interface Props {
 }
 
 const ERROR_MESSAGES: Record<string, string> = {
-  geocode_unavailable: 'Geocodeerservice (PDOK) is momenteel niet bereikbaar',
-  address_not_found: 'Adres niet gevonden bij PDOK',
+  geocode_unavailable: 'Geocodeerservice (PDOK) is momenteel niet bereikbaar (Geocoding service (PDOK) is currently unreachable)',
+  address_not_found: 'Adres niet gevonden bij PDOK (Address not found at PDOK)',
 };
 
 export function GeocodeButton({ buildingId, hasCoords }: Props) {
@@ -25,12 +25,12 @@ export function GeocodeButton({ buildingId, hasCoords }: Props) {
       const res = await fetch(`/api/buildings/${buildingId}/geocode`, { method: 'POST' });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(ERROR_MESSAGES[data.error] ?? data.error ?? 'Locatie ophalen mislukt');
+        setError(ERROR_MESSAGES[data.error] ?? data.error ?? 'Locatie ophalen mislukt (Failed to fetch location)');
         return;
       }
       router.refresh();
     } catch {
-      setError('Locatie ophalen mislukt — controleer de verbinding');
+      setError('Locatie ophalen mislukt — controleer de verbinding (Failed to fetch location — check your connection)');
     } finally {
       setLoading(false);
     }
@@ -46,7 +46,11 @@ export function GeocodeButton({ buildingId, hasCoords }: Props) {
         {loading
           ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
           : <MapPin className="w-3.5 h-3.5" />}
-        {hasCoords ? 'Locatie vernieuwen' : 'Locatie ophalen'}
+        {hasCoords ? (
+          <>Locatie vernieuwen <span className="italic font-normal text-gray-500">(Refresh location)</span></>
+        ) : (
+          <>Locatie ophalen <span className="italic font-normal text-gray-500">(Fetch location)</span></>
+        )}
       </button>
       {error && <p className="text-xs text-rose-600">{error}</p>}
     </div>

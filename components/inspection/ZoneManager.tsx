@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
   FlatList, SectionList, StyleSheet, Alert, ActivityIndicator,
+  KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { supabase, Rekenzone, Zone } from '../../lib/supabase';
 import { useAuthStore } from '../../store/authStore';
@@ -202,7 +203,11 @@ export function ZoneManager({ buildingId, zones, onZonesChange, onDrawZone, onCo
   };
 
   return (
-    <View style={styles.wrap}>
+    <KeyboardAvoidingView
+      style={styles.wrap}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+    >
       <Text style={styles.header}>Your Zones</Text>
       <Text style={styles.sub}>Each zone needs a floor plan before you can place elements.</Text>
 
@@ -322,7 +327,7 @@ export function ZoneManager({ buildingId, zones, onZonesChange, onDrawZone, onCo
             : 'Draw at least one floor plan to continue'}
         </Text>
       </TouchableOpacity>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
