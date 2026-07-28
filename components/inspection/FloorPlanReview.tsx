@@ -41,12 +41,23 @@ interface Props {
 }
 
 export function FloorPlanReview({ zone, elements, onMeasure }: Props) {
-  const hasImage = !!zone.floor_plan_image_url;
+  // A hand-drawn sketch is treated like "no image" here too, matching
+  // GridCanvas/ElementPlacer: it's a rough doodle, not worth tracing over, and
+  // elements were placed against the bbox-fit frame for sketch zones, so this
+  // must stay bbox-fit or placed elements would drift off the sketch photo.
+  const isSketchZone = !!(zone.metadata as any)?.is_sketch;
+  const hasImage = !!zone.floor_plan_image_url && !isSketchZone;
   const [imgLoaded, setImgLoaded] = useState(false);
   const [imgDims,   setImgDims]   = useState<{ w: number; h: number } | null>(null);
 
-  // Outline points: image-anchored when the photo dims are known, bbox-fit otherwise.
-  const outlinePts = hasImage && imgDims
+  // Outline points: image-anchored when the photo dims are known, bbox-fit
+  // otherwise. A hand-traced sketch outline is wobbly by construction —
+  // clipping the grid to it just makes the freehand line show through in a
+  // different form — so sketch zones get a plain full-canvas grid instead,
+  // same as a never-traced blank zone (ClippedGrid's own <3-points fallback).
+  const outlinePts = isSketchZone
+    ? []
+    : hasImage && imgDims
     ? projectPointsOnImage(zone.floor_plan_points, imgDims, CANVAS)
     : fitPointsToInner(zone.floor_plan_points, CANVAS, PADDING);
   // Elements share the outline's frame: image-relative grid_* are shifted by the

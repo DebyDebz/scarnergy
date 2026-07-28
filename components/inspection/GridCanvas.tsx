@@ -40,8 +40,19 @@ export function GridCanvas({ zones, onConfirmed }: Props) {
   // Image zones project the outline through the same contain transform as the
   // displayed image (once its dims are known); bbox-fit is the pre-load fallback
   // so it's never blank. No-image zones keep the original bbox-fit behaviour.
-  const hasImage = !!activeZone.floor_plan_image_url;
-  const outlinePts = hasImage && imgDims
+  // A hand-drawn sketch is treated the same as "no image" here — it's a rough
+  // doodle, not something worth tracing over — so it falls back to the same
+  // grid-only rendering already used for blank-canvas zones; the sketch image
+  // itself is untouched and still shown elsewhere (ElementPlacer, review, print).
+  const isSketchZone = !!(activeZone.metadata as any)?.is_sketch;
+  const hasImage = !!activeZone.floor_plan_image_url && !isSketchZone;
+  // A hand-traced sketch outline is wobbly by construction — clipping the grid
+  // to it (and stroking it) just makes the freehand line show through in a
+  // different form. Sketch zones get a plain full-canvas grid instead, same as
+  // a never-traced blank zone (ClippedGrid's own <3-points fallback).
+  const outlinePts = isSketchZone
+    ? []
+    : hasImage && imgDims
     ? projectPointsOnImage(activeZone.floor_plan_points, imgDims, CANVAS)
     : fitPointsToInner(activeZone.floor_plan_points, CANVAS, PADDING);
   const scaleM = parseFloat(scaleInputs[activeZone.id] || '5') || 5;

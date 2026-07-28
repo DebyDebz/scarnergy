@@ -7,7 +7,8 @@ import {
 import { supabase, Zone } from '../../lib/supabase';
 import { useAuthStore } from '../../store/authStore';
 import {
-  detectFloorPlan, FloorPlanDetection, DetectionUnavailableError,
+  detectFloorPlan, FloorPlanDetection, DetectionUnavailableError, DetectedRoom,
+  SketchSymbol, sketchSymbolsToElements, elementsToDrafts,
 } from '../../lib/floorplanDetect';
 import { uploadImageToStorage } from '../../lib/uploadImage';
 import { PaintCanvas, isSketchAvailable } from './PaintCanvas';
@@ -37,7 +38,7 @@ interface Props {
    */
   onDetected?: (
     detection: FloorPlanDetection,
-    image: { uri: string; mime: string; ext: string },
+    image: { uri: string; mime: string; ext: string; isSketch: boolean },
   ) => void;
   /**
    * Stage 3 "sub-regions" support: the main floor-plan outline (normalised points
@@ -70,9 +71,42 @@ function polyArea(poly: { x: number; y: number }[]): number {
   return Math.abs(a) / 2;
 }
 
+/** Ray-casting point-in-polygon test, normalised 0..1 coords. */
+function pointInPoly(p: { x: number; y: number }, poly: { x: number; y: number }[]): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x, yi = poly[i].y, xj = poly[j].x, yj = poly[j].y;
+    const intersect = (yi > p.y) !== (yj > p.y)
+      && p.x < ((xj - xi) * (p.y - yi)) / (yj - yi) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * Merge explicitly tap-placed door/window symbols (PaintCanvas) into CV-detected
+ * rooms — attaching each to whichever room's polygon contains it (falling back
+ * to the largest room otherwise). No-op when there are no symbols, so plain
+ * photo uploads and manual-draw zones are completely unaffected.
+ */
+function injectSketchElements(rooms: DetectedRoom[], symbols: SketchSymbol[]): DetectedRoom[] {
+  if (!symbols.length || !rooms.length) return rooms;
+  const largest = rooms.reduce((a, b) => (polyArea(b.polygon) >= polyArea(a.polygon) ? b : a));
+  const extra = sketchSymbolsToElements(symbols);
+  const byRoom = new Map<DetectedRoom, typeof extra>();
+  extra.forEach((el, i) => {
+    const room = rooms.find(r => pointInPoly({ x: symbols[i].x, y: symbols[i].y }, r.polygon)) ?? largest;
+    byRoom.set(room, [...(byRoom.get(room) ?? []), el]);
+  });
+  return rooms.map(r => (byRoom.has(r) ? { ...r, elements: [...r.elements, ...byRoom.get(r)!] } : r));
+}
+
 function LineSegment({
-  x1, y1, x2, y2, dashed,
-}: { x1: number; y1: number; x2: number; y2: number; dashed?: boolean }) {
+  x1, y1, x2, y2, dashed, color, thickness,
+}: {
+  x1: number; y1: number; x2: number; y2: number; dashed?: boolean;
+  color?: string; thickness?: number;
+}) {
   const dx = x2 - x1, dy = y2 - y1;
   const len = Math.hypot(dx, dy);
   const angle = Math.atan2(dy, dx) * (180 / Math.PI);
@@ -83,16 +117,21 @@ function LineSegment({
       style={{
         position:        'absolute',
         width:           len,
-        height:          2,
+        height:          thickness ?? 2,
         left:            (x1 + x2) / 2 - len / 2,
-        top:             (y1 + y2) / 2 - 1,
-        backgroundColor: dashed ? '#93C5FD' : PRIMARY,
+        top:             (y1 + y2) / 2 - (thickness ?? 2) / 2,
+        backgroundColor: color ?? (dashed ? '#93C5FD' : PRIMARY),
         opacity:         dashed ? 0.9 : 1,
         transform:       [{ rotate: `${angle}deg` }],
       }}
     />
   );
 }
+
+// Same colors as ElementPlacer's palette, so a sketch symbol and its eventual
+// on-canvas element read as the same thing.
+const DOOR_COLOR   = '#2563EB';
+const WINDOW_COLOR = '#0284c7';
 
 export function FloorPlanImageUpload({ zoneId, zoneName, buildingId, onSaved, onDetected, backdropPoints }: Props) {
   const { profile } = useAuthStore();
@@ -115,6 +154,15 @@ export function FloorPlanImageUpload({ zoneId, zoneName, buildingId, onSaved, on
   const [closed,       setClosed]       = useState(false);
   const [saving,       setSaving]       = useState(false);
   const [detecting,    setDetecting]    = useState(false);
+  // Door/window taps placed in the PaintCanvas sketch tool — empty for every
+  // other entry path (photo upload, manual grid draw), so this only ever adds
+  // new behaviour, never changes existing ones.
+  const [sketchSymbols, setSketchSymbols] = useState<SketchSymbol[]>([]);
+  // True only when the current imgUri came from the hand-drawn sketch tool —
+  // lets later stages (Grid Analysis) tell "rough doodle" apart from "real
+  // photo/floor plan" without guessing from shape. Reset on every path that
+  // sets imgUri some other way, so switching images mid-flow can't leak it.
+  const [isSketch, setIsSketch] = useState(false);
 
   // ─── Step 1: pick image ────────────────────────────────────────────────────
   const pickImage = async (source: 'camera' | 'library') => {
@@ -147,11 +195,13 @@ export function FloorPlanImageUpload({ zoneId, zoneName, buildingId, onSaved, on
     setPoints([]);
     setClosed(false);
     setImgLoadFailed(false);
+    setIsSketch(false);
     setStep(2);
   };
 
   const skipImage = () => {
     setImgUri(null);
+    setIsSketch(false);
     setStep(2);
   };
 
@@ -160,12 +210,17 @@ export function FloorPlanImageUpload({ zoneId, zoneName, buildingId, onSaved, on
   // inspector only has to (optionally) name the zone and tap Save, the "draw
   // then save" feel of a paint app. Undo still re-opens it for manual adjustment
   // if the room isn't a perfect rectangle — nothing about step 2 changes. ───
-  const useSketch = (res: { uri: string; mime: string; ext: string; width: number; height: number }) => {
+  const useSketch = (res: {
+    uri: string; mime: string; ext: string; width: number; height: number;
+    symbols: SketchSymbol[];
+  }) => {
     setImgUri(res.uri);
     setImgMime(res.mime);
     setImgW(res.width);
     setImgH(res.height);
     setImgExt(res.ext);
+    setSketchSymbols(res.symbols);
+    setIsSketch(true);
     setPoints([
       { x: 0, y: 0 },
       { x: CANVAS, y: 0 },
@@ -191,9 +246,12 @@ export function FloorPlanImageUpload({ zoneId, zoneName, buildingId, onSaved, on
         );
         return;
       }
+      // Tap-placed door/window symbols always win over the CV pipeline's ink-gap
+      // guess for the same opening — merge them in before either downstream path.
+      if (sketchSymbols.length) det.rooms = injectSketchElements(det.rooms, sketchSymbols);
       // Fresh-start context → let the flow create zones + draft elements.
       if (onDetected) {
-        onDetected(det, { uri: imgUri, mime: imgMime, ext: imgExt });
+        onDetected(det, { uri: imgUri, mime: imgMime, ext: imgExt, isSketch });
         return;
       }
       // Editing a specific zone → pre-fill the largest room's boundary for review.
@@ -273,6 +331,7 @@ export function FloorPlanImageUpload({ zoneId, zoneName, buildingId, onSaved, on
             zone_code:   'Z01',
             name:        newZoneName.trim(),
             floor_level: 0,
+            ...(isSketch ? { metadata: { is_sketch: true } } : {}),
           })
           .select()
           .single();
@@ -301,11 +360,32 @@ export function FloorPlanImageUpload({ zoneId, zoneName, buildingId, onSaved, on
       const payload: Record<string, unknown> = { floor_plan_points: normalized };
       if (imageUrl) payload.floor_plan_image_url = imageUrl;
 
+      // Tag is_sketch on an existing zone too (re-drawing a zone's plan by hand),
+      // merging into whatever metadata it already carries (e.g. auto_detected)
+      // instead of clobbering it — only fetched when actually needed.
+      if (isSketch && !isNewZone && actualZoneId) {
+        const { data: existing } = await (supabase.from('zones') as any)
+          .select('metadata').eq('id', actualZoneId).single();
+        payload.metadata = { ...(existing?.metadata ?? {}), is_sketch: true };
+      }
+
       const { error: planErr } = await supabase
         .from('zones')
         .update(payload)
         .eq('id', actualZoneId);
       if (planErr) throw new Error(planErr.message);
+
+      // 4. Tap-placed door/window symbols → real building_elements, independent
+      // of whether auto-detect ran. No-op (and no existing behaviour touched)
+      // for every path other than a sketch with placed symbols.
+      if (sketchSymbols.length && actualZoneId) {
+        const drafts = elementsToDrafts(
+          { polygon: [], elements: sketchSymbolsToElements(sketchSymbols) },
+          actualZoneId,
+          profile!.org_id,
+        );
+        if (drafts.length) await supabase.from('building_elements').insert(drafts);
+      }
 
       setSaving(false);
 
@@ -457,6 +537,23 @@ export function FloorPlanImageUpload({ zoneId, zoneName, buildingId, onSaved, on
                   <Text style={styles.imgErrBannerTxt}>⚠ Preview image failed to load.</Text>
                 </View>
               )}
+
+              {/* Door/window symbols placed in the sketch tool — shown here purely
+                  for confirmation; empty for every other entry path. */}
+              {sketchSymbols.map((s, i) => {
+                const rad = (s.angle * Math.PI) / 180;
+                const hx = (s.length * CANVAS / 2) * Math.cos(rad);
+                const hy = (s.length * CANVAS / 2) * Math.sin(rad);
+                const cx = s.x * CANVAS, cy = s.y * CANVAS;
+                return (
+                  <LineSegment
+                    key={`sym${i}`}
+                    x1={cx - hx} y1={cy - hy} x2={cx + hx} y2={cy + hy}
+                    color={s.kind === 'door' ? DOOR_COLOR : WINDOW_COLOR}
+                    thickness={4}
+                  />
+                );
+              })}
 
               {/* Grid lines (blank canvas mode only) */}
               {!imgUri && Array.from({ length: GRID_N + 1 }).map((_, i) => (

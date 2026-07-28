@@ -269,11 +269,22 @@ export function ElementPlacer({ zones, sessionId, onSaved }: Props) {
   // otherwise. Both the boundary polygon and placed elements use this frame, so
   // dragging, the grid clip and the photo all stay aligned.
   const activeDims = dimsByZone[activeZone.id];
-  const hasImage   = !!activeZone.floor_plan_image_url && !!activeDims;
+  // A hand-drawn sketch is treated like "no image" here too — same reasoning
+  // as GridCanvas: it's a rough doodle, not worth tracing over, and elements
+  // were placed against GridCanvas's bbox-fit frame for sketch zones, so this
+  // must stay bbox-fit too or placed elements would drift off the sketch photo.
+  const isSketchZone = !!(activeZone.metadata as any)?.is_sketch;
+  const hasImage   = !!activeZone.floor_plan_image_url && !!activeDims && !isSketchZone;
   const activeOff: Offsets = hasImage ? imageOffsets(activeDims!, CANVAS) : { offX: 0, offY: 0 };
 
   // Pixel-space polygon for the active zone (outline render + boundary checks).
-  const polygonPixelPts = hasImage
+  // A hand-traced sketch outline is wobbly by construction — clipping the grid
+  // to it just makes the freehand line show through in a different form — so
+  // sketch zones get a plain full-canvas grid instead (no clip, no outline,
+  // no drag-boundary enforcement), same as a never-traced blank zone.
+  const polygonPixelPts = isSketchZone
+    ? []
+    : hasImage
     ? projectPointsOnImage(activeZone.floor_plan_points ?? null, activeDims!, CANVAS)
     : fitPointsToInner(activeZone.floor_plan_points ?? null, CANVAS, PADDING);
 
@@ -520,10 +531,10 @@ export function ElementPlacer({ zones, sessionId, onSaved }: Props) {
       >
         {/* Floor plan photo (image-upload zones) — placed elements and the grid
             project into this image's contain-fit frame so they sit on the plan. */}
-        {activeZone.floor_plan_image_url && (
+        {hasImage && (
           <Image
             key={activeZone.id}
-            source={{ uri: activeZone.floor_plan_image_url }}
+            source={{ uri: activeZone.floor_plan_image_url! }}
             style={styles.bgImg}
             resizeMode="contain"
           />

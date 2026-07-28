@@ -126,6 +126,7 @@ export interface Zone {
   floor_plan_points: Array<{ x: number; y: number }> | null;
   floor_plan_scale_m: number | null;
   floor_plan_image_url: string | null;
+  metadata?: Record<string, unknown> | null;
 }
 export interface BuildingElement {
   id: string; zone_id: string; element_type: string; name: string;

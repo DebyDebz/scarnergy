@@ -158,7 +158,7 @@ export default function InspectionFlowScreen() {
   // scale) and ElementPlacer, which loads the inserted elements automatically.
   const handleDetected = async (
     det: FloorPlanDetection,
-    image: { uri: string; mime: string; ext: string },
+    image: { uri: string; mime: string; ext: string; isSketch: boolean },
   ) => {
     if (!profile) return;
     const usableRooms = det.rooms.filter(r => r.polygon && r.polygon.length >= 3);
@@ -212,7 +212,7 @@ export default function InspectionFlowScreen() {
 
         const { data: zoneRow, error: zErr } = await supabase
           .from('zones')
-          .insert({ org_id: profile.org_id, building_id: buildingId, zone_code: zoneCode, name, floor_level: 0, metadata: { auto_detected: true } })
+          .insert({ org_id: profile.org_id, building_id: buildingId, zone_code: zoneCode, name, floor_level: 0, metadata: { auto_detected: true, ...(image.isSketch ? { is_sketch: true } : {}) } })
           .select()
           .single();
         if (zErr || !zoneRow) continue;
