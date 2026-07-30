@@ -46,7 +46,7 @@
     "@tanstack/react-query": "^5.40.0",
     "@types/react": "~19.1.10",
     "babel-preset-expo": "~54.0.10",
-    "expo": "~54.0.35",
+    "expo": "~54.0.36",
     "expo-constants": "~18.0.13",
     "expo-dev-client": "~6.0.20",
     "expo-file-system": "~19.0.23",

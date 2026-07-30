@@ -11,10 +11,11 @@ import { BagPanel } from '@/components/buildings/BagPanel';
 import { MapPanel } from '@/components/buildings/MapPanel';
 import { ZoneEditButton } from '@/components/buildings/ZoneEditButton';
 import { ElementTypeSections, type ElementWithRelations } from '@/components/elements/ElementTypeSections';
+import { EnergyLabelTrendChart } from '@/components/charts/EnergyLabelTrendChart';
 import { ArrowLeft, ChevronDown, ChevronRight } from 'lucide-react';
 import type {
   BuildingSummary, Rekenzone, Zone, SessionSummary,
-  BuildingElement, Opening, BuildingFacadePhoto,
+  BuildingElement, Opening, BuildingFacadePhoto, EnergyLabelSnapshot,
 } from '@/lib/types';
 import { fmtDate } from '@/lib/format';
 import { areaByFloor, totalZoneArea, fmtArea } from '@/lib/calc';
@@ -33,7 +34,7 @@ const DIRECTIONS: { key: BuildingFacadePhoto['direction']; label: string; en: st
 export default async function BuildingDetailPage({ params }: Props) {
   const supabase = await createClient();
 
-  const [buildingResult, zonesResult, sessionsResult, facadeResult, rekenzonesResult] = await Promise.all([
+  const [buildingResult, zonesResult, sessionsResult, facadeResult, rekenzonesResult, labelSnapshotsResult] = await Promise.all([
     supabase.from('building_summary').select('*').eq('id', params.id).single(),
     (supabase.from('zones') as any).select('*').eq('building_id', params.id).order('floor_level'),
     supabase.from('session_summary').select('*')
@@ -43,6 +44,8 @@ export default async function BuildingDetailPage({ params }: Props) {
       .select('*').eq('building_id', params.id).order('direction'),
     (supabase.from('rekenzones') as any)
       .select('*').eq('building_id', params.id).eq('is_active', true).order('sort_order'),
+    (supabase.from('energy_label_snapshots') as any)
+      .select('*').eq('building_id', params.id).order('computed_at', { ascending: true }),
   ]);
 
   const building = (buildingResult as unknown as { data: BuildingSummary | null }).data;
@@ -52,6 +55,7 @@ export default async function BuildingDetailPage({ params }: Props) {
   const rekenzones = (rekenzonesResult as unknown as { data: Rekenzone[] | null }).data ?? [];
   const sessions = (sessionsResult as unknown as { data: SessionSummary[] | null }).data ?? [];
   const facadePhotosRaw: BuildingFacadePhoto[] = (facadeResult as unknown as { data: BuildingFacadePhoto[] | null }).data ?? [];
+  const labelSnapshots: EnergyLabelSnapshot[] = (labelSnapshotsResult as unknown as { data: EnergyLabelSnapshot[] | null }).data ?? [];
 
   // Sign facade photo storage paths (bucket: facade-photos)
   const facadeByDir: Record<string, string | null> = {};
@@ -416,6 +420,12 @@ export default async function BuildingDetailPage({ params }: Props) {
             <p className="px-5 py-6 text-sm text-gray-400 text-center">No zones defined</p>
           )}
         </div>
+      </div>
+
+      {/* ── Energy label history ────────────────────────────────────────── */}
+      <div className="bg-white rounded-xl border border-gray-200 p-5">
+        <h2 className="font-semibold text-gray-900 mb-4">Energy label history</h2>
+        <EnergyLabelTrendChart snapshots={labelSnapshots} />
       </div>
 
       {/* ── Inspection sessions ─────────────────────────────────────────── */}

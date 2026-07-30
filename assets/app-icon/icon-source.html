@@ -1,0 +1,56 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; padding: 0; width: 1024px; height: 1024px; overflow: hidden; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2a4d78"/>
+      <stop offset="55%" stop-color="#1E3A5F"/>
+      <stop offset="100%" stop-color="#0f1f33"/>
+    </linearGradient>
+    <linearGradient id="bolt" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFD37A"/>
+      <stop offset="100%" stop-color="#F0A73A"/>
+    </linearGradient>
+    <filter id="soft" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000000" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+
+  <!-- background -->
+  <rect x="0" y="0" width="1024" height="1024" fill="url(#bg)"/>
+
+  <!-- subtle radial glow -->
+  <circle cx="512" cy="470" r="420" fill="#ffffff" opacity="0.04"/>
+
+  <!-- scan viewfinder corner brackets -->
+  <g stroke="#EAF1FA" stroke-width="34" stroke-linecap="round" fill="none" opacity="0.92">
+    <!-- top-left -->
+    <path d="M 232 358 V 246 Q 232 216 262 216 H 374"/>
+    <!-- top-right -->
+    <path d="M 650 216 H 762 Q 792 216 792 246 V 358"/>
+    <!-- bottom-left -->
+    <path d="M 232 666 V 778 Q 232 808 262 808 H 374"/>
+    <!-- bottom-right -->
+    <path d="M 650 808 H 762 Q 792 808 792 778 V 666"/>
+  </g>
+
+  <!-- lightning bolt (energy) -->
+  <path filter="url(#soft)" fill="url(#bolt)"
+    d="M 566 268
+       L 392 590
+       L 486 590
+       L 452 758
+       L 646 462
+       L 542 462
+       Z"/>
+</svg>
+</body>
+</html>

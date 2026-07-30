@@ -200,6 +200,15 @@ export interface BuildingFacadePhoto {
   created_at: string;
 }
 
+export interface EnergyLabelSnapshot {
+  id: string;
+  org_id: string;
+  building_id: string;
+  session_id: string;
+  energy_label: string;
+  computed_at: string;
+}
+
 export interface BuildingSummary extends Building {
   full_address: string;
   zone_count: number;

@@ -7,8 +7,9 @@ import { MeasurementChart } from '@/components/charts/MeasurementChart';
 import { CloseSessionButton } from '@/components/sessions/CloseSessionButton';
 import { ExportButtons } from '@/components/sessions/ExportButtons';
 import { ElementsWithEdit } from '@/components/elements/ElementsWithEdit';
+import { EnergyLabelBadge } from '@/components/buildings/EnergyLabelBadge';
 import { ArrowLeft, TriangleAlert } from 'lucide-react';
-import type { SessionSummary, Measurement, UserProfile, Zone, BuildingElement, Opening } from '@/lib/types';
+import type { SessionSummary, Measurement, UserProfile, Zone, BuildingElement, Opening, EnergyLabelSnapshot } from '@/lib/types';
 import { fmtDate, fmtTime, fmtDuration } from '@/lib/format';
 import { gevelpositie, toCardinal } from '@scarnergy/opname-calc';
 
@@ -23,7 +24,7 @@ export default async function SessionDetailPage({ params, searchParams }: Props)
 
   const { data: { user } } = await supabase.auth.getUser();
 
-  const [sessionResult, measurementsResult, profileResult] = await Promise.all([
+  const [sessionResult, measurementsResult, profileResult, labelSnapshotResult] = await Promise.all([
     supabase.from('session_summary').select('*').eq('id', params.id).maybeSingle(),
     anomaliesOnly
       ? supabase.from('measurements').select('*').eq('session_id', params.id).eq('is_anomaly', true).order('measured_at', { ascending: false }).limit(200)
@@ -31,11 +32,14 @@ export default async function SessionDetailPage({ params, searchParams }: Props)
     user
       ? supabase.from('user_profiles').select('role').eq('id', user.id).maybeSingle()
       : Promise.resolve({ data: null }),
+    (supabase.from('energy_label_snapshots') as any)
+      .select('*').eq('session_id', params.id).maybeSingle(),
   ]);
 
   const session = (sessionResult as unknown as { data: SessionSummary | null }).data;
   const measurements = (measurementsResult as unknown as { data: Measurement[] | null }).data ?? [];
   const profile = (profileResult as unknown as { data: Pick<UserProfile, 'role'> | null }).data;
+  const labelSnapshot = (labelSnapshotResult as unknown as { data: EnergyLabelSnapshot | null }).data;
 
   if (!session) notFound();
 
@@ -106,7 +110,7 @@ export default async function SessionDetailPage({ params, searchParams }: Props)
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <ExportButtons sessionId={params.id} sessionCode={session.session_code} />
-            {canClose && <CloseSessionButton sessionId={params.id} />}
+            {canClose && <CloseSessionButton sessionId={params.id} buildingId={session.building_id} />}
           </div>
         </div>
       </div>
@@ -135,6 +139,7 @@ export default async function SessionDetailPage({ params, searchParams }: Props)
           { label: 'Voorgevel Orientatie', en: 'Front facade', value: voorgevelOrientatie },
           { label: 'Measurements', value: session.total_measurements },
           { label: 'Anomalies', value: session.anomaly_count },
+          { label: 'Predicted label', value: <EnergyLabelBadge label={labelSnapshot?.energy_label ?? null} /> },
         ].map(({ label, en, value }: { label: string; en?: string; value: React.ReactNode }) => (
           <div key={label} className="bg-white border border-gray-200 rounded-xl p-4">
             <p className="text-xs text-gray-500 mb-1">
