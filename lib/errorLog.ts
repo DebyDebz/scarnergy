@@ -28,7 +28,23 @@ function emit() {
   listeners.forEach(l => l(snapshot));
 }
 
+// Benign auth-session noise, not app failures: an expired/rotated refresh
+// token on cold start is an expected state — supabase-js logs it via
+// console.error, clears the stored session, and the router lands on sign-in.
+// Keep these out of the user-facing overlay (they still reach the console).
+const IGNORED_ERROR_PATTERNS = [
+  /invalid refresh token/i,
+  /refresh token not found/i,
+  /auth session missing/i,
+  /auto refresh tick failed/i,
+];
+
+export function isIgnoredError(message: string): boolean {
+  return IGNORED_ERROR_PATTERNS.some(re => re.test(message));
+}
+
 function push(kind: AppError["kind"], message: string, stack: string | null) {
+  if (isIgnoredError(message)) return;
   const entry: AppError = {
     id:   nextId++,
     when: new Date().toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),

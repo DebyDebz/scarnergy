@@ -6,12 +6,17 @@ const ELEMENT_FIELDS = [
   'installation_type', 'fuel_type', 'efficiency', 'capacity_kw', 'year_installed',
   'tilt_deg', 'nokhoogte_m', 'bodemisolatie', 'brand', 'model_nr', 'cv_klasse',
   'rc_value', 'u_value', 'notes',
+  // Migration 024 calc fields (GAP W2)
+  'plafond_type', 'warmtecap_vloer_klasse', 'warmtecap_gevel_klasse',
+  'dikte_vloerconstructie_mm', 'rekenhoogte_m_override', 'rc_source',
 ] as const;
 
 const OPENING_FIELDS = [
   'opening_type', 'frame_type', 'glazing_type',
   'thermisch_onderbroken', 'has_shading', 'shading_type', 'shading_factor',
   'overstek_m', 'belemmering', 'notes',
+  // Migration 024 calc fields (§4.2/4.3)
+  'u_glas', 'g_waarde', 'f_sh',
 ] as const;
 
 export async function PATCH(

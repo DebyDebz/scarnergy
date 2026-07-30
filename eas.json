@@ -8,7 +8,9 @@
       "developmentClient": true,
       "distribution": "internal",
       "env": {
-        "SENTRY_DISABLE_AUTO_UPLOAD": "true"
+        "SENTRY_DISABLE_AUTO_UPLOAD": "true",
+        "RCT_NEW_ARCH_ENABLED": "0",
+        "EXPO_PUBLIC_SENTRY_DSN": "https://8b434962c2fff51fa8b3e5a8cd883223@o4511704929533953.ingest.us.sentry.io/4511704936873984"
       }
     },
     "preview": {
@@ -18,6 +20,8 @@
       },
       "env": {
         "SENTRY_DISABLE_AUTO_UPLOAD": "true",
+        "RCT_NEW_ARCH_ENABLED": "0",
+        "EXPO_PUBLIC_SENTRY_DSN": "https://8b434962c2fff51fa8b3e5a8cd883223@o4511704929533953.ingest.us.sentry.io/4511704936873984",
         "EXPO_PUBLIC_SUPABASE_URL": "http://212.69.86.210:54321",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjIwNTEyMTg4MDB9.r0GAZmnw3PcxO23v52N13u52lmWHIUYQ4LcaqcYd4b8",
         "EXPO_PUBLIC_AI_SERVER_URL": "http://212.69.86.210:8001"
@@ -29,6 +33,8 @@
     "production": {
       "env": {
         "SENTRY_DISABLE_AUTO_UPLOAD": "true",
+        "RCT_NEW_ARCH_ENABLED": "0",
+        "EXPO_PUBLIC_SENTRY_DSN": "https://8b434962c2fff51fa8b3e5a8cd883223@o4511704929533953.ingest.us.sentry.io/4511704936873984",
         "EXPO_PUBLIC_SUPABASE_URL": "http://212.69.86.210:54321",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjIwNTEyMTg4MDB9.r0GAZmnw3PcxO23v52N13u52lmWHIUYQ4LcaqcYd4b8",
         "EXPO_PUBLIC_AI_SERVER_URL": "http://212.69.86.210:8001"

@@ -91,6 +91,30 @@ export async function detectFloorPlan(
   return data;
 }
 
+// ── Hand-sketch door/window symbols (PaintCanvas tap-to-place) ────────────────
+// Distinct from CV-detected elements: these come from an explicit tap by the
+// inspector (kind is certain, not inferred from an ink gap), normalised 0..1 in
+// the same canvas-relative frame as floor_plan_points / DetectedElement
+// endpoints, so they merge into a room's elements without any extra transform.
+export interface SketchSymbol {
+  kind: 'door' | 'window';
+  x: number; y: number;   // centre
+  angle: number;          // degrees, 0 = horizontal
+  length: number;         // normalised 0..1
+}
+
+/** Convert placed symbols into the same DetectedElement shape the CV pipeline
+ * emits, so elementsToDrafts (and any CV-detected wall/opening elements) can be
+ * merged with these directly. */
+export function sketchSymbolsToElements(symbols: SketchSymbol[]): DetectedElement[] {
+  return symbols.map(s => {
+    const rad = (s.angle * Math.PI) / 180;
+    const hx = (s.length / 2) * Math.cos(rad);
+    const hy = (s.length / 2) * Math.sin(rad);
+    return { kind: s.kind, x1: s.x - hx, y1: s.y - hy, x2: s.x + hx, y2: s.y + hy };
+  });
+}
+
 // ── Mapping detected elements -> building_elements draft rows ─────────────────
 // element_type enum: gevel (wall), transparant_deel (door/window — door vs window
 // is distinguished by the `name` prefix, per ElementPlacer's dbRowToElementType).

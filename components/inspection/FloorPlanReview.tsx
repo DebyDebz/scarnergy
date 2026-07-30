@@ -41,12 +41,23 @@ interface Props {
 }
 
 export function FloorPlanReview({ zone, elements, onMeasure }: Props) {
-  const hasImage = !!zone.floor_plan_image_url;
+  // A hand-drawn sketch is treated like "no image" here too, matching
+  // GridCanvas/ElementPlacer: it's a rough doodle, not worth tracing over, and
+  // elements were placed against the bbox-fit frame for sketch zones, so this
+  // must stay bbox-fit or placed elements would drift off the sketch photo.
+  const isSketchZone = !!(zone.metadata as any)?.is_sketch;
+  const hasImage = !!zone.floor_plan_image_url && !isSketchZone;
   const [imgLoaded, setImgLoaded] = useState(false);
   const [imgDims,   setImgDims]   = useState<{ w: number; h: number } | null>(null);
 
-  // Outline points: image-anchored when the photo dims are known, bbox-fit otherwise.
-  const outlinePts = hasImage && imgDims
+  // Outline points: image-anchored when the photo dims are known, bbox-fit
+  // otherwise. A hand-traced sketch outline is wobbly by construction —
+  // clipping the grid to it just makes the freehand line show through in a
+  // different form — so sketch zones get a plain full-canvas grid instead,
+  // same as a never-traced blank zone (ClippedGrid's own <3-points fallback).
+  const outlinePts = isSketchZone
+    ? []
+    : hasImage && imgDims
     ? projectPointsOnImage(zone.floor_plan_points, imgDims, CANVAS)
     : fitPointsToInner(zone.floor_plan_points, CANVAS, PADDING);
   // Elements share the outline's frame: image-relative grid_* are shifted by the
@@ -107,20 +118,22 @@ export function FloorPlanReview({ zone, elements, onMeasure }: Props) {
           );
         })}
 
-        {/* Value chips at each element centre. Captured value when measured;
+        {/* Name + value chips at each element centre. Captured value when measured;
             otherwise the scale-derived suggestion ("~1.20m") so the inspector
             sees the plan's own measurement before capturing. */}
         {placed.map(el => {
           const captured  = primaryMeters(el);
           const suggested = captured == null ? gridLengthMeters(el.grid_w, scaleM) : null;
-          const label = captured ?? (suggested != null ? `~${suggested.toFixed(2)}m` : null);
-          if (!label) return null;
+          const value = captured ?? (suggested != null ? `~${suggested.toFixed(2)}m` : null);
           const cx = offX + (el.grid_x! + (el.grid_w ?? 0.04) / 2) * CANVAS;
           const cy = offY + (el.grid_y! + (el.grid_h ?? 0.04) / 2) * CANVAS;
           return (
             <View key={`c${el.id}`} pointerEvents="none"
-              style={[styles.chip, suggested != null && styles.chipSuggested, { left: cx - 16, top: cy - 7 }]}>
-              <Text style={styles.chipTxt}>{label}</Text>
+              style={[styles.chipWrap, { left: cx - 40, top: cy - 10 }]}>
+              <View style={[styles.chip, suggested != null && styles.chipSuggested]}>
+                <Text style={styles.chipName} numberOfLines={1}>{el.name}</Text>
+                {value != null && <Text style={styles.chipTxt}>{value}</Text>}
+              </View>
             </View>
           );
         })}
@@ -150,10 +163,12 @@ const styles = StyleSheet.create({
   imgHidden:  { opacity: 0 },
   imgLoading: { position: 'absolute', top: 0, left: 0, width: CANVAS, height: CANVAS,
                 alignItems: 'center', justifyContent: 'center' },
-  chip:       { position: 'absolute', backgroundColor: 'rgba(30,58,95,0.92)',
-                borderRadius: 4, paddingHorizontal: 3, paddingVertical: 1 },
+  chipWrap:   { position: 'absolute', width: 80, alignItems: 'center' },
+  chip:       { backgroundColor: 'rgba(30,58,95,0.92)', alignItems: 'center',
+                borderRadius: 4, paddingHorizontal: 4, paddingVertical: 1, maxWidth: 80 },
   chipSuggested: { backgroundColor: 'rgba(107,114,128,0.85)' },
-  chipTxt:    { fontSize: 8, color: '#fff', fontWeight: '700' },
+  chipName:   { fontSize: 8, color: '#fff', fontWeight: '700' },
+  chipTxt:    { fontSize: 8, color: 'rgba(255,255,255,0.85)', fontWeight: '600' },
   infoRow:    { flexDirection: 'row', justifyContent: 'center', gap: 20, marginTop: 12 },
   infoTxt:    { fontSize: 12, color: '#6B7280' },
   infoBold:   { fontWeight: '700', color: PRIMARY },

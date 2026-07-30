@@ -66,6 +66,14 @@ enable_signup = true
 double_confirm_changes = true
 enable_confirmations = false   # true in production
 
+# Recovery email must carry the 6-digit {{ .Token }}: the mobile app's
+# forgot-password flow (app/auth/forgot-password.tsx) verifies it with
+# verifyOtp(type: "recovery") — the default link-only template is useless
+# on a phone. Dev: read the email in inbucket (port 54324).
+[auth.email.template.recovery]
+subject = "Scarnergy password reset code"
+content_path = "./supabase/templates/recovery.html"
+
 [auth.sms]
 enable_signup = false
 enable_confirmations = false

@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase, Measurement } from "../lib/supabase";
 
+// Pure prepend-with-dedupe used by both the realtime INSERT callback and the
+// optimistic addMeasurement below: the optimistic add and the Realtime echo of
+// the same row must produce exactly one list entry. Exported for the
+// BLE → insert → realtime pipeline test.
+export function mergeMeasurement(prev: Measurement[], incoming: Measurement): Measurement[] {
+  if (prev.some(p => p.id === incoming.id)) return prev;
+  return [incoming, ...prev];
+}
+
 export function useLiveMeasurements(sessionId: string | null) {
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
   const [loading, setLoading] = useState(true);
@@ -40,11 +49,7 @@ export function useLiveMeasurements(sessionId: string | null) {
         },
         (payload) => {
           // Deduplicate: optimistic add may have already inserted this id
-          setMeasurements(prev => {
-            const incoming = payload.new as Measurement;
-            if (prev.some(p => p.id === incoming.id)) return prev;
-            return [incoming, ...prev];
-          });
+          setMeasurements(prev => mergeMeasurement(prev, payload.new as Measurement));
         }
       )
       .subscribe();
@@ -57,9 +62,7 @@ export function useLiveMeasurements(sessionId: string | null) {
 
   // Optimistic insert — shows the row immediately without waiting for Realtime
   const addMeasurement = useCallback((m: Measurement) => {
-    setMeasurements(prev =>
-      prev.some(p => p.id === m.id) ? prev : [m, ...prev]
-    );
+    setMeasurements(prev => mergeMeasurement(prev, m));
   }, []);
 
   return { measurements, loading, addMeasurement };

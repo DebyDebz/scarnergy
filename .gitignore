@@ -28,3 +28,6 @@ cloudflared-linux-amd64.deb
 
 # env backups
 .env.bak*
+
+# Playwright MCP debug output
+.playwright-mcp/

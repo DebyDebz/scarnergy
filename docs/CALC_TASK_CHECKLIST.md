@@ -13,33 +13,38 @@ Legend: `[ ]` todo · files are exact paths.
 
 Nothing here changes app behaviour; it restores our ability to prove non-regression.
 
-- [ ] **Restore the test harness.** `ts-jest` is referenced in `package.json` but not installed
+- [x] **Restore the test harness.** `ts-jest` is referenced in `package.json` but not installed
       → `npm test` fails. Reinstall `ts-jest` (or migrate the config to `jest-expo`), then
       confirm `bleDecoder.test.ts`, `floorplanGeometry.test.ts`, `thickness.test.ts` pass.
-- [ ] **Scope the root tsconfig.** Add `"exclude": ["web", "supabase/functions", "node_modules"]`
+- [x] **Scope the root tsconfig.** Add `"exclude": ["web", "supabase/functions", "node_modules"]`
       so `npx tsc --noEmit` typechecks the **mobile** app only (today it drags in web + Deno and
       throws ~40 false errors). Add a `"typecheck": "tsc --noEmit"` script to each app.
-- [ ] **Fix / confirm** the one real mobile error: `expo-file-system/legacy` in `lib/uploadImage.ts:14`.
-- [ ] **Capture a golden VABI export.** Run the current mobile `buildVabiXml` and web `vabiXml`
+- [x] **Fix / confirm** the one real mobile error: `expo-file-system/legacy` in `lib/uploadImage.ts:14`.
+- [x] **Capture a golden VABI export.** Run the current mobile `buildVabiXml` and web `vabiXml`
       on one real session; save both outputs as fixtures. These are the regression oracle for Phase 1.
-- **Verify gate:** `npm test` green · mobile `tsc` clean · `cd web && tsc` clean · `cd web && next build` succeeds · golden fixtures saved.
+      (`__tests__/fixtures/vabi.mobile.golden.xml` + snapshot; mobile format is the canonical oracle.)
+- **Verify gate:** ✅ 2026-07-13 — `npm test` green (88) · mobile `tsc` clean · `cd web && tsc` clean · `next build` succeeds · golden fixtures saved.
 
 ---
 
 ## Phase 1 — Shared core (kill the duplication, zero behaviour change)
 
-- [ ] Add root `"workspaces": ["web", "packages/*"]`; create `packages/opname-calc`
-      (`package.json` name `@scarnergy/opname-calc`, `tsconfig`, `src/index.ts`).
-- [ ] Move pure primitives in, **verbatim** (no logic changes yet):
+- [x] Create `packages/opname-calc` (`package.json` name `@scarnergy/opname-calc`, `tsconfig`,
+      `src/index.ts`). (Wired via `file:` deps in both apps instead of root workspaces —
+      same effect, no hoisting surprises with Metro.)
+- [x] Move pure primitives in, **verbatim** (no logic changes yet):
       - `src/units.ts` ← `mmToM`, formatters (from `web/lib/calc.ts`)
       - `src/geometry.ts` ← `toCardinal`, `openingArea`, area/netto helpers (from `lib/vabiExport.ts` + `web/lib/calc.ts`)
       - `src/thickness.ts` ← move `lib/thickness.ts`
-- [ ] Point **both** apps at the package: Next `transpilePackages: ["@scarnergy/opname-calc"]`;
-      Metro `watchFolders` + resolver for the package. Update imports in
-      `lib/vabiExport.ts`, `web/lib/vabiXml.ts`, `web/lib/calc.ts`.
-- [ ] Collapse the two VABI exporters onto one shared builder; delete the divergent copy.
-- **Verify gate:** the two golden fixtures from Phase 0 are **byte-identical** (or diff-reviewed &
-      approved) · both `tsc` clean · `next build` ok · mobile export still shares/downloads on device.
+- [x] Point **both** apps at the package: Next `transpilePackages: ["@scarnergy/opname-calc"]`;
+      Metro resolution via `file:` dep. Imports updated in
+      `web/lib/vabiXml.ts`, `web/lib/calc.ts`, and mobile callers.
+- [x] Collapse the two VABI exporters onto one shared builder; delete the divergent copy.
+      (`packages/opname-calc/src/vabi.ts`; canonical = mobile format + web's Vloer `<Perimeter>`.
+      `lib/vabiExport.ts` deleted; `web/lib/vabiXml.ts` is a re-export shim.)
+- **Verify gate:** ✅ 2026-07-13 — mobile golden **byte-identical** · web divergence diff-reviewed
+      (web adopts the richer mobile format) · both `tsc` clean · `next build` ok ·
+      _mobile export share on a real device: still to re-verify after next dev-client session._
 
 ---
 

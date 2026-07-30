@@ -4,15 +4,10 @@
     "slug": "scarnergy-app",
     "version": "2.0.0",
     "jsEngine": "hermes",
-    "newArchEnabled": true,
-    "extra": {
-      "eas": {
-        "projectId": "e41c9a9f-d0c2-4076-9392-3e36e42169c0"
-      }
-    },
+    "newArchEnabled": false,
     "ios": {
       "bundleIdentifier": "com.krontivaafrica.scarnergyapp",
-      "buildNumber": "15",
+      "buildNumber": "17",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSBluetoothAlwaysUsageDescription": "This app uses Bluetooth to connect to and communicate with your GLM device.",
@@ -30,13 +25,14 @@
     },
     "android": {
       "package": "com.krontivaafrica.scarnergyapp",
-      "versionCode": 15,
+      "versionCode": 17,
       "permissions": [
         "android.permission.BLUETOOTH",
         "android.permission.BLUETOOTH_ADMIN",
         "android.permission.BLUETOOTH_SCAN",
         "android.permission.BLUETOOTH_CONNECT",
-        "android.permission.ACCESS_FINE_LOCATION"
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "scheme": "scarnergyapp",
@@ -60,6 +56,12 @@
       ],
       "@sentry/react-native"
     ],
-    "owner": "fabricelaba"
+    "owner": "krontivaorg",
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "70f0b188-6dce-49a4-a3b8-73e9c6f3a668"
+      }
+    }
   }
 }

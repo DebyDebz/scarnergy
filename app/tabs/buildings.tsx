@@ -88,6 +88,13 @@ export default function BuildingsScreen() {
             item.construction_year,
             item.gross_floor_area_m2 ? `${item.gross_floor_area_m2} m²` : null,
           ].filter(Boolean).join(" · ");
+          // Cached registry data (migration 026); hidden until fetched on web.
+          const bagMeta = [
+            item.bag_bouwjaar,
+            item.bag_oppervlakte_m2 != null ? `${item.bag_oppervlakte_m2} m²` : null,
+            item.dbag_hoogte_m != null ? `height ${item.dbag_hoogte_m} m` : null,
+            item.bag_gebruiksdoel,
+          ].filter(Boolean).join(" · ");
 
           return (
             <View style={styles.card}>
@@ -109,6 +116,7 @@ export default function BuildingsScreen() {
                 </View>
                 <Text style={styles.cityLine}>{item.postal_code} · {item.city}</Text>
                 <Text style={styles.metaLine}>{meta}</Text>
+                {bagMeta ? <Text style={styles.metaLine}>BAG: {bagMeta}</Text> : null}
               </TouchableOpacity>
 
               {/* Stats */}

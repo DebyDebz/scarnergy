@@ -160,6 +160,17 @@ def _binarise(gray: np.ndarray) -> np.ndarray:
     )
     # Close small gaps so wall runs are connected.
     binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8), iterations=1)
+
+    # Defensive self-correction: a real floor plan has walls as a small minority
+    # of pixels. If "ink" covers almost everything, the source image was very
+    # likely captured with an inverted/broken background (e.g. a canvas
+    # snapshot whose background didn't composite as opaque white and decoded
+    # as black instead) rather than actually being solid black — flip it back
+    # instead of feeding a blown-out mask into the contour stages below.
+    ink_frac = float(np.count_nonzero(binary)) / binary.size
+    if ink_frac > 0.85:
+        binary = cv2.bitwise_not(binary)
+
     return binary
 
 

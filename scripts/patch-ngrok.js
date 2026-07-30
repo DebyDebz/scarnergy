@@ -53,6 +53,12 @@ async function connect(opts) {
         resolved = true;
         clearTimeout(timeout);
         processUrl = match[0];
+        // Force Expo to emit HTTPS manifest+bundle URLs for the tunnel host.
+        // Without this Expo defaults the bundleUrl to http://<host>, which iOS
+        // ATS blocks (public domain, cleartext) -> the dev client can fetch the
+        // manifest (https wrapper) but never downloads the JS bundle, so the app
+        // "does not load". Setting the proxy URL makes UrlCreator upgrade to https.
+        process.env.EXPO_PACKAGER_PROXY_URL = match[0];
         resolve(match[0]);
       }
     };
