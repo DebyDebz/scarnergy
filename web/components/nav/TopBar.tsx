@@ -3,6 +3,7 @@ import { useRouter } from 'next/navigation';
 import { LogOut, ChevronDown } from 'lucide-react';
 import { createClient } from '@/lib/supabase';
 import { useState } from 'react';
+import { DataSourceToggle } from './DataSourceToggle';
 
 interface Props {
   fullName: string;
@@ -27,6 +28,8 @@ export function TopBar({ fullName, orgName }: Props) {
         <span className="mx-1.5 text-gray-300">·</span>
         Admin Panel
       </div>
+      <div className="flex items-center gap-4">
+      <DataSourceToggle />
       <div className="relative">
         <button
           onClick={() => setOpen(v => !v)}
@@ -49,6 +52,7 @@ export function TopBar({ fullName, orgName }: Props) {
             </button>
           </div>
         )}
+      </div>
       </div>
     </header>
   );

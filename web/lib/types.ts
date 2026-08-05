@@ -200,6 +200,21 @@ export interface BuildingFacadePhoto {
   created_at: string;
 }
 
+export type ContactRole = 'eigenaar' | 'huurder' | 'beheerder' | 'opdrachtgever';
+export interface Contact {
+  id: string;
+  org_id: string;
+  building_id: string | null;
+  legacy_id: string | null;
+  full_name: string;
+  phone: string | null;
+  email: string | null;
+  role: ContactRole | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface EnergyLabelSnapshot {
   id: string;
   org_id: string;
@@ -256,6 +271,7 @@ export type Database = {
       openings:            TableDef<Opening>;
       inspection_sessions: TableDef<InspectionSession>;
       measurements:        TableDef<Measurement>;
+      contacts:            TableDef<Contact>;
     };
     Views: {
       building_summary:    ViewDef<BuildingSummary>;

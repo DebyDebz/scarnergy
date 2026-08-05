@@ -1,8 +1,10 @@
 import Link from 'next/link';
 import { Suspense } from 'react';
 import { createClient } from '@/lib/supabase-server';
+import { getServerDataSource } from '@/lib/dataSource/serverSource';
 import { MeasurementFilters } from '@/components/measurements/MeasurementFilters';
 import { MeasurementsLiveTable } from '@/components/measurements/MeasurementsLiveTable';
+import { AppsheetNotAvailable } from '@/components/shared/AppsheetNotAvailable';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { RecentMeasurement } from '@/lib/types';
 
@@ -20,7 +22,27 @@ interface Props {
   };
 }
 
+// Measurement.value_mm is raw Bosch GLM50C rangefinder/BLE-device capture —
+// mobile-app-only. No sheet in the AppSheet workbook (per
+// docs/APPSHEET_SCANERGYV2_TOGGLE_ANALYSIS.md §1's full entity list)
+// corresponds to this, confirmed with the user — always "not available"
+// rather than querying Supabase with an AppSheet-side id.
 export default async function MeasurementsPage({ searchParams }: Props) {
+  const source = await getServerDataSource();
+  if (source === 'appsheet') {
+    return (
+      <div className="space-y-5">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Measurement History</h1>
+          <p className="text-sm text-gray-500 mt-0.5">AppSheet source active</p>
+        </div>
+        <AppsheetNotAvailable items={[
+          'Measurements — raw rangefinder/BLE-device capture is mobile-app-only; no AppSheet sheet holds this data',
+        ]} />
+      </div>
+    );
+  }
+
   const supabase = await createClient();
 
   const q = searchParams.q ?? '';

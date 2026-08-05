@@ -1,7 +1,9 @@
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase-server';
+import { getServerDataSource } from '@/lib/dataSource/serverSource';
 import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
 import { DeleteSessionButton } from '@/components/sessions/DeleteSessionButton';
+import { AppsheetNotAvailable } from '@/components/shared/AppsheetNotAvailable';
 import { Search } from 'lucide-react';
 import type { SessionSummary } from '@/lib/types';
 import { fmtDateTimeFull } from '@/lib/format';
@@ -14,7 +16,28 @@ interface Props {
 
 const STATUSES = ['all', 'active', 'completed', 'paused', 'cancelled'];
 
+// ScanergyV2's inspection_sessions is a repeatable event per building (many
+// visits over time, each with status/started_at/completed_at/sync state).
+// AppSheet has no matching table — Objecten just carries one Opname Datum/
+// Tijd/Duur/Status per object (one visit, not a history). Decided with the
+// user not to synthesize a fake session from those four fields — shows an
+// explicit not-available notice instead.
 export default async function SessionsPage({ searchParams }: Props) {
+  const source = await getServerDataSource();
+  if (source === 'appsheet') {
+    return (
+      <div className="space-y-5">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Sessions</h1>
+          <p className="text-sm text-gray-500 mt-0.5">AppSheet source active</p>
+        </div>
+        <AppsheetNotAvailable items={[
+          'Inspection sessions — AppSheet models one visit per Objecten row (Opname Datum/Tijd/Duur/Status), not a repeatable session history',
+        ]} />
+      </div>
+    );
+  }
+
   const supabase = await createClient();
   const status = searchParams.status ?? 'all';
   const q = searchParams.q ?? '';

@@ -1,4 +1,7 @@
 import { createClient } from '@/lib/supabase-server';
+import { getServerDataSource } from '@/lib/dataSource/serverSource';
+import { appsheetFind } from '@/lib/appsheet/client';
+import { mapInspecteurRow } from '@/lib/appsheet/mappers';
 import { InviteUserForm } from '@/components/admin/InviteUserForm';
 import { ToggleActiveButton } from '@/components/admin/ToggleActiveButton';
 import { ChangeRoleButton } from '@/components/admin/ChangeRoleButton';
@@ -8,7 +11,60 @@ import { fmtDate } from '@/lib/format';
 
 export const revalidate = 0;
 
+// AppSheet-sourced "users" = Inspecteurs, per docs/CONTACTPERSOON_.../
+// APPSHEET_SCANERGYV2_TOGGLE_ANALYSIS.md §1. There's no AppSheet-side
+// admin/service_role equivalent, so this list is legitimately shorter than
+// ScanergyV2's — a different independently-maintained dataset, not a
+// filtered view of the same one. Read-only here: invite/role-change/
+// deactivate all write to Supabase and don't apply to AppSheet rows.
+async function AppsheetUsersPage() {
+  const result = await appsheetFind('Inspecteurs');
+  const users = (Array.isArray(result) ? result : []).map(mapInspecteurRow);
+  const roleCount = (role: string) => users.filter(u => u.role === role).length;
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Users</h1>
+        <p className="text-sm text-gray-500 mt-0.5">
+          {users.length} inspecteurs (AppSheet) ·{' '}
+          {roleCount('supervisor')} beheerder · {roleCount('inspector')} inspecteur
+        </p>
+      </div>
+
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-xs text-gray-500 bg-gray-50 border-b border-gray-100 text-left">
+              <th className="px-5 py-3 font-medium">Name</th>
+              <th className="px-5 py-3 font-medium">Role</th>
+              <th className="px-5 py-3 font-medium">Active</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-50">
+            {users.map(u => (
+              <tr key={u.id} className="hover:bg-gray-50 transition-colors">
+                <td className="px-5 py-3 text-gray-900 font-medium">{u.full_name}</td>
+                <td className="px-5 py-3 text-gray-600 capitalize">{u.role}</td>
+                <td className="px-5 py-3 text-gray-500">{u.is_active ? 'Yes' : 'No'}</td>
+              </tr>
+            ))}
+            {!users.length && (
+              <tr>
+                <td colSpan={3} className="px-5 py-8 text-center text-gray-400">No inspecteurs</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export default async function UsersPage() {
+  const source = await getServerDataSource();
+  if (source === 'appsheet') return <AppsheetUsersPage />;
+
   const supabase = await createClient();
 
   const { data: { user: authUser } } = await supabase.auth.getUser();

@@ -1,6 +1,9 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { createClient } from '@/lib/supabase-server';
+import { getServerDataSource } from '@/lib/dataSource/serverSource';
+import { appsheetFind } from '@/lib/appsheet/client';
+import { mapObjectenRow } from '@/lib/appsheet/mappers';
 import { EnergyLabelBadge } from '@/components/buildings/EnergyLabelBadge';
 import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
 import { FloorPlanButton } from '@/components/buildings/FloorPlanButton';
@@ -8,6 +11,7 @@ import { BuildingFloorPlanUpload } from '@/components/buildings/BuildingFloorPla
 import { FloorPlanViewer } from '@/components/buildings/FloorPlanViewer';
 import { BuildingExportButtons } from '@/components/buildings/BuildingExportButtons';
 import { BagPanel } from '@/components/buildings/BagPanel';
+import { BuildingContactCard } from '@/components/buildings/BuildingContactCard';
 import { MapPanel } from '@/components/buildings/MapPanel';
 import { ZoneEditButton } from '@/components/buildings/ZoneEditButton';
 import { ElementTypeSections, type ElementWithRelations } from '@/components/elements/ElementTypeSections';
@@ -32,6 +36,11 @@ const DIRECTIONS: { key: BuildingFacadePhoto['direction']; label: string; en: st
 ];
 
 export default async function BuildingDetailPage({ params }: Props) {
+  const source = await getServerDataSource();
+  if (source === 'appsheet') {
+    return <AppsheetBuildingDetail objectId={params.id} />;
+  }
+
   const supabase = await createClient();
 
   const [buildingResult, zonesResult, sessionsResult, facadeResult, rekenzonesResult, labelSnapshotsResult] = await Promise.all([
@@ -213,6 +222,9 @@ export default async function BuildingDetailPage({ params }: Props) {
           </div>
         ))}
       </div>
+
+      {/* ── Contactpersoon (data-source toggle build) ───────────────────── */}
+      <BuildingContactCard buildingId={params.id} />
 
       {/* ── BAG / 3DBAG registry data (GAP W3) ──────────────────────────── */}
       <BagPanel building={building} />
@@ -470,6 +482,69 @@ export default async function BuildingDetailPage({ params }: Props) {
             )}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+// AppSheet-sourced building detail — a deliberately reduced view. Only
+// organisations/buildings/contacts have an AppSheet-side implementation in
+// this build (see docs/APPSHEET_SCANERGYV2_TOGGLE_ANALYSIS.md §6); zones,
+// elements, sessions, rekenzones, facade photos, floor plans, and energy
+// label history have no AppSheet-side read path yet, so this shows an
+// explicit notice instead of querying Supabase with an AppSheet Object ID
+// (which would silently return "no data" rather than "not supported").
+async function AppsheetBuildingDetail({ objectId }: { objectId: string }) {
+  const [objectenResult, bagResult] = await Promise.all([
+    appsheetFind('Objecten', `FILTER(Objecten, [Object ID] = "${objectId.replace(/"/g, '\\"')}")`),
+    appsheetFind('BAG Data', `FILTER("BAG Data", [Object ID] = "${objectId.replace(/"/g, '\\"')}")`),
+  ]);
+  const row = Array.isArray(objectenResult) ? objectenResult[0] : undefined;
+  if (!row) notFound();
+
+  const bagRow = Array.isArray(bagResult) ? bagResult[0] : undefined;
+  const building = mapObjectenRow(row, bagRow);
+  const fullAddress = `${building.street} ${building.house_number}, ${building.postal_code} ${building.city}`.trim();
+
+  const NOT_AVAILABLE = [
+    'Zones & elements (Verdiepingen / Daken / Gevels / Vloeren / Installaties)',
+    'Rekenzones',
+    'Facade photos',
+    'Floor plans',
+    'Energy label history',
+    'Inspection sessions',
+  ];
+
+  return (
+    <div className="space-y-6 max-w-5xl">
+      <div>
+        <Link href="/buildings" className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 mb-3">
+          <ArrowLeft className="w-4 h-4" /> Buildings
+        </Link>
+        <h1 className="text-2xl font-bold text-gray-900">{fullAddress}</h1>
+        <p className="text-sm text-gray-500 font-mono mt-0.5">{building.reference_code}</p>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        {[
+          { label: 'Type', value: building.building_type || '—' },
+          { label: 'Built', value: building.construction_year || '—' },
+          { label: 'Floor area', value: building.gross_floor_area_m2 ? `${building.gross_floor_area_m2} m²` : '—' },
+        ].map(({ label, value }) => (
+          <div key={label} className="bg-white border border-gray-200 rounded-xl p-4">
+            <p className="text-xs text-gray-500 mb-1">{label}</p>
+            <p className="font-semibold text-gray-900">{value}</p>
+          </div>
+        ))}
+      </div>
+
+      <BuildingContactCard buildingId={objectId} />
+
+      <div className="bg-white rounded-xl border border-gray-200 p-5">
+        <p className="text-sm font-medium text-amber-700 mb-2">Not available for AppSheet-sourced buildings yet</p>
+        <ul className="text-xs text-gray-500 list-disc list-inside space-y-1">
+          {NOT_AVAILABLE.map(item => <li key={item}>{item}</li>)}
+        </ul>
       </div>
     </div>
   );

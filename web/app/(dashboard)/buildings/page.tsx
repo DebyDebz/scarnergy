@@ -1,5 +1,8 @@
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase-server';
+import { getServerDataSource } from '@/lib/dataSource/serverSource';
+import { appsheetFind } from '@/lib/appsheet/client';
+import { mapObjectenRow } from '@/lib/appsheet/mappers';
 import { EnergyLabelBadge } from '@/components/buildings/EnergyLabelBadge';
 import { DeleteBuildingButton } from '@/components/buildings/DeleteBuildingButton';
 import { Search, Plus } from 'lucide-react';
@@ -12,9 +15,49 @@ interface Props {
   searchParams: { q?: string };
 }
 
+// AppSheet-sourced buildings only carry the fields Objecten/BAG Data
+// actually provide (see lib/appsheet/mappers.ts) — zone/element/session
+// counts, last-inspection date, and energy label have no AppSheet-side
+// equivalent in this build's scope, so they're defaulted rather than faked.
+function toBuildingSummary(row: Record<string, unknown>, bagRow: Record<string, unknown> | undefined): BuildingSummary {
+  const building = mapObjectenRow(row, bagRow);
+  return {
+    ...building,
+    full_address: `${building.street} ${building.house_number}, ${building.postal_code} ${building.city}`.trim(),
+    zone_count: 0,
+    element_count: 0,
+    session_count: 0,
+    last_inspection_at: null,
+    latest_energy_label: null,
+  };
+}
+
 export default async function BuildingsPage({ searchParams }: Props) {
-  const supabase = await createClient();
   const q = searchParams.q ?? '';
+  const source = await getServerDataSource();
+
+  if (source === 'appsheet') {
+    const [objectenResult, bagResult] = await Promise.all([
+      appsheetFind('Objecten'),
+      appsheetFind('BAG Data'),
+    ]);
+    const bagByObjectId = new Map(
+      (Array.isArray(bagResult) ? bagResult : []).map((r: Record<string, unknown>) => [String(r['Object ID']), r])
+    );
+    let buildings = (Array.isArray(objectenResult) ? objectenResult : [])
+      .map((row: Record<string, unknown>) => toBuildingSummary(row, bagByObjectId.get(String(row['Object ID']))));
+    if (q) {
+      const needle = q.toLowerCase();
+      buildings = buildings.filter(b =>
+        b.reference_code.toLowerCase().includes(needle) ||
+        b.street.toLowerCase().includes(needle) ||
+        b.city.toLowerCase().includes(needle)
+      );
+    }
+    return <BuildingsTable buildings={buildings} q={q} isAdmin={false} source={source} />;
+  }
+
+  const supabase = await createClient();
 
   const { data: { user } } = await supabase.auth.getUser();
   const profileResult = await (supabase.from('user_profiles') as any)
@@ -29,6 +72,17 @@ export default async function BuildingsPage({ searchParams }: Props) {
   const result = await query as unknown as { data: BuildingSummary[] | null };
   const buildings = result.data;
 
+  return <BuildingsTable buildings={buildings} q={q} isAdmin={isAdmin} source={source} />;
+}
+
+interface TableProps {
+  buildings: BuildingSummary[] | null;
+  q: string;
+  isAdmin: boolean;
+  source: 'scanergy' | 'appsheet';
+}
+
+function BuildingsTable({ buildings, q, isAdmin, source }: TableProps) {
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
@@ -85,10 +139,10 @@ export default async function BuildingsPage({ searchParams }: Props) {
                 </td>
                 <td className="px-5 py-3 text-gray-700">{b.full_address}</td>
                 <td className="px-5 py-3 text-gray-500 capitalize">{b.building_type}</td>
-                <td className="px-5 py-3 text-gray-500">{b.construction_year}</td>
-                <td className="px-5 py-3 text-gray-700">{b.zone_count}</td>
-                <td className="px-5 py-3 text-gray-700">{b.element_count}</td>
-                <td className="px-5 py-3 text-gray-700">{b.session_count}</td>
+                <td className="px-5 py-3 text-gray-500">{b.construction_year || '—'}</td>
+                <td className="px-5 py-3 text-gray-700">{source === 'appsheet' ? '—' : b.zone_count}</td>
+                <td className="px-5 py-3 text-gray-700">{source === 'appsheet' ? '—' : b.element_count}</td>
+                <td className="px-5 py-3 text-gray-700">{source === 'appsheet' ? '—' : b.session_count}</td>
                 <td className="px-5 py-3 text-gray-500">
                   {b.last_inspection_at
                     ? fmtDate(b.last_inspection_at)

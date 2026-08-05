@@ -10,7 +10,7 @@
     "postinstall": "chmod +x node_modules/.bin/*"
   },
   "dependencies": {
-    "@scarnergy/opname-calc": "file:../packages/opname-calc",
+    "@scarnergy/opname-calc": "file:./packages/opname-calc",
     "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.106.1",
     "lucide-react": "^1.16.0",

@@ -78,3 +78,20 @@ Verified against Google's own AppSheet API docs, plus a real (if prototype/non-p
 - Decide who owns the Rekenzones scope-mismatch risk (§2) before cutover — it's the one place toggling could show materially different structure for the same building, and it isn't part of the Contactpersoon-scoped build.
 - Get a firm delivery/confirmation date from the third party owning Annotations feature parity — don't let it default to "sometime before cutover."
 - Load-test the AppSheet API against the actual account/data volumes before committing to a real-time toggle UX.
+
+---
+
+## 6. Build status (2026-07-30)
+
+§3 validated against the real dashboard repo (`web/`), not just the data facts:
+
+- **Global state**: confirmed the doc's claim — the web app had zero React Context/Zustand/Redux before this build (only mobile's `store/authStore.ts`). Built `web/lib/dataSource/DataSourceContext.tsx`, a plain React Context (a store library is overkill for one app-wide enum), wrapped around `{children}` in `web/app/(dashboard)/layout.tsx`.
+- **Settings/nav surface**: no dedicated `/settings` route exists. The toggle + indicator live in the persistent `TopBar` (`web/components/nav/DataSourceToggle.tsx`) instead — the one place guaranteed visible on every screen.
+- **Service layer**: confirmed there was no existing service-layer abstraction — components called Supabase directly. Built `web/lib/services/{types.ts,index.ts,scanergy/*,appsheet/*}` with one interface per entity, a Supabase-backed impl, an AppSheet-backed impl, and a factory keyed off the active `DataSource`.
+- **Contacts table**: shipped (`supabase/migrations/029_contacts.sql`, `contacts` table + `contact_role` enum + RLS, per `CONTACTPERSOON_DATA_ANALYSIS.md` §4's field mapping). Wired end-to-end as the reference dual-sided entity: `BuildingContactCard` on the building detail page reads through the toggle, with explicit loading/blocked/empty states per §3.
+- **Scope actually implemented**: organisations, buildings, and contacts got both a `scanergy/` and an `appsheet/` implementation. The other ~9 entity types in §1's table (rekenzones, zones, building_elements, openings, ble_devices, user_profiles, etc.) are **not yet built** — they follow the identical two-file-plus-factory shape documented in `web/lib/services/types.ts`; this is a scale-out task, not a design question.
+- **AppSheet-side blockers — still open, not resolved by this build.** Checked this repo and this environment for evidence either way and found none:
+  1. **AppSheet Enterprise API access is not confirmed** on the target account.
+  2. **The exposed `ApplicationAccessKey`** in `Bosch-GLM50C-Rangefinder/web/services/appsheetApi.ts` could not be checked or rotated — that repo isn't present in this environment.
+
+  Because of this, every `appsheet/*` service implementation is a stub: it throws `DataSourceBlockedError` (see `web/lib/services/types.ts`) instead of calling a real endpoint. **The toggle UI is fully wired and functional** — flipping to "AppSheet" visibly changes the active-source indicator and every screen reads through the same context — but no AppSheet network call happens yet. This is intentional: building the real bulk `Find`/`Selector` integration against an unconfirmed account/unrotated key would either fail opaquely or, worse, work against a still-exposed secret. Both must be resolved before the `appsheet/*` stubs are replaced with real server-proxy calls.
