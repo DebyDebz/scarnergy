@@ -48,3 +48,40 @@ export async function appsheetFind(table: string, selector?: string) {
 
   return res.json();
 }
+
+// Add/Edit/Delete — confirmed live against Objecten (see conversation
+// notes): Add auto-generates the key column (don't supply one), returns the
+// created row(s) including any auto-computed defaults. There is a live
+// automation that validates/rewrites Adres on Add when the postcode/house
+// number can't be resolved — callers should check the returned row, not
+// assume success just because the HTTP call didn't throw. AppSheet can also
+// fail an Add with a 400 referencing a "Row ID to correct" for a row that
+// was NOT actually persisted (verified: a failed virtual-column validation
+// rolls back the whole Add) — that error path is safe to surface as a plain
+// failure. Edit is confirmed atomic the same way — e.g. trying to blank the
+// required "Opname Datum" date column fails with no partial write. Edit
+// only needs the key column plus the fields actually being changed, not a
+// full row.
+export async function appsheetAction(table: string, action: 'Add' | 'Edit' | 'Delete', rows: Record<string, unknown>[]) {
+  const { appId, accessKey } = requireConfig();
+
+  const res = await fetch(`${BASE_URL}/${appId}/tables/${encodeURIComponent(table)}/Action`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ApplicationAccessKey: accessKey,
+    },
+    body: JSON.stringify({
+      Action: action,
+      Properties: { Locale: 'en-US' },
+      Rows: rows,
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`AppSheet ${action} on "${table}" failed: ${res.status} ${res.statusText} ${body}`);
+  }
+
+  return res.json();
+}

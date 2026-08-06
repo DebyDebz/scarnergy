@@ -23,10 +23,12 @@ interface Props {
 }
 
 // Measurement.value_mm is raw Bosch GLM50C rangefinder/BLE-device capture —
-// mobile-app-only. No sheet in the AppSheet workbook (per
-// docs/APPSHEET_SCANERGYV2_TOGGLE_ANALYSIS.md §1's full entity list)
-// corresponds to this, confirmed with the user — always "not available"
-// rather than querying Supabase with an AppSheet-side id.
+// mobile-app-only, one timestamped reading per device. Checked live: the
+// closest thing in AppSheet (Transparante_Delen's Hoogte/Breedte) is a
+// static per-element dimension, not a timestamped reading — no device
+// link, no anomaly concept, nothing to map. Confirmed with the user twice
+// (once from the entity list, once after checking Transparante_Delen
+// directly) — always "not available" rather than fabricating rows.
 export default async function MeasurementsPage({ searchParams }: Props) {
   const source = await getServerDataSource();
   if (source === 'appsheet') {

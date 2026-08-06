@@ -11,8 +11,9 @@
 // the always-on header is the one place guaranteed to be visible
 // regardless of which page the user is on.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
+import { Loader2 } from 'lucide-react';
 import { useDataSource, type DataSource } from '@/lib/dataSource/DataSourceContext';
 
 const OPTIONS: { value: DataSource; label: string }[] = [
@@ -25,16 +26,23 @@ type HealthState = 'idle' | 'checking' | 'ok' | 'error';
 export function DataSourceToggle() {
   const { source, setSource } = useDataSource();
   const router = useRouter();
+  const [isPending, startTransition] = useTransition();
 
   // Server components (buildings/organizations/dashboard/sessions/
   // measurements/users lists) read the active source from a cookie (see
   // lib/dataSource/serverSource.ts) and only re-run on the next request —
   // flipping the toggle alone doesn't re-fetch them. router.refresh()
   // re-runs the current route's server components against the
-  // now-updated cookie without a full page reload.
+  // now-updated cookie without a full page reload. Wrapped in
+  // useTransition so the admin gets a visible "switching…" state instead
+  // of the toggle looking unresponsive while those server components
+  // re-fetch (AppSheet in particular can be noticeably slower).
   function handleSelect(next: DataSource) {
+    if (next === source) return;
     setSource(next);
-    router.refresh();
+    startTransition(() => {
+      router.refresh();
+    });
   }
   // ScanergyV2 reads straight from the DB the rest of this dashboard already
   // trusts, so it doesn't need a live check. AppSheet is a real third-party
@@ -75,13 +83,18 @@ export function DataSourceToggle() {
 
   return (
     <div className="flex items-center gap-2">
-      <div className="flex items-center bg-gray-100 rounded-lg p-0.5 text-xs font-medium">
+      <div
+        className={`flex items-center bg-gray-100 rounded-lg p-0.5 text-xs font-medium transition-opacity ${
+          isPending ? 'opacity-60' : ''
+        }`}
+      >
         {OPTIONS.map(opt => (
           <button
             key={opt.value}
             onClick={() => handleSelect(opt.value)}
+            disabled={isPending}
             aria-pressed={source === opt.value}
-            className={`px-2.5 py-1 rounded-md transition-colors ${
+            className={`px-2.5 py-1 rounded-md transition-colors disabled:cursor-wait ${
               source === opt.value
                 ? 'bg-white text-gray-900 shadow-sm'
                 : 'text-gray-500 hover:text-gray-700'
@@ -91,6 +104,9 @@ export function DataSourceToggle() {
           </button>
         ))}
       </div>
+      {isPending && (
+        <Loader2 className="w-3.5 h-3.5 text-gray-400 animate-spin" aria-label="Switching data source…" />
+      )}
       <span
         className={`inline-flex items-center gap-1.5 text-[11px] font-semibold px-2 py-0.5 rounded-full ${
           source === 'appsheet'

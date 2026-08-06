@@ -1,8 +1,9 @@
 import { createClient } from '@/lib/supabase-server';
 import { getServerDataSource } from '@/lib/dataSource/serverSource';
 import { appsheetFind } from '@/lib/appsheet/client';
-import { mapInspecteurRow } from '@/lib/appsheet/mappers';
+import { mapInspecteurRow, mapBedrijvenRow } from '@/lib/appsheet/mappers';
 import { InviteUserForm } from '@/components/admin/InviteUserForm';
+import { AppsheetInviteUserForm } from '@/components/admin/AppsheetInviteUserForm';
 import { ToggleActiveButton } from '@/components/admin/ToggleActiveButton';
 import { ChangeRoleButton } from '@/components/admin/ChangeRoleButton';
 import { Users } from 'lucide-react';
@@ -15,11 +16,17 @@ export const revalidate = 0;
 // APPSHEET_SCANERGYV2_TOGGLE_ANALYSIS.md §1. There's no AppSheet-side
 // admin/service_role equivalent, so this list is legitimately shorter than
 // ScanergyV2's — a different independently-maintained dataset, not a
-// filtered view of the same one. Read-only here: invite/role-change/
-// deactivate all write to Supabase and don't apply to AppSheet rows.
+// filtered view of the same one. Add is wired to the real API (confirmed
+// live: Inspecteurs Add/Delete are both clean, see
+// AppsheetInviteUserForm.tsx) — role-change/deactivate aren't yet, so those
+// stay read-only here until a similar admin-gated PATCH is built for them.
 async function AppsheetUsersPage() {
-  const result = await appsheetFind('Inspecteurs');
-  const users = (Array.isArray(result) ? result : []).map(mapInspecteurRow);
+  const [inspecteursResult, bedrijvenResult] = await Promise.all([
+    appsheetFind('Inspecteurs'),
+    appsheetFind('Bedrijven'),
+  ]);
+  const users = (Array.isArray(inspecteursResult) ? inspecteursResult : []).map(mapInspecteurRow);
+  const orgs = (Array.isArray(bedrijvenResult) ? bedrijvenResult : []).map(mapBedrijvenRow);
   const roleCount = (role: string) => users.filter(u => u.role === role).length;
 
   return (
@@ -30,6 +37,14 @@ async function AppsheetUsersPage() {
           {users.length} inspecteurs (AppSheet) ·{' '}
           {roleCount('supervisor')} beheerder · {roleCount('inspector')} inspecteur
         </p>
+      </div>
+
+      <div className="bg-white rounded-xl border border-gray-200 p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <Users className="w-4 h-4 text-indigo-600" />
+          <h2 className="font-semibold text-gray-900 text-sm">Add user (AppSheet)</h2>
+        </div>
+        <AppsheetInviteUserForm orgs={orgs} />
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">

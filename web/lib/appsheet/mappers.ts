@@ -5,7 +5,7 @@
 // components (buildings/organizations pages, which call appsheetFind()
 // directly) can share the same mapping logic.
 
-import type { Organisation, Building, Contact, ContactRole, UserProfile, Role } from '@/lib/types';
+import type { Organisation, Building, Contact, ContactRole, UserProfile, Role, SessionSummary } from '@/lib/types';
 
 export function escapeForSelector(value: string) {
   return value.replace(/"/g, '\\"');
@@ -84,6 +84,58 @@ export function mapObjectenRow(row: Record<string, unknown>, bagRow: Record<stri
   };
 }
 
+// ── New Objecten row payload (for Add) ─────────────────────────────────
+// Confirmed live (see conversation notes): Objecttype is a constrained
+// enum, and several "virtual"/formula columns (Gebouwtype, Subtype,
+// Subtype_ID, Daktype_ligging, Daktype_ID) compute an invalid default when
+// left unset for a "Woning" row — Add fails with a validation error citing
+// Subtype unless real values are supplied. The combo below is copied
+// verbatim from a real live Woning row's values, not invented.
+// "Utiliteit" rows observed in the wild have all five of these blank, so
+// they're omitted for that type — this is inferred from one example row,
+// not verified with a live Add test the way Woning was; treat Utiliteit
+// creation as lower-confidence until it's been tested the same way.
+//
+// Object ID is deliberately NOT included — AppSheet auto-generates it.
+// Adres is composed to match the exact format seen on real rows
+// ("Straat Nr, Postcode  Stad", double space before the city) because a
+// live automation re-validates/rewrites this field against a real
+// address lookup and will overwrite anything it can't resolve.
+export interface NewBuildingInput {
+  objecttype: 'Woning' | 'Utiliteit';
+  street: string;
+  houseNumber: string;
+  houseLetter?: string;
+  houseAddition?: string;
+  postalCode: string;
+  city: string;
+  bedrijfsId: string;
+}
+
+const WONING_VIRTUAL_DEFAULTS = {
+  Gebouwtype: '0',
+  Subtype: 'Woning-2',
+  Subtype_ID: '2',
+  Daktype_ligging: 'Daktype-1',
+  Daktype_ID: '1',
+};
+
+export function buildNewObjectenRow(input: NewBuildingInput): Record<string, unknown> {
+  const houseSuffix = `${input.houseNumber}${input.houseLetter ?? ''}${input.houseAddition ?? ''}`;
+  return {
+    Objecttype: input.objecttype,
+    // No separate "Straat" column exists — Adres carries the full string.
+    Adres: `${input.street} ${houseSuffix}, ${input.postalCode}  ${input.city}`,
+    Postcode: input.postalCode,
+    Huisnummer: input.houseNumber,
+    Huisletter: input.houseLetter ?? '',
+    Huistoevoeging: input.houseAddition ?? '',
+    'Bedrijfs ID': input.bedrijfsId,
+    Status: 'Nieuw',
+    ...(input.objecttype === 'Woning' ? WONING_VIRTUAL_DEFAULTS : {}),
+  };
+}
+
 // ── Contactpersoon -> Contact ──────────────────────────────────────────
 const ROLE_MAP: Record<string, ContactRole> = {
   Eigenaar: 'eigenaar',
@@ -139,5 +191,81 @@ export function mapInspecteurRow(row: Record<string, unknown>): UserProfile {
     role: INSPECTEUR_ROLE_MAP[String(row['Rol'] ?? '').trim()] ?? 'inspector',
     full_name: String(row['Inspecteur Naam'] ?? ''),
     is_active: String(row['Actief'] ?? '').trim().toUpperCase() === 'Y',
+  };
+}
+
+// ── New Inspecteurs row payload (for Add) ──────────────────────────────
+// Confirmed live: Add/Delete on Inspecteurs are both clean — no virtual-
+// column validation, no address-lookup automation, unlike Objecten.
+// Inspecteur ID is auto-generated; don't supply one.
+export interface NewInspecteurInput {
+  naam: string;
+  email: string;
+  rol: 'Inspecteur' | 'Beheerder';
+  bedrijfId: string;
+}
+
+export function buildNewInspecteurRow(input: NewInspecteurInput): Record<string, unknown> {
+  return {
+    'Inspecteur Naam': input.naam,
+    'Inspecteur Email': input.email,
+    'Bedrijf ID': input.bedrijfId,
+    Actief: 'Y',
+    Rol: input.rol,
+  };
+}
+
+// ── Objecten -> pseudo-SessionSummary ───────────────────────────────────
+// AppSheet has no repeatable-session concept — each Objecten row carries
+// exactly one Opname Datum/Tijd/Duur/Status (see
+// docs/APPSHEET_SCANERGYV2_TOGGLE_ANALYSIS.md §2). Per the user's explicit
+// decision, the sessions page treats each Objecten row as one
+// pseudo-session so All/Active/Completed/Paused/Cancelled + search + delete
+// can exist there — but this is a real building row, not a session record,
+// which is why "delete" (see /api/appsheet/[table] PATCH) resets Status
+// rather than removing anything.
+//
+// Status mapping is best-effort: only "Nieuw" and "Besteld" have been
+// observed live. Neither maps cleanly to ScanergyV2's four statuses, and no
+// AppSheet value corresponding to completed/paused/cancelled has been seen
+// at all — until one is, those three tabs will legitimately show empty in
+// AppSheet mode rather than guess.
+const OBJECTEN_STATUS_MAP: Record<string, SessionSummary['status']> = {
+  Nieuw: 'active',
+  Besteld: 'active',
+};
+
+export function mapObjectenToSessionSummary(
+  row: Record<string, unknown>,
+  inspecteurNameById: Map<string, string>
+): SessionSummary {
+  const objectId = String(row['Object ID'] ?? '');
+  const inspecteurId = String(row['Inspecteur'] ?? '');
+  const { street, city } = parseAdres(
+    String(row['Adres'] ?? ''),
+    String(row['Huisnummer'] ?? ''),
+    String(row['Huisletter'] ?? ''),
+    String(row['Huistoevoeging'] ?? '')
+  );
+  const opnameDatum = String(row['Opname Datum'] ?? '');
+  const opnameTijd = String(row['Opname Tijd'] ?? '');
+  const startedAt = opnameDatum ? `${opnameDatum} ${opnameTijd}`.trim() : '';
+
+  return {
+    id: objectId,
+    org_id: String(row['Bedrijfs ID'] ?? ''),
+    building_id: objectId,
+    inspector_id: inspecteurId,
+    session_code: `OBJ-${objectId}`,
+    status: OBJECTEN_STATUS_MAP[String(row['Status'] ?? '').trim()] ?? 'active',
+    started_at: startedAt,
+    completed_at: null,
+    total_measurements: 0,
+    anomaly_count: 0,
+    sync_status: 'n/a',
+    is_active: true,
+    inspector_name: inspecteurNameById.get(inspecteurId) ?? 'Unknown',
+    building_address: `${street} ${row['Huisnummer'] ?? ''}${row['Huisletter'] ?? ''}${row['Huistoevoeging'] ?? ''}`.trim(),
+    building_city: city,
   };
 }

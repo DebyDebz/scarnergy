@@ -1,9 +1,11 @@
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase-server';
 import { getServerDataSource } from '@/lib/dataSource/serverSource';
+import { appsheetFind } from '@/lib/appsheet/client';
+import { mapObjectenToSessionSummary } from '@/lib/appsheet/mappers';
 import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
 import { DeleteSessionButton } from '@/components/sessions/DeleteSessionButton';
-import { AppsheetNotAvailable } from '@/components/shared/AppsheetNotAvailable';
+import { AppsheetDeleteSessionButton } from '@/components/sessions/AppsheetDeleteSessionButton';
 import { Search } from 'lucide-react';
 import type { SessionSummary } from '@/lib/types';
 import { fmtDateTimeFull } from '@/lib/format';
@@ -16,31 +18,44 @@ interface Props {
 
 const STATUSES = ['all', 'active', 'completed', 'paused', 'cancelled'];
 
-// ScanergyV2's inspection_sessions is a repeatable event per building (many
-// visits over time, each with status/started_at/completed_at/sync state).
-// AppSheet has no matching table — Objecten just carries one Opname Datum/
-// Tijd/Duur/Status per object (one visit, not a history). Decided with the
-// user not to synthesize a fake session from those four fields — shows an
-// explicit not-available notice instead.
 export default async function SessionsPage({ searchParams }: Props) {
   const source = await getServerDataSource();
+  const status = searchParams.status ?? 'all';
+  const q = searchParams.q ?? '';
+
   if (source === 'appsheet') {
+    const [objectenResult, inspecteursResult] = await Promise.all([
+      appsheetFind('Objecten'),
+      appsheetFind('Inspecteurs'),
+    ]);
+    const inspecteurNameById = new Map(
+      (Array.isArray(inspecteursResult) ? inspecteursResult : [])
+        .map((r: Record<string, unknown>) => [String(r['Inspecteur ID']), String(r['Inspecteur Naam'] ?? '')])
+    );
+    let sessions = (Array.isArray(objectenResult) ? objectenResult : [])
+      .map((row: Record<string, unknown>) => mapObjectenToSessionSummary(row, inspecteurNameById));
+
+    if (status !== 'all') sessions = sessions.filter(s => s.status === status);
+    if (q) {
+      const needle = q.toLowerCase();
+      sessions = sessions.filter(s =>
+        s.building_address.toLowerCase().includes(needle) ||
+        s.inspector_name.toLowerCase().includes(needle)
+      );
+    }
+    sessions.sort((a, b) => (a.started_at < b.started_at ? 1 : -1));
+
     return (
-      <div className="space-y-5">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Sessions</h1>
-          <p className="text-sm text-gray-500 mt-0.5">AppSheet source active</p>
-        </div>
-        <AppsheetNotAvailable items={[
-          'Inspection sessions — AppSheet models one visit per Objecten row (Opname Datum/Tijd/Duur/Status), not a repeatable session history',
-        ]} />
-      </div>
+      <SessionsView
+        sessions={sessions}
+        status={status}
+        q={q}
+        source="appsheet"
+      />
     );
   }
 
   const supabase = await createClient();
-  const status = searchParams.status ?? 'all';
-  const q = searchParams.q ?? '';
 
   let query = (supabase.from('session_summary') as unknown as ReturnType<typeof supabase.from>)
     .select('*')
@@ -53,10 +68,31 @@ export default async function SessionsPage({ searchParams }: Props) {
   const sessions = result.data;
 
   return (
+    <SessionsView
+      sessions={sessions ?? []}
+      status={status}
+      q={q}
+      source="scanergy"
+    />
+  );
+}
+
+interface ViewProps {
+  sessions: SessionSummary[];
+  status: string;
+  q: string;
+  source: 'scanergy' | 'appsheet';
+}
+
+function SessionsView({ sessions, status, q, source }: ViewProps) {
+  return (
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Sessions</h1>
-        <p className="text-sm text-gray-500 mt-0.5">{sessions?.length ?? 0} sessions shown</p>
+        <p className="text-sm text-gray-500 mt-0.5">
+          {sessions.length} sessions shown
+          {source === 'appsheet' ? ' — from AppSheet (Objecten, one visit per building)' : ''}
+        </p>
       </div>
 
       <div className="flex flex-wrap gap-3 items-center">
@@ -111,21 +147,26 @@ export default async function SessionsPage({ searchParams }: Props) {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-50">
-            {(sessions ?? []).map(s => (
+            {sessions.map(s => (
               <tr key={s.id} className="hover:bg-gray-50 transition-colors">
                 <td className="px-5 py-3 font-mono text-xs">
-                  <Link href={`/sessions/${s.id}`} className="text-indigo-600 hover:underline font-medium">
+                  <Link
+                    href={source === 'appsheet' ? `/buildings/${s.id}` : `/sessions/${s.id}`}
+                    className="text-indigo-600 hover:underline font-medium"
+                  >
                     {s.session_code}
                   </Link>
                 </td>
                 <td className="px-5 py-3 text-gray-700">{s.building_address}, {s.building_city}</td>
                 <td className="px-5 py-3 text-gray-600">{s.inspector_name}</td>
                 <td className="px-5 py-3 text-gray-500 whitespace-nowrap">
-                  {fmtDateTimeFull(s.started_at)}
+                  {s.started_at ? fmtDateTimeFull(s.started_at) : '—'}
                 </td>
-                <td className="px-5 py-3 text-gray-700">{s.total_measurements}</td>
+                <td className="px-5 py-3 text-gray-700">{source === 'appsheet' ? '—' : s.total_measurements}</td>
                 <td className="px-5 py-3">
-                  {s.anomaly_count > 0 ? (
+                  {source === 'appsheet' ? (
+                    <span className="text-gray-400">—</span>
+                  ) : s.anomaly_count > 0 ? (
                     <span className="text-amber-600 font-medium">{s.anomaly_count}</span>
                   ) : (
                     <span className="text-gray-400">0</span>
@@ -135,11 +176,13 @@ export default async function SessionsPage({ searchParams }: Props) {
                   <SessionStatusBadge status={s.status} />
                 </td>
                 <td className="px-5 py-3 text-right">
-                  <DeleteSessionButton sessionId={s.id} sessionCode={s.session_code} />
+                  {source === 'appsheet'
+                    ? <AppsheetDeleteSessionButton objectId={s.id} sessionCode={s.session_code} />
+                    : <DeleteSessionButton sessionId={s.id} sessionCode={s.session_code} />}
                 </td>
               </tr>
             ))}
-            {!sessions?.length && (
+            {!sessions.length && (
               <tr>
                 <td colSpan={8} className="px-5 py-8 text-center text-gray-400">No sessions</td>
               </tr>

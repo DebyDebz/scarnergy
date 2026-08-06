@@ -5,6 +5,7 @@ import { appsheetFind } from '@/lib/appsheet/client';
 import { mapObjectenRow } from '@/lib/appsheet/mappers';
 import { EnergyLabelBadge } from '@/components/buildings/EnergyLabelBadge';
 import { DeleteBuildingButton } from '@/components/buildings/DeleteBuildingButton';
+import { AppsheetDeleteBuildingButton } from '@/components/buildings/AppsheetDeleteBuildingButton';
 import { Search, Plus } from 'lucide-react';
 import type { BuildingSummary, UserProfile } from '@/lib/types';
 import { fmtDate } from '@/lib/format';
@@ -36,6 +37,16 @@ export default async function BuildingsPage({ searchParams }: Props) {
   const q = searchParams.q ?? '';
   const source = await getServerDataSource();
 
+  // Admin-ness is a ScanergyV2 (Supabase) concept regardless of which data
+  // source is active — the logged-in user's role always comes from here.
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  const profileResult = await (supabase.from('user_profiles') as any)
+    .select('role')
+    .eq('id', user!.id)
+    .single() as unknown as { data: Pick<UserProfile, 'role'> | null };
+  const isAdmin = profileResult.data?.role === 'admin';
+
   if (source === 'appsheet') {
     const [objectenResult, bagResult] = await Promise.all([
       appsheetFind('Objecten'),
@@ -54,17 +65,8 @@ export default async function BuildingsPage({ searchParams }: Props) {
         b.city.toLowerCase().includes(needle)
       );
     }
-    return <BuildingsTable buildings={buildings} q={q} isAdmin={false} source={source} />;
+    return <BuildingsTable buildings={buildings} q={q} isAdmin={isAdmin} source={source} />;
   }
-
-  const supabase = await createClient();
-
-  const { data: { user } } = await supabase.auth.getUser();
-  const profileResult = await (supabase.from('user_profiles') as any)
-    .select('role')
-    .eq('id', user!.id)
-    .single() as unknown as { data: Pick<UserProfile, 'role'> | null };
-  const isAdmin = profileResult.data?.role === 'admin';
 
   let query = supabase.from('building_summary').select('*').order('city');
   if (q) query = query.or(`reference_code.ilike.%${q}%,street.ilike.%${q}%,city.ilike.%${q}%`);
@@ -153,7 +155,9 @@ function BuildingsTable({ buildings, q, isAdmin, source }: TableProps) {
                 </td>
                 {isAdmin && (
                   <td className="px-5 py-3 text-right">
-                    <DeleteBuildingButton id={b.id} label={b.reference_code} />
+                    {source === 'appsheet'
+                      ? <AppsheetDeleteBuildingButton id={b.id} label={b.reference_code} />
+                      : <DeleteBuildingButton id={b.id} label={b.reference_code} />}
                   </td>
                 )}
               </tr>
