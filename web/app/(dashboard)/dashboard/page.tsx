@@ -18,7 +18,13 @@ type OrgWithStats = {
   inspection_sessions: { count: number }[];
 };
 
-export const revalidate = 60;
+// Must be 0, not a positive interval: this page reads the data-source cookie
+// (getServerDataSource()) and OpenNext's Cloudflare incremental cache keys
+// on URL only, not on cookies — a positive revalidate window caches the
+// rendered response for whichever source happened to render it, and every
+// visitor gets that stale source until the window expires (see the
+// organizations page, which hit this same bug first).
+export const revalidate = 0;
 
 // AppSheet-sourced dashboard mirrors the Scanergy KPI layout with real
 // AppSheet-backed numbers: active sessions and total buildings both derive

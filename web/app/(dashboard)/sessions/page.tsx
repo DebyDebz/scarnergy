@@ -10,7 +10,11 @@ import { Search } from 'lucide-react';
 import type { SessionSummary } from '@/lib/types';
 import { fmtDateTimeFull } from '@/lib/format';
 
-export const revalidate = 30;
+// Must be 0 — see the identical fix + rationale on the dashboard page
+// (app/(dashboard)/dashboard/page.tsx): a positive revalidate window lets
+// OpenNext's Cloudflare incremental cache serve a stale data source to
+// every visitor, since it keys on URL only, not on the source cookie.
+export const revalidate = 0;
 
 interface Props {
   searchParams: { status?: string; q?: string };
