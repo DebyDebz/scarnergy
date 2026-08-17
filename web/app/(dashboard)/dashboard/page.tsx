@@ -20,32 +20,42 @@ type OrgWithStats = {
 
 export const revalidate = 60;
 
-// AppSheet-sourced dashboard only shows KPIs with a real AppSheet source:
-// org/building/inspector counts. Anomalies/measurements have no AppSheet
-// equivalent — shown as "—" rather than a fabricated 0. Recent sessions
-// reuses the same Objecten-as-pseudo-session mapping the /sessions page
-// already relies on, rendered in the identical table used by Scanergy mode
-// (rows link to /buildings/[id] since there's no separate session record).
+// AppSheet-sourced dashboard mirrors the Scanergy KPI layout with real
+// AppSheet-backed numbers: active sessions and total buildings both derive
+// from Objecten (same active/completed status logic as the /sessions
+// page), measurements today comes from the real Metingen table. Anomalies
+// has no AppSheet equivalent (Metingen carries no anomaly flag) — shown as
+// "—" rather than a fabricated 0. Recent sessions reuses the same
+// Objecten-as-pseudo-session mapping the /sessions page already relies on,
+// rendered in the identical table used by Scanergy mode (rows link to
+// /buildings/[id] since there's no separate session record).
 async function AppsheetDashboardPage() {
-  const [bedrijvenResult, objectenResult, inspecteursResult] = await Promise.all([
+  const [bedrijvenResult, objectenResult, inspecteursResult, metingenResult] = await Promise.all([
     appsheetFind('Bedrijven'),
     appsheetFind('Objecten'),
     appsheetFind('Inspecteurs'),
+    appsheetFind('Metingen'),
   ]);
   const orgs = (Array.isArray(bedrijvenResult) ? bedrijvenResult : []).map(mapBedrijvenRow);
   const totalBuildings = Array.isArray(objectenResult) ? objectenResult.length : 0;
-  const totalInspecteurs = Array.isArray(inspecteursResult) ? inspecteursResult.length : 0;
 
   const inspecteurNameById = new Map(
     (Array.isArray(inspecteursResult) ? inspecteursResult : [])
       .map((r: Record<string, unknown>) => [String(r['Inspecteur ID']), String(r['Inspecteur Naam'] ?? '')])
   );
-  const recentSessions = (Array.isArray(objectenResult) ? objectenResult : [])
-    .map((row: Record<string, unknown>) => mapObjectenToSessionSummary(row, inspecteurNameById))
+  const allSessions = (Array.isArray(objectenResult) ? objectenResult : [])
+    .map((row: Record<string, unknown>) => mapObjectenToSessionSummary(row, inspecteurNameById));
+  const activeSessions = allSessions.filter(s => s.status === 'active').length;
+  const recentSessions = [...allSessions]
     .sort((a, b) =>
       (parseAppsheetDateTime(b.started_at)?.getTime() ?? 0) - (parseAppsheetDateTime(a.started_at)?.getTime() ?? 0)
     )
     .slice(0, 10);
+
+  const todayISODate = new Date().toISOString().slice(0, 10);
+  const measurementsToday = (Array.isArray(metingenResult) ? metingenResult : [])
+    .filter((r: Record<string, unknown>) => parseAppsheetDateTime(r['Tijdstip'])?.toISOString().slice(0, 10) === todayISODate)
+    .length;
 
   return (
     <div className="space-y-6">
@@ -55,10 +65,10 @@ async function AppsheetDashboardPage() {
       </div>
 
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+        <KpiCard label="Active sessions" value={activeSessions} sub="right now" icon={Activity} color="indigo" />
         <KpiCard label="Total buildings" value={totalBuildings} sub="Objecten" icon={Building2} color="emerald" />
-        <KpiCard label="Inspecteurs" value={totalInspecteurs} sub="AppSheet" icon={Activity} color="indigo" />
         <KpiCard label="Anomalies (7d)" value="—" sub="not available" icon={TriangleAlert} color="amber" />
-        <KpiCard label="Measurements today" value="—" sub="not available" icon={Ruler} color="rose" />
+        <KpiCard label="Measurements today" value={measurementsToday} sub="Metingen" icon={Ruler} color="rose" />
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200">
