@@ -12,7 +12,6 @@
 // regardless of which page the user is on.
 
 import { useEffect, useState, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { useDataSource, type DataSource } from '@/lib/dataSource/DataSourceContext';
 
@@ -25,23 +24,24 @@ type HealthState = 'idle' | 'checking' | 'ok' | 'error';
 
 export function DataSourceToggle() {
   const { source, setSource } = useDataSource();
-  const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
   // Server components (buildings/organizations/dashboard/sessions/
   // measurements/users lists) read the active source from a cookie (see
   // lib/dataSource/serverSource.ts) and only re-run on the next request —
-  // flipping the toggle alone doesn't re-fetch them. router.refresh()
-  // re-runs the current route's server components against the
-  // now-updated cookie without a full page reload. Wrapped in
-  // useTransition so the admin gets a visible "switching…" state instead
-  // of the toggle looking unresponsive while those server components
-  // re-fetch (AppSheet in particular can be noticeably slower).
+  // flipping the toggle alone doesn't re-fetch them. router.refresh() only
+  // re-runs the CURRENT route — it does not invalidate Next's client-side
+  // Router Cache for other routes already prefetched via sidebar/nav
+  // <Link>s (verified: toggle, then click Dashboard in the sidebar, and
+  // it served the stale cached render from before the toggle). A full
+  // reload is the only way to guarantee every route re-fetches against
+  // the new cookie, so that's used instead of router.refresh() despite
+  // losing the softer transition.
   function handleSelect(next: DataSource) {
     if (next === source) return;
     setSource(next);
     startTransition(() => {
-      router.refresh();
+      window.location.reload();
     });
   }
   // ScanergyV2 reads straight from the DB the rest of this dashboard already
