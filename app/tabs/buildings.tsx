@@ -7,9 +7,12 @@ import { useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase, BuildingSummary } from "../../lib/supabase";
 import { useAuthStore } from "../../store/authStore";
+import { useDataSourceStore } from "../../store/dataSourceStore";
+import { fetchAppsheetBuildings, materializeAppsheetBuilding, AppsheetProxyError } from "../../lib/appsheetProxy";
 
 export default function BuildingsScreen() {
   const { profile } = useAuthStore();
+  const { source }  = useDataSourceStore();
   const router      = useRouter();
   const [buildings,  setBuildings]  = useState<BuildingSummary[]>([]);
   const [loading,    setLoading]    = useState(true);
@@ -20,6 +23,13 @@ export default function BuildingsScreen() {
   const load = useCallback(() => {
     if (!profile) { setLoading(false); return; }
     setLoading(true);
+    if (source === "appsheet") {
+      fetchAppsheetBuildings()
+        .then((data) => { setBuildings(data as unknown as BuildingSummary[]); setError(null); })
+        .catch((e) => setError(e instanceof AppsheetProxyError ? e.message : "Could not load AppSheet buildings."))
+        .finally(() => setLoading(false));
+      return;
+    }
     supabase
       .from("building_summary")
       .select("*")
@@ -30,7 +40,7 @@ export default function BuildingsScreen() {
         else setBuildings((data ?? []) as BuildingSummary[]);
         setLoading(false);
       });
-  }, [profile]);
+  }, [profile, source]);
 
   // Refresh every time the tab comes into focus (e.g. after the inspection flow
   // creates zones/elements and the user returns to this screen).
@@ -47,11 +57,26 @@ export default function BuildingsScreen() {
   const startInspection = useCallback(async (building: BuildingSummary) => {
     if (!profile) return;
     setStarting(building.id);
+
+    // AppSheet buildings aren't Supabase rows — the whole session/zone/
+    // element flow below is FK-anchored to a real buildings.id, so a
+    // "shadow" row gets materialized (or reused, if already done) first.
+    let buildingId = building.id;
+    if (source === "appsheet") {
+      try {
+        buildingId = await materializeAppsheetBuilding(building.id);
+      } catch (e) {
+        setStarting(null);
+        Alert.alert("Could not start inspection", e instanceof AppsheetProxyError ? e.message : "Server error — please try again.");
+        return;
+      }
+    }
+
     const { data, error } = await supabase
       .from("inspection_sessions")
       .insert({
         org_id:       profile.org_id,
-        building_id:  building.id,
+        building_id:  buildingId,
         inspector_id: profile.id,
       })
       .select()
@@ -59,8 +84,8 @@ export default function BuildingsScreen() {
 
     setStarting(null);
     if (error) { Alert.alert("Could not start inspection", error.message || "Server error — please try again."); return; }
-    router.push(`/tabs/sessions/flow?id=${data.id}&buildingId=${building.id}`);
-  }, [profile, router]);
+    router.push(`/tabs/sessions/flow?id=${data.id}&buildingId=${buildingId}`);
+  }, [profile, router, source]);
 
   if (loading && buildings.length === 0) return <ActivityIndicator style={styles.loader} color="#1E3A5F" />;
   if (error)   return (

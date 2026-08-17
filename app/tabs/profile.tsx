@@ -6,6 +6,7 @@ import { Ionicons } from "@expo/vector-icons";
 import Constants from "expo-constants";
 import { supabase } from "../../lib/supabase";
 import { useAuthStore } from "../../store/authStore";
+import { useDataSourceStore } from "../../store/dataSourceStore";
 
 const ROLE_LABELS: Record<string, string> = {
   inspector:    "Inspector",
@@ -16,6 +17,7 @@ const ROLE_LABELS: Record<string, string> = {
 
 export default function Profile() {
   const { profile, user, signOut } = useAuthStore();
+  const { source, setSource } = useDataSourceStore();
   const [orgName,     setOrgName]     = useState<string | null>(null);
   const [name,        setName]        = useState(profile?.full_name ?? "");
   const [savingName,  setSavingName]  = useState(false);
@@ -128,6 +130,32 @@ export default function Profile() {
         </View>
       </View>
 
+      {/* Data source */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Data Source</Text>
+        <View style={styles.card}>
+          <Text style={styles.fieldValue}>
+            {source === "appsheet"
+              ? "Buildings load from AppSheet. Closed sessions export their zone/wall dimensions back to AppSheet."
+              : "Buildings and sessions use Scanergy (Supabase) as usual."}
+          </Text>
+          <View style={styles.sourceToggleRow}>
+            <TouchableOpacity
+              style={[styles.sourceOption, source === "scanergy" && styles.sourceOptionActive]}
+              onPress={() => setSource("scanergy")}
+            >
+              <Text style={[styles.sourceOptionText, source === "scanergy" && styles.sourceOptionTextActive]}>Scanergy</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.sourceOption, source === "appsheet" && styles.sourceOptionActive]}
+              onPress={() => setSource("appsheet")}
+            >
+              <Text style={[styles.sourceOptionText, source === "appsheet" && styles.sourceOptionTextActive]}>AppSheet</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+
       {/* App info + sign out */}
       <View style={styles.section}>
         <View style={styles.card}>
@@ -177,4 +205,10 @@ const styles = StyleSheet.create({
                   backgroundColor: "#FDEDEC", borderRadius: 12, paddingVertical: 14, marginTop: 12,
                   borderWidth: 1, borderColor: "#F5B7B1" },
   signOutText:  { color: "#C0392B", fontWeight: "700", fontSize: 15 },
+  sourceToggleRow:      { flexDirection: "row", gap: 8, marginTop: 14 },
+  sourceOption:         { flex: 1, height: 40, borderRadius: 8, borderWidth: 1, borderColor: "#DDD",
+                          alignItems: "center", justifyContent: "center" },
+  sourceOptionActive:   { backgroundColor: "#1E3A5F", borderColor: "#1E3A5F" },
+  sourceOptionText:     { color: "#1E3A5F", fontWeight: "700", fontSize: 14 },
+  sourceOptionTextActive: { color: "#FFF" },
 });

@@ -1,0 +1,8 @@
+# Forces cloudflared to ignore ~/.cloudflared/config.yml (a different,
+# already-in-use named tunnel for ai-server/grafana/supabase, with a
+# catch-all `service: http_status:404` ingress rule) when spawning an
+# anonymous Expo dev-server quick tunnel. Without --config pointing here,
+# cloudflared silently loads that unrelated config and every dev-tunnel
+# request gets swallowed by its catch-all 404 instead of ever reaching
+# Metro — see scripts/patch-ngrok.js.
+{}

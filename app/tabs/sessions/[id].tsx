@@ -9,6 +9,7 @@ import { useBLE } from "../../../lib/BLEContext";
 import { buildVabiXml } from "@scarnergy/opname-calc";
 import { elementTypeLabel } from "../../../lib/elementTypes";
 import { FloorPlanReview } from "../../../components/inspection/FloorPlanReview";
+import { pushSessionResultsToAppsheet } from "../../../lib/appsheetProxy";
 
 export default function SessionDetailScreen() {
   const { id: sessionId } = useLocalSearchParams<{ id: string }>();
@@ -109,6 +110,46 @@ export default function SessionDetailScreen() {
 
   // ── Session lifecycle actions ──────────────────────────────────────────────
 
+  // Best-effort export of this session's finished zone/gevel/opening
+  // dimensions to AppSheet, IF this building was originally sourced from
+  // AppSheet (buildings.appsheet_object_id set — see the "materialize"
+  // step in tabs/buildings.tsx). Supabase is always the write of record;
+  // this never blocks or reverts session close on failure.
+  const syncToAppsheetIfLinked = useCallback(async (buildingId: string) => {
+    const buildingRes = await (supabase.from("buildings") as any)
+      .select("appsheet_object_id")
+      .eq("id", buildingId)
+      .maybeSingle();
+    if (!buildingRes.data?.appsheet_object_id) return;
+
+    try {
+      const zonesRes = await supabase.from("zones").select("*").eq("building_id", buildingId).eq("is_active", true);
+      const zoneIds = (zonesRes.data ?? []).map((z: Zone) => z.id);
+      const elementsRes = zoneIds.length
+        ? await supabase.from("building_elements").select("*").in("zone_id", zoneIds).eq("is_active", true)
+        : { data: [] };
+      const elementIds = new Set((elementsRes.data ?? []).map((e: BuildingElement) => e.id));
+      const openingsRes = zoneIds.length
+        ? await supabase.from("openings").select("*").eq("is_active", true)
+        : { data: [] };
+      const openings = (openingsRes.data ?? []).filter((o: any) => elementIds.has(o.element_id));
+
+      const results = await pushSessionResultsToAppsheet({
+        buildingId,
+        zones: zonesRes.data ?? [],
+        elements: elementsRes.data ?? [],
+        openings,
+      });
+      const failed = results.filter(r => r.status === "failed");
+      if (failed.length) {
+        console.warn("[AppSheet sync] some rows failed:", failed);
+      }
+    } catch (e: any) {
+      console.warn("[AppSheet sync] session-close export failed:", e.message);
+      Alert.alert("Saved locally", "Your session is saved, but syncing results to AppSheet failed. You can retry later.");
+    }
+  }, []);
+
   const closeSession = useCallback(() => {
     if (!sessionId || !session || session.status !== "active") return;
     Alert.alert(
@@ -128,6 +169,7 @@ export default function SessionDetailScreen() {
                 body: { session_id: sessionId },
               });
               if (fnErr) throw fnErr;
+              if (session.building_id) await syncToAppsheetIfLinked(session.building_id);
               loadSession();
               router.push({ pathname: "/tabs/sessions/results", params: { id: sessionId } });
             } catch (fnEx: any) {
@@ -139,6 +181,7 @@ export default function SessionDetailScreen() {
               });
               if (rpcErr) Alert.alert("Error", rpcErr.message);
               else {
+                if (session.building_id) await syncToAppsheetIfLinked(session.building_id);
                 loadSession();
                 router.push({ pathname: "/tabs/sessions/results", params: { id: sessionId } });
               }
@@ -149,7 +192,7 @@ export default function SessionDetailScreen() {
         },
       ]
     );
-  }, [sessionId, session, loadSession]);
+  }, [sessionId, session, loadSession, syncToAppsheetIfLinked]);
 
   const pauseSession = useCallback(() => {
     if (!sessionId || !session || session.status !== "active") return;
