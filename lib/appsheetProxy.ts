@@ -103,6 +103,17 @@ export async function fetchAppsheetSessions(buildingId?: string): Promise<Appshe
   return data.sessions;
 }
 
+export interface AppsheetDashboardStats {
+  activeSessions: number;
+  totalBuildings: number;
+  measurementsToday: number;
+  recentSessions: AppsheetSessionSummary[];
+}
+
+export async function fetchAppsheetDashboardStats(): Promise<AppsheetDashboardStats> {
+  return callProxy<AppsheetDashboardStats>("/api/appsheet/mobile/dashboard-stats");
+}
+
 export async function materializeAppsheetBuilding(objectId: string): Promise<string> {
   const data = await callProxy<{ id: string }>("/api/appsheet/mobile/buildings", { action: "materialize", objectId });
   return data.id;

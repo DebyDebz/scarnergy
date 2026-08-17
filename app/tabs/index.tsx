@@ -1,14 +1,17 @@
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { View, Text, ScrollView, StyleSheet, RefreshControl, TouchableOpacity } from "react-native";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
 import { useAuthStore } from "../../store/authStore";
+import { useDataSourceStore } from "../../store/dataSourceStore";
+import { fetchAppsheetDashboardStats, AppsheetProxyError } from "../../lib/appsheetProxy";
 import { useSyncQueue } from "../../hooks/useSyncQueue";
 import { useBLE } from "../../lib/BLEContext";
 
 export default function Dashboard() {
   const { profile } = useAuthStore();
+  const { source }  = useDataSourceStore();
   const { pendingCount, drain } = useSyncQueue();
   const { isConnected, state: bleState, deviceName, batteryLevel } = useBLE();
   const router         = useRouter();
@@ -16,8 +19,23 @@ export default function Dashboard() {
   const [recentSessions, setRecentSessions] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
 
-  const load = async () => {
+  // useFocusEffect (not a plain mount-only effect) so this refetches every
+  // time the Dashboard tab regains focus — including right after switching
+  // the AppSheet/ScanergyV2 toggle on the Profile tab and tabbing back here.
+  const load = useCallback(async () => {
     if (!profile) return;
+
+    if (source === "appsheet") {
+      try {
+        const data = await fetchAppsheetDashboardStats();
+        setStats({ activeSessions: data.activeSessions, buildings: data.totalBuildings, measurements: data.measurementsToday });
+        setRecentSessions(data.recentSessions);
+      } catch (e) {
+        console.warn("[Dashboard]", e instanceof AppsheetProxyError ? e.message : "Could not load AppSheet dashboard.");
+      }
+      return;
+    }
+
     const [sessRes, buildRes, measRes, recentRes] = await Promise.all([
       supabase.from("inspection_sessions").select("id", { count: "exact" }).eq("org_id", profile.org_id).eq("status", "active"),
       supabase.from("buildings").select("id", { count: "exact" }).eq("org_id", profile.org_id),
@@ -30,9 +48,9 @@ export default function Dashboard() {
       measurements:   measRes.count ?? 0,
     });
     setRecentSessions(recentRes.data ?? []);
-  };
+  }, [profile, source]);
 
-  useEffect(() => { load(); }, [profile]);
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 
