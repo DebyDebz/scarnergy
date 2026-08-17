@@ -1,6 +1,7 @@
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase-server';
+import { getServerDataSource } from '@/lib/dataSource/serverSource';
 import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
 import { LiveFeed } from '@/components/sessions/LiveFeed';
 import { MeasurementChart } from '@/components/charts/MeasurementChart';
@@ -19,6 +20,16 @@ interface Props {
 }
 
 export default async function SessionDetailPage({ params, searchParams }: Props) {
+  // AppSheet has no repeatable-session concept — /sessions already treats
+  // each Objecten row as a pseudo-session and links straight to
+  // /buildings/[id] (see sessions/page.tsx), so params.id here is an Object
+  // ID, not a session_summary UUID. Redirect rather than 404 in case of a
+  // stale bookmark/link from before that list-page fix, or a direct visit.
+  const source = await getServerDataSource();
+  if (source === 'appsheet') {
+    redirect(`/buildings/${params.id}`);
+  }
+
   const supabase = await createClient();
   const anomaliesOnly = searchParams.anomalies === '1';
 

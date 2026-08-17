@@ -3,7 +3,11 @@ import { notFound } from 'next/navigation';
 import { createClient } from '@/lib/supabase-server';
 import { getServerDataSource } from '@/lib/dataSource/serverSource';
 import { appsheetFind } from '@/lib/appsheet/client';
-import { mapObjectenRow } from '@/lib/appsheet/mappers';
+import {
+  mapObjectenRow, mapVerdiepingRow, mapRekenzoneRow, mapGevelRow, mapDakRow,
+  mapVloerRow, mapInstallatieRow, mapTransparantDeelRow, firstZoneIdForRekenzone,
+  escapeForSelector,
+} from '@/lib/appsheet/mappers';
 import { EnergyLabelBadge } from '@/components/buildings/EnergyLabelBadge';
 import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
 import { FloorPlanButton } from '@/components/buildings/FloorPlanButton';
@@ -13,6 +17,9 @@ import { BuildingExportButtons } from '@/components/buildings/BuildingExportButt
 import { BagPanel } from '@/components/buildings/BagPanel';
 import { BuildingContactCard } from '@/components/buildings/BuildingContactCard';
 import { MapPanel } from '@/components/buildings/MapPanel';
+import { AppsheetZoneEditButton } from '@/components/buildings/AppsheetZoneEditButton';
+import { AppsheetElementEditPanel } from '@/components/elements/AppsheetElementEditPanel';
+import { geocodeAddress } from '@/lib/geocode';
 import { ZoneEditButton } from '@/components/buildings/ZoneEditButton';
 import { ElementTypeSections, type ElementWithRelations } from '@/components/elements/ElementTypeSections';
 import { EnergyLabelTrendChart } from '@/components/charts/EnergyLabelTrendChart';
@@ -487,17 +494,28 @@ export default async function BuildingDetailPage({ params }: Props) {
   );
 }
 
-// AppSheet-sourced building detail — a deliberately reduced view. Only
-// organisations/buildings/contacts have an AppSheet-side implementation in
-// this build (see docs/APPSHEET_SCANERGYV2_TOGGLE_ANALYSIS.md §6); zones,
-// elements, sessions, rekenzones, facade photos, floor plans, and energy
-// label history have no AppSheet-side read path yet, so this shows an
-// explicit notice instead of querying Supabase with an AppSheet Object ID
-// (which would silently return "no data" rather than "not supported").
+// AppSheet-sourced building detail. Organisations/buildings/contacts and now
+// zones/elements/rekenzones have an AppSheet-side read path (see
+// docs/APPSHEET_SCANERGYV2_TOGGLE_ANALYSIS.md §6 for build history); facade
+// photos, floor plans (AppSheet hosts sketches in its own file storage, not
+// signable from here), energy label history, and inspection sessions have no
+// AppSheet-side equivalent at all, so those stay an explicit notice instead
+// of silently showing "no data".
 async function AppsheetBuildingDetail({ objectId }: { objectId: string }) {
-  const [objectenResult, bagResult] = await Promise.all([
-    appsheetFind('Objecten', `FILTER(Objecten, [Object ID] = "${objectId.replace(/"/g, '\\"')}")`),
-    appsheetFind('BAG Data', `FILTER("BAG Data", [Object ID] = "${objectId.replace(/"/g, '\\"')}")`),
+  const idFilter = escapeForSelector(objectId);
+  const [
+    objectenResult, bagResult, verdiepingenResult, rekenzonesResult,
+    gevelsResult, dakenResult, vloerenResult, installatiesResult, openingenResult,
+  ] = await Promise.all([
+    appsheetFind('Objecten', `FILTER(Objecten, [Object ID] = "${idFilter}")`),
+    appsheetFind('BAG Data', `FILTER("BAG Data", [Object ID] = "${idFilter}")`),
+    appsheetFind('Verdiepingen', `FILTER(Verdiepingen, [Object ID] = "${idFilter}")`),
+    appsheetFind('Rekenzones', `FILTER(Rekenzones, [Object ID] = "${idFilter}")`),
+    appsheetFind('Gevels', `FILTER(Gevels, [Object ID virtual] = "${idFilter}")`),
+    appsheetFind('Daken', `FILTER(Daken, [Object ID virtual] = "${idFilter}")`),
+    appsheetFind('Vloeren', `FILTER(Vloeren, [Object ID virtual] = "${idFilter}")`),
+    appsheetFind('Installaties', `FILTER(Installaties, [Object ID virtual] = "${idFilter}")`),
+    appsheetFind('Transparante_Delen', `FILTER(Transparante_Delen, [Object ID virtual] = "${idFilter}")`),
   ]);
   const row = Array.isArray(objectenResult) ? objectenResult[0] : undefined;
   if (!row) notFound();
@@ -506,14 +524,63 @@ async function AppsheetBuildingDetail({ objectId }: { objectId: string }) {
   const building = mapObjectenRow(row, bagRow);
   const fullAddress = `${building.street} ${building.house_number}, ${building.postal_code} ${building.city}`.trim();
 
-  const NOT_AVAILABLE = [
-    'Zones & elements (Verdiepingen / Daken / Gevels / Vloeren / Installaties)',
-    'Rekenzones',
-    'Facade photos',
-    'Floor plans',
-    'Energy label history',
-    'Inspection sessions',
-  ];
+  // No AppSheet column caches resolved coordinates, so geocode live on every
+  // render instead of the Scanergy button+persist flow (see lib/geocode.ts).
+  let coords: { lat: number; lon: number } | null = null;
+  try {
+    coords = await geocodeAddress(building.street, building.house_number, null, building.postal_code, building.city);
+  } catch {
+    coords = null;
+  }
+
+  const rekenzoneRows: Record<string, unknown>[] = Array.isArray(rekenzonesResult) ? rekenzonesResult : [];
+  const rekenzones: Rekenzone[] = rekenzoneRows.map(mapRekenzoneRow);
+  // Daken/Vloeren/Installaties carry a Rekenzone ID but no Verdieping ID of
+  // their own (unlike Gevels) — resolve a best-effort zone via the
+  // rekenzone's first related floor (see firstZoneIdForRekenzone).
+  const zoneIdByRekenzone = new Map<string, string>(
+    rekenzoneRows.map(r => [String(r['Rekenzone ID'] ?? ''), firstZoneIdForRekenzone(r)])
+  );
+
+  const zones: Zone[] = (Array.isArray(verdiepingenResult) ? verdiepingenResult : []).map(mapVerdiepingRow);
+
+  const gevels = (Array.isArray(gevelsResult) ? gevelsResult : []).map(mapGevelRow);
+  const daken = (Array.isArray(dakenResult) ? dakenResult : []).map((r: Record<string, unknown>) =>
+    mapDakRow(r, zoneIdByRekenzone.get(String(r['Rekenzone ID'] ?? '')) ?? ''));
+  const vloeren = (Array.isArray(vloerenResult) ? vloerenResult : []).map((r: Record<string, unknown>) =>
+    mapVloerRow(r, zoneIdByRekenzone.get(String(r['Rekenzone ID'] ?? '')) ?? ''));
+  const installaties = (Array.isArray(installatiesResult) ? installatiesResult : []).map((r: Record<string, unknown>) =>
+    mapInstallatieRow(r, zoneIdByRekenzone.get(String(r['Rekenzone ID'] ?? '')) ?? ''));
+  const elements: BuildingElement[] = [...gevels, ...daken, ...vloeren, ...installaties];
+
+  const openings: Opening[] = (Array.isArray(openingenResult) ? openingenResult : []).map(mapTransparantDeelRow);
+  const openingsByElement = openings.reduce<Record<string, Opening[]>>((acc, o) => {
+    (acc[o.element_id] ??= []).push(o);
+    return acc;
+  }, {});
+
+  type ZoneWithElements = Zone & { elements: ElementWithRelations[] };
+  const zonesWithElements: ZoneWithElements[] = zones.map(z => ({
+    ...z,
+    elements: elements
+      .filter(e => e.zone_id === z.id)
+      .map(e => ({ ...e, openings: openingsByElement[e.id] ?? [], dakkapellen: [] })),
+  }));
+
+  const floorAreas = areaByFloor(zones);
+  const totalArea = totalZoneArea(zones);
+
+  const rzZoneIds = new Map<string, Set<string>>(
+    rekenzones.map(rz => [rz.id, new Set(zones.filter(z => z.rekenzone_id === rz.id).map(z => z.id))])
+  );
+  const rzCountRows = rekenzones.map(rz => {
+    const zIds = rzZoneIds.get(rz.id)!;
+    const counts = { gevel: 0, dak: 0, vloer: 0, installatie: 0 } as Record<string, number>;
+    for (const e of elements) {
+      if (zIds.has(e.zone_id) && counts[e.element_type] !== undefined) counts[e.element_type]++;
+    }
+    return { rz, counts };
+  });
 
   return (
     <div className="space-y-6 max-w-5xl">
@@ -521,8 +588,15 @@ async function AppsheetBuildingDetail({ objectId }: { objectId: string }) {
         <Link href="/buildings" className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 mb-3">
           <ArrowLeft className="w-4 h-4" /> Buildings
         </Link>
-        <h1 className="text-2xl font-bold text-gray-900">{fullAddress}</h1>
-        <p className="text-sm text-gray-500 font-mono mt-0.5">{building.reference_code}</p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">{fullAddress}</h1>
+            <p className="text-sm text-gray-500 font-mono mt-0.5">{building.reference_code}</p>
+          </div>
+          <div className="shrink-0">
+            <BuildingExportButtons buildingId={objectId} buildingCode={building.reference_code} />
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -530,6 +604,7 @@ async function AppsheetBuildingDetail({ objectId }: { objectId: string }) {
           { label: 'Type', value: building.building_type || '—' },
           { label: 'Built', value: building.construction_year || '—' },
           { label: 'Floor area', value: building.gross_floor_area_m2 ? `${building.gross_floor_area_m2} m²` : '—' },
+          { label: 'Zones', value: zones.length },
         ].map(({ label, value }) => (
           <div key={label} className="bg-white border border-gray-200 rounded-xl p-4">
             <p className="text-xs text-gray-500 mb-1">{label}</p>
@@ -540,12 +615,109 @@ async function AppsheetBuildingDetail({ objectId }: { objectId: string }) {
 
       <BuildingContactCard buildingId={objectId} />
 
-      <div className="bg-white rounded-xl border border-gray-200 p-5">
-        <p className="text-sm font-medium text-amber-700 mb-2">Not available for AppSheet-sourced buildings yet</p>
-        <ul className="text-xs text-gray-500 list-disc list-inside space-y-1">
-          {NOT_AVAILABLE.map(item => <li key={item}>{item}</li>)}
-        </ul>
+      <BagPanel building={building} showActions={false} />
+
+      <MapPanel
+        building={{ id: objectId, latitude: coords?.lat ?? null, longitude: coords?.lon ?? null }}
+        showActions={false}
+      />
+
+      {zones.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200">
+          <div className="px-5 py-4 border-b border-gray-100">
+            <h2 className="font-semibold text-gray-900">Floor area</h2>
+          </div>
+          <table className="w-full text-sm">
+            <tbody className="divide-y divide-gray-50">
+              {floorAreas.map(f => (
+                <tr key={f.level}>
+                  <td className="px-5 py-2.5 text-gray-700">{f.name}</td>
+                  <td className="px-5 py-2.5 text-right text-gray-700">{fmtArea(f.area)}</td>
+                </tr>
+              ))}
+              <tr className="border-t border-gray-200 bg-gray-50">
+                <td className="px-5 py-2.5 font-semibold text-gray-900">Total</td>
+                <td className="px-5 py-2.5 text-right font-semibold text-gray-900">{fmtArea(totalArea)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {rekenzones.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200">
+          <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
+            <h2 className="font-semibold text-gray-900">
+              Rekenzones
+              <span className="ml-2 font-normal text-gray-400 text-sm">Calculation zones</span>
+            </h2>
+            <span className="bg-gray-200 text-gray-700 rounded-full px-2 py-0.5 text-[11px] font-semibold">
+              {rekenzones.length}
+            </span>
+          </div>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-xs text-gray-500 bg-gray-50 border-b border-gray-100 text-left">
+                <th className="px-5 py-3 font-medium">Naam</th>
+                <th className="px-5 py-3 font-medium">Gevels</th>
+                <th className="px-5 py-3 font-medium">Daken</th>
+                <th className="px-5 py-3 font-medium">Vloeren</th>
+                <th className="px-5 py-3 font-medium">Installaties</th>
+                <th className="px-5 py-3 font-medium">Notities</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {rzCountRows.map(({ rz, counts }) => (
+                <tr key={rz.id} className="hover:bg-gray-50">
+                  <td className="px-5 py-3 font-medium text-gray-800">{rz.name}</td>
+                  <td className="px-5 py-3 text-gray-700">Gevels ({counts.gevel})</td>
+                  <td className="px-5 py-3 text-gray-700">Daken ({counts.dak})</td>
+                  <td className="px-5 py-3 text-gray-700">Vloeren ({counts.vloer})</td>
+                  <td className="px-5 py-3 text-gray-700">Installaties ({counts.installatie})</td>
+                  <td className="px-5 py-3 text-gray-500">{rz.notes ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="bg-white rounded-xl border border-gray-200">
+        <div className="px-5 py-4 border-b border-gray-100">
+          <h2 className="font-semibold text-gray-900">Zones &amp; elements</h2>
+        </div>
+        <div className="divide-y divide-gray-100">
+          {zonesWithElements.map(zone => (
+            <details key={zone.id} className="group">
+              <summary className="flex items-center gap-3 px-5 py-3.5 cursor-pointer hover:bg-gray-50 list-none">
+                <ChevronDown className="w-4 h-4 text-gray-400 group-open:rotate-180 transition-transform" />
+                <span className="font-medium text-gray-800">{zone.name}</span>
+                <span className="ml-auto text-xs text-gray-500">{zone.elements.length} elements</span>
+                <span className="ml-2">
+                  <AppsheetZoneEditButton
+                    zoneId={zone.id}
+                    zoneName={zone.name}
+                    ceilingHeightM={zone.ceiling_height_m}
+                    grossAreaM2={zone.gross_area_m2}
+                    description={zone.description}
+                    elementCount={zone.elements.length}
+                  />
+                </span>
+              </summary>
+              <div className="px-5 pb-4 pt-2 space-y-3">
+                <p className="text-xs text-gray-500">
+                  Area: <span className="font-medium text-gray-700">{fmtArea(zone.gross_area_m2)}</span>
+                </p>
+                <ElementTypeSections elements={zone.elements} photoUrls={{}} EditPanel={AppsheetElementEditPanel} />
+              </div>
+            </details>
+          ))}
+          {!zones.length && (
+            <p className="px-5 py-6 text-sm text-gray-400 text-center">No zones defined</p>
+          )}
+        </div>
       </div>
+
     </div>
   );
 }

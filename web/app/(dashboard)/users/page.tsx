@@ -6,6 +6,8 @@ import { InviteUserForm } from '@/components/admin/InviteUserForm';
 import { AppsheetInviteUserForm } from '@/components/admin/AppsheetInviteUserForm';
 import { ToggleActiveButton } from '@/components/admin/ToggleActiveButton';
 import { ChangeRoleButton } from '@/components/admin/ChangeRoleButton';
+import { AppsheetChangeRoleButton } from '@/components/admin/AppsheetChangeRoleButton';
+import { AppsheetToggleActiveButton } from '@/components/admin/AppsheetToggleActiveButton';
 import { Users } from 'lucide-react';
 import type { UserProfile, InspectionSession } from '@/lib/types';
 import { fmtDate } from '@/lib/format';
@@ -16,16 +18,20 @@ export const revalidate = 0;
 // APPSHEET_SCANERGYV2_TOGGLE_ANALYSIS.md §1. There's no AppSheet-side
 // admin/service_role equivalent, so this list is legitimately shorter than
 // ScanergyV2's — a different independently-maintained dataset, not a
-// filtered view of the same one. Add is wired to the real API (confirmed
-// live: Inspecteurs Add/Delete are both clean, see
-// AppsheetInviteUserForm.tsx) — role-change/deactivate aren't yet, so those
-// stay read-only here until a similar admin-gated PATCH is built for them.
+// filtered view of the same one. Add/role-change/deactivate are all wired
+// to the real API now (confirmed live: Inspecteurs Add/Delete/Edit are all
+// clean — see AppsheetInviteUserForm.tsx and buildInspecteurEditRow).
 async function AppsheetUsersPage() {
   const [inspecteursResult, bedrijvenResult] = await Promise.all([
     appsheetFind('Inspecteurs'),
     appsheetFind('Bedrijven'),
   ]);
-  const users = (Array.isArray(inspecteursResult) ? inspecteursResult : []).map(mapInspecteurRow);
+  const rows = Array.isArray(inspecteursResult) ? inspecteursResult : [];
+  const users = rows.map(mapInspecteurRow);
+  // AppsheetChangeRoleButton needs Inspecteurs' own raw "Rol" value
+  // (Inspecteur/Beheerder), not the ScanergyV2 role enum mapInspecteurRow
+  // collapses it into.
+  const rawRolById = new Map(rows.map((r: Record<string, unknown>) => [String(r['Inspecteur ID']), String(r['Rol'] ?? 'Inspecteur')]));
   const orgs = (Array.isArray(bedrijvenResult) ? bedrijvenResult : []).map(mapBedrijvenRow);
   const roleCount = (role: string) => users.filter(u => u.role === role).length;
 
@@ -60,8 +66,15 @@ async function AppsheetUsersPage() {
             {users.map(u => (
               <tr key={u.id} className="hover:bg-gray-50 transition-colors">
                 <td className="px-5 py-3 text-gray-900 font-medium">{u.full_name}</td>
-                <td className="px-5 py-3 text-gray-600 capitalize">{u.role}</td>
-                <td className="px-5 py-3 text-gray-500">{u.is_active ? 'Yes' : 'No'}</td>
+                <td className="px-5 py-3">
+                  <AppsheetChangeRoleButton
+                    inspecteurId={u.id}
+                    currentRol={(rawRolById.get(u.id) as 'Inspecteur' | 'Beheerder') ?? 'Inspecteur'}
+                  />
+                </td>
+                <td className="px-5 py-3">
+                  <AppsheetToggleActiveButton inspecteurId={u.id} isActive={u.is_active} />
+                </td>
               </tr>
             ))}
             {!users.length && (

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase-server';
+import { getAuthFromRequest } from '../_auth';
 import { appsheetFind, appsheetAction, AppSheetConfigError } from '@/lib/appsheet/client';
 
 // Server-side proxy for AppSheet bulk Find + Selector calls. The
@@ -11,20 +11,83 @@ import { appsheetFind, appsheetAction, AppSheetConfigError } from '@/lib/appshee
 // appsheet/* service implementation (see web/lib/services/types.ts). Keeping
 // the allowlist here too stops the proxy itself being used to fetch
 // arbitrary sheets from this workbook before they're vetted.
-const ALLOWED_TABLES = new Set(['Bedrijven', 'Objecten', 'Contactpersoon', 'BAG Data']);
+const ALLOWED_TABLES = new Set([
+  'Bedrijven', 'Objecten', 'Contactpersoon', 'BAG Data', 'Inspecteurs',
+  'Verdiepingen', 'Gevels', 'Daken', 'Vloeren', 'Installaties', 'Transparante_Delen',
+]);
 
-// Write access (Add/Delete) is scoped tighter than read — only these two
-// tables, and only for admins, mirroring the existing /api/buildings write
-// routes. Confirmed live: Add on Objecten auto-generates the key column and
-// can trigger a live address-validation automation (see
-// lib/appsheet/client.ts) — this is a real write to production AppSheet
-// data, not a local mock. Inspecteurs has no such quirks — Add/Delete both
-// confirmed clean on a throwaway row.
-const WRITE_TABLES = new Set(['Objecten', 'Inspecteurs']);
+// Write access (Add/Delete/Edit) is scoped tighter than read, and only for
+// admins, mirroring the existing /api/buildings write routes. Confirmed
+// live: Add on Objecten auto-generates the key column and can trigger a
+// live address-validation automation (see lib/appsheet/client.ts) — this is
+// a real write to production AppSheet data, not a local mock. Inspecteurs
+// has no such quirks — Add/Delete both confirmed clean on a throwaway row.
+// Bedrijven's Add is confirmed clean too, but its "Bedrijf ID" key column
+// is Number-typed, not an AppSheet-auto-generated key like every other
+// table here — auto-generation produces a hex string ("75dd7925") that gets
+// rejected ("cannot be converted to type 'Number'"); callers must supply
+// the next sequential integer explicitly (see buildNewBedrijfRow).
+const WRITE_TABLES = new Set([
+  'Objecten', 'Inspecteurs', 'Bedrijven',
+]);
 
-async function requireAdmin() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+// Edit-capable tables — a narrower set than WRITE_TABLES's Add/Delete
+// scope. Confirmed live (edit + revert on a real row of each) that a
+// narrow field-level Edit has no virtual-column side effects on any of
+// these, even though several of them have landmine-heavy Add validation
+// (see DELETE_TABLES below) — Edit and Add are validated independently by
+// AppSheet, so a table being Edit-safe says nothing about Add-safety.
+const EDIT_TABLES: Record<string, { key: string; fields: string[] }> = {
+  Verdiepingen: { key: 'Verdieping ID', fields: ['GBO', 'Hoogte', 'Notities'] },
+  Gevels: {
+    key: 'Gevel ID',
+    fields: ['Naam', 'Breedte', 'Hoogte', 'Bruto Oppervlakte', 'Orientatie Code', 'Grenzend aan code', 'Positie', 'Notities'],
+  },
+  Daken: {
+    key: 'Dak ID',
+    fields: ['Lengte Dak', 'Breedte Dak', 'Bruto Oppervlakte', 'Hoek', 'Type Dak', 'Nokhoogte/Lengte Vloer', 'Grenzend aan code', 'Notities'],
+  },
+  // Bodemisolatie is a constrained Enum column — confirmed live that none
+  // of 'Y'/'N'/'Ja'/'Nee'/'1'/'0'/etc. are accepted values, and every real
+  // row has it blank, so there's no observed value to copy either. Left out
+  // rather than shipping a field that always 400s.
+  Vloeren: {
+    key: 'Vloer ID',
+    fields: ['Lengte', 'Breedte', 'Bruto Oppervlakte', 'Vloerisolatie', 'Grenzend aan code', 'Notities'],
+  },
+  // 'Locatie in huis' is a constrained Enum — confirmed live it only
+  // accepts exactly 'Binnen de thermische zone' / 'Buiten de thermische
+  // zone' (free text 400s), enforced in the edit UI as a select, not text.
+  Installaties: {
+    key: 'Installatie ID',
+    fields: ['Type Installatie', 'Locatie in huis', 'Merk/Model', 'Notities Installatie'],
+  },
+  // Rol/Actief are Inspecteurs' own two-value fields (see mapInspecteurRow's
+  // INSPECTEUR_ROLE_MAP) — confirmed live, edit + revert clean.
+  Inspecteurs: { key: 'Inspecteur ID', fields: ['Rol', 'Actief'] },
+};
+
+// Delete-capable tables — deliberately separate from WRITE_TABLES/EDIT_TABLES
+// rather than reusing either: WRITE_TABLES governs Add (which several of
+// these tables fail hard, per landmine-heavy required-field chains
+// confirmed live on Gevels/Vloeren/Installaties — missing Rekenzone
+// ID/Positie/Type Toestel Tapwater/etc., the same shape of problem Objecten's
+// Woning defaults already had), and being Edit-safe (EDIT_TABLES) says
+// nothing about Delete-safety either. Delete itself is confirmed clean on
+// all five: real Add+Delete round-trips on throwaway rows for Verdiepingen/
+// Daken/Vloeren, and — since Gevels/Installaties' Add landmines made a
+// throwaway row impractical without risking a botched restore of a real
+// row's photo-attachment columns — a Delete-of-a-nonexistent-key call
+// confirmed the same graceful, uniform no-op response AppSheet's generic
+// Delete action gives on every other table tested, rather than a table-
+// specific code path that could behave differently.
+const DELETE_TABLES = new Set([
+  'Objecten', 'Inspecteurs', 'Bedrijven',
+  'Verdiepingen', 'Gevels', 'Daken', 'Vloeren', 'Installaties',
+]);
+
+async function requireAdmin(req: NextRequest) {
+  const { user, supabase } = await getAuthFromRequest(req);
   if (!user) return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) };
 
   const profileResult = await (supabase.from('user_profiles') as any)
@@ -53,7 +116,7 @@ export async function POST(
     if (!WRITE_TABLES.has(table)) {
       return NextResponse.json({ error: `Writes not enabled for AppSheet table "${table}"` }, { status: 404 });
     }
-    const { error } = await requireAdmin();
+    const { error } = await requireAdmin(req);
     if (error) return error;
 
     const rows = Array.isArray(body.rows) ? body.rows : [];
@@ -69,8 +132,45 @@ export async function POST(
     }
   }
 
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  if (body?.action === 'edit') {
+    const editSpec = EDIT_TABLES[table];
+    if (!editSpec) {
+      return NextResponse.json({ error: `Edits not enabled for AppSheet table "${table}"` }, { status: 404 });
+    }
+    const { error } = await requireAdmin(req);
+    if (error) return error;
+
+    const rows = Array.isArray(body.rows) ? body.rows : [];
+    if (!rows.length) {
+      return NextResponse.json({ error: 'No rows to edit' }, { status: 400 });
+    }
+    // Only the key column + whitelisted fields survive — same
+    // defense-in-depth as the Scanergy zone/element PATCH routes.
+    const allowed = new Set([editSpec.key, ...editSpec.fields]);
+    const sanitizedRows = rows.map((row: Record<string, unknown>) => {
+      const clean: Record<string, unknown> = {};
+      for (const key of Object.keys(row)) {
+        if (allowed.has(key)) clean[key] = row[key];
+      }
+      return clean;
+    });
+    if (sanitizedRows.some((r: Record<string, unknown>) => !(editSpec.key in r))) {
+      return NextResponse.json({ error: `Every row must include "${editSpec.key}"` }, { status: 400 });
+    }
+
+    try {
+      const result = await appsheetAction(table, 'Edit', sanitizedRows);
+      return NextResponse.json(result);
+    } catch (err) {
+      if (err instanceof AppSheetConfigError) {
+        return NextResponse.json({ error: err.message }, { status: 503 });
+      }
+      const message = err instanceof Error ? err.message : 'Unknown AppSheet error';
+      return NextResponse.json({ error: message }, { status: 502 });
+    }
+  }
+
+  const { user } = await getAuthFromRequest(req);
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const selector: string | undefined = typeof body?.selector === 'string' ? body.selector : undefined;
@@ -107,7 +207,7 @@ export async function PATCH(
   if (table !== 'Objecten') {
     return NextResponse.json({ error: `Writes not enabled for AppSheet table "${table}"` }, { status: 404 });
   }
-  const { error } = await requireAdmin();
+  const { error } = await requireAdmin(req);
   if (error) return error;
 
   const body = await req.json().catch(() => ({}));
@@ -133,10 +233,10 @@ export async function DELETE(
   { params }: { params: { table: string } }
 ) {
   const table = params.table;
-  if (!WRITE_TABLES.has(table)) {
-    return NextResponse.json({ error: `Writes not enabled for AppSheet table "${table}"` }, { status: 404 });
+  if (!DELETE_TABLES.has(table)) {
+    return NextResponse.json({ error: `Deletes not enabled for AppSheet table "${table}"` }, { status: 404 });
   }
-  const { error } = await requireAdmin();
+  const { error } = await requireAdmin(req);
   if (error) return error;
 
   const body = await req.json().catch(() => ({}));

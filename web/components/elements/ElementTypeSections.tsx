@@ -26,12 +26,21 @@ export interface ElementWithRelations extends BuildingElement {
   dakkapellen: BuildingElement[];
 }
 
+type EditPanelProps = {
+  element: ElementWithRelations | null;
+  opening: Opening | null;
+  onClose: () => void;
+  onSaved: () => void;
+};
+
 interface Props {
   elements: ElementWithRelations[];
   /** element id → signed photo URLs (inspection-photos bucket) */
   photoUrls: Record<string, string[]>;
   /** hides the edit pencil + panel — used by the read-only rekenzone drill-down (GAP W5) */
   readOnly?: boolean;
+  /** swap the edit UI — AppsheetBuildingDetail passes AppsheetElementEditPanel */
+  EditPanel?: React.ComponentType<EditPanelProps>;
 }
 
 const SECTIONS: { type: string; nl: string; en: string }[] = [
@@ -335,7 +344,7 @@ function ChipRow({ label, options, active, onToggle }: {
   );
 }
 
-export function ElementTypeSections({ elements, photoUrls, readOnly = false }: Props) {
+export function ElementTypeSections({ elements, photoUrls, readOnly = false, EditPanel = ElementEditPanel }: Props) {
   const router = useRouter();
   const [editing, setEditing] = useState<ElementWithRelations | null>(null);
   const [grenstFilter, setGrenstFilter] = useState<string | null>(null);
@@ -423,7 +432,7 @@ export function ElementTypeSections({ elements, photoUrls, readOnly = false }: P
       ))}
 
       {!readOnly && editing && (
-        <ElementEditPanel
+        <EditPanel
           element={editing}
           opening={editing.element_type === 'transparant_deel' ? (editing.openings[0] ?? null) : null}
           onClose={() => setEditing(null)}

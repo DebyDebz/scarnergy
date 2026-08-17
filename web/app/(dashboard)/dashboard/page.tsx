@@ -2,11 +2,10 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase-server';
 import { getServerDataSource } from '@/lib/dataSource/serverSource';
 import { appsheetFind } from '@/lib/appsheet/client';
-import { mapBedrijvenRow } from '@/lib/appsheet/mappers';
+import { mapBedrijvenRow, mapObjectenToSessionSummary, parseAppsheetDateTime } from '@/lib/appsheet/mappers';
 import { KpiCard } from '@/components/dashboard/KpiCard';
 import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
 import { RecentOrgsPanel } from '@/components/dashboard/RecentOrgsPanel';
-import { AppsheetNotAvailable } from '@/components/shared/AppsheetNotAvailable';
 import { Activity, Building2, TriangleAlert, Ruler } from 'lucide-react';
 import type { SessionSummary } from '@/lib/types';
 import { fmtDateTime } from '@/lib/format';
@@ -22,10 +21,11 @@ type OrgWithStats = {
 export const revalidate = 60;
 
 // AppSheet-sourced dashboard only shows KPIs with a real AppSheet source:
-// org/building/inspector counts. Sessions/anomalies/measurements have no
-// AppSheet equivalent (see sessions/measurements pages) — shown as "—"
-// rather than a fabricated 0, and the recent-sessions table is replaced
-// with the same not-available notice used elsewhere.
+// org/building/inspector counts. Anomalies/measurements have no AppSheet
+// equivalent — shown as "—" rather than a fabricated 0. Recent sessions
+// reuses the same Objecten-as-pseudo-session mapping the /sessions page
+// already relies on, rendered in the identical table used by Scanergy mode
+// (rows link to /buildings/[id] since there's no separate session record).
 async function AppsheetDashboardPage() {
   const [bedrijvenResult, objectenResult, inspecteursResult] = await Promise.all([
     appsheetFind('Bedrijven'),
@@ -35,6 +35,17 @@ async function AppsheetDashboardPage() {
   const orgs = (Array.isArray(bedrijvenResult) ? bedrijvenResult : []).map(mapBedrijvenRow);
   const totalBuildings = Array.isArray(objectenResult) ? objectenResult.length : 0;
   const totalInspecteurs = Array.isArray(inspecteursResult) ? inspecteursResult.length : 0;
+
+  const inspecteurNameById = new Map(
+    (Array.isArray(inspecteursResult) ? inspecteursResult : [])
+      .map((r: Record<string, unknown>) => [String(r['Inspecteur ID']), String(r['Inspecteur Naam'] ?? '')])
+  );
+  const recentSessions = (Array.isArray(objectenResult) ? objectenResult : [])
+    .map((row: Record<string, unknown>) => mapObjectenToSessionSummary(row, inspecteurNameById))
+    .sort((a, b) =>
+      (parseAppsheetDateTime(b.started_at)?.getTime() ?? 0) - (parseAppsheetDateTime(a.started_at)?.getTime() ?? 0)
+    )
+    .slice(0, 10);
 
   return (
     <div className="space-y-6">
@@ -50,9 +61,51 @@ async function AppsheetDashboardPage() {
         <KpiCard label="Measurements today" value="—" sub="not available" icon={Ruler} color="rose" />
       </div>
 
-      <AppsheetNotAvailable items={[
-        'Recent sessions — no AppSheet-side repeatable-session concept (see /sessions)',
-      ]} />
+      <div className="bg-white rounded-xl border border-gray-200">
+        <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+          <h2 className="font-semibold text-gray-900">Recent sessions</h2>
+          <Link href="/sessions" className="text-sm text-indigo-600 hover:underline">View all</Link>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs text-gray-500 border-b border-gray-100">
+                <th className="px-5 py-3 font-medium">Code</th>
+                <th className="px-5 py-3 font-medium">Building</th>
+                <th className="px-5 py-3 font-medium">Inspector</th>
+                <th className="px-5 py-3 font-medium">Started</th>
+                <th className="px-5 py-3 font-medium">Measurements</th>
+                <th className="px-5 py-3 font-medium">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {recentSessions.map(s => (
+                <tr key={s.id} className="hover:bg-gray-50 transition-colors">
+                  <td className="px-5 py-3 font-mono text-xs">
+                    <Link href={`/buildings/${s.id}`} className="text-indigo-600 hover:underline">
+                      {s.session_code}
+                    </Link>
+                  </td>
+                  <td className="px-5 py-3 text-gray-700">{s.building_address}</td>
+                  <td className="px-5 py-3 text-gray-600">{s.inspector_name}</td>
+                  <td className="px-5 py-3 text-gray-500">
+                    {s.started_at ? fmtDateTime(s.started_at) : '—'}
+                  </td>
+                  <td className="px-5 py-3 text-gray-700">—</td>
+                  <td className="px-5 py-3">
+                    <SessionStatusBadge status={s.status} />
+                  </td>
+                </tr>
+              ))}
+              {!recentSessions.length && (
+                <tr>
+                  <td colSpan={6} className="px-5 py-8 text-center text-gray-400 text-sm">No sessions yet</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
 
       <div className="bg-white rounded-xl border border-gray-200">
         <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
@@ -61,7 +114,13 @@ async function AppsheetDashboardPage() {
         </div>
         <div className="divide-y divide-gray-50">
           {orgs.map(org => (
-            <div key={org.id} className="px-5 py-3 text-sm text-gray-800">{org.name}</div>
+            <Link
+              key={org.id}
+              href={`/organizations/${org.id}`}
+              className="block px-5 py-3 text-sm text-gray-800 hover:bg-gray-50 hover:text-indigo-600 transition-colors"
+            >
+              {org.name}
+            </Link>
           ))}
           {!orgs.length && (
             <p className="px-5 py-6 text-sm text-gray-400 text-center">No organizations</p>

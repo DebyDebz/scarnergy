@@ -4,6 +4,7 @@ import { getServerDataSource } from '@/lib/dataSource/serverSource';
 import { appsheetFind } from '@/lib/appsheet/client';
 import { mapBedrijvenRow } from '@/lib/appsheet/mappers';
 import { AddOrgForm } from '@/components/admin/AddOrgForm';
+import { AppsheetAddOrgForm } from '@/components/admin/AppsheetAddOrgForm';
 import { Building, MapPin, ChevronRight } from 'lucide-react';
 import type { Organisation, UserProfile, BuildingSummary, Role } from '@/lib/types';
 
@@ -30,21 +31,28 @@ export default async function OrganizationsPage() {
           </div>
         </div>
 
+        <AppsheetAddOrgForm existingIds={orgs.map(o => o.id)} />
+
         <div className="space-y-4">
           {orgs.map(org => (
-            <div key={org.id} className="bg-white rounded-xl border border-gray-200 p-5">
-              <div className="flex items-center gap-3">
-                <div className="bg-indigo-100 rounded-lg p-2 shrink-0">
-                  <Building className="w-5 h-5 text-indigo-600" />
+            <Link
+              key={org.id}
+              href={`/organizations/${org.id}`}
+              className="block bg-white rounded-xl border border-gray-200 p-5 hover:border-indigo-300 hover:shadow-sm transition-all group"
+            >
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="bg-indigo-100 rounded-lg p-2 shrink-0">
+                    <Building className="w-5 h-5 text-indigo-600" />
+                  </div>
+                  <div>
+                    <h2 className="font-semibold text-gray-900 group-hover:text-indigo-600 transition-colors">{org.name}</h2>
+                    <p className="text-xs text-gray-400 mt-0.5">Bedrijf ID {org.id}</p>
+                  </div>
                 </div>
-                <div>
-                  <h2 className="font-semibold text-gray-900">{org.name}</h2>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    Bedrijf ID {org.id} — user/building counts not available for AppSheet-sourced organisations
-                  </p>
-                </div>
+                <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-indigo-500 transition-colors shrink-0" />
               </div>
-            </div>
+            </Link>
           ))}
           {!orgs.length && (
             <p className="text-sm text-gray-400 text-center py-8">No organizations</p>

@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase-server';
 import { getServerDataSource } from '@/lib/dataSource/serverSource';
 import { appsheetFind } from '@/lib/appsheet/client';
-import { mapObjectenToSessionSummary } from '@/lib/appsheet/mappers';
+import { mapObjectenToSessionSummary, parseAppsheetDateTime } from '@/lib/appsheet/mappers';
 import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
 import { DeleteSessionButton } from '@/components/sessions/DeleteSessionButton';
 import { AppsheetDeleteSessionButton } from '@/components/sessions/AppsheetDeleteSessionButton';
@@ -43,7 +43,11 @@ export default async function SessionsPage({ searchParams }: Props) {
         s.inspector_name.toLowerCase().includes(needle)
       );
     }
-    sessions.sort((a, b) => (a.started_at < b.started_at ? 1 : -1));
+    // started_at is AppSheet's raw "MM/DD/YYYY HH:mm:ss" display string —
+    // not lexicographically sortable, has to go through a real Date parse.
+    sessions.sort((a, b) =>
+      (parseAppsheetDateTime(b.started_at)?.getTime() ?? 0) - (parseAppsheetDateTime(a.started_at)?.getTime() ?? 0)
+    );
 
     return (
       <SessionsView
