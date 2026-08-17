@@ -8,6 +8,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams, useFocusEffect } from "expo-router";
 import { supabase, SessionSummary, Building } from "../../../lib/supabase";
 import { useAuthStore } from "../../../store/authStore";
+import { useDataSourceStore } from "../../../store/dataSourceStore";
+import { fetchAppsheetSessions, AppsheetProxyError } from "../../../lib/appsheetProxy";
 
 const STATUS_COLOR: Record<string, string> = {
   active:    "#2E86C1",
@@ -18,11 +20,13 @@ const STATUS_COLOR: Record<string, string> = {
 
 export default function SessionsScreen() {
   const { profile }    = useAuthStore();
+  const { source }     = useDataSourceStore();
   const router         = useRouter();
   const { buildingId } = useLocalSearchParams<{ buildingId?: string }>();
 
   const [sessions,  setSessions]  = useState<SessionSummary[]>([]);
   const [loading,   setLoading]   = useState(true);
+  const [error,     setError]     = useState<string | null>(null);
   // Tracks whether we've done at least one successful load so the profile
   // useEffect below doesn't fire a second time when the screen is already focused.
   const didInitialLoad = useRef(false);
@@ -38,6 +42,13 @@ export default function SessionsScreen() {
   const loadSessions = useCallback(() => {
     if (!profile) { setLoading(false); return; }
     setLoading(true);
+    if (source === "appsheet") {
+      fetchAppsheetSessions(buildingId)
+        .then((data) => { setSessions(data as unknown as SessionSummary[]); setError(null); })
+        .catch((e) => setError(e instanceof AppsheetProxyError ? e.message : "Could not load AppSheet sessions."))
+        .finally(() => setLoading(false));
+      return;
+    }
     let query = supabase
       .from("session_summary")
       .select("*")
@@ -45,11 +56,12 @@ export default function SessionsScreen() {
       .order("started_at", { ascending: false });
     if (buildingId) query = query.eq("building_id", buildingId);
     query.then(({ data, error }) => {
-      if (error) console.warn("[Sessions]", error.message);
+      if (error) setError(error.message);
+      else setError(null);
       setSessions(data ?? []);
       setLoading(false);
     });
-  }, [profile, buildingId]);
+  }, [profile, buildingId, source]);
 
   // Refresh whenever this screen comes into focus; set the initial-load flag.
   useFocusEffect(useCallback(() => {
@@ -106,6 +118,15 @@ export default function SessionsScreen() {
     }
   }, [profile, selectedBuildingId, notes, router]);
 
+  if (error) return (
+    <View style={styles.errorWrap}>
+      <Text style={styles.error}>{error}</Text>
+      <TouchableOpacity style={styles.retryBtn} onPress={() => { setError(null); setLoading(true); loadSessions(); }}>
+        <Text style={styles.retryBtnText}>Retry</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
   return (
     <View style={styles.container}>
       {loading
@@ -120,7 +141,9 @@ export default function SessionsScreen() {
             ListEmptyComponent={
               <View style={styles.emptyWrap}>
                 <Text style={styles.emptyTitle}>No sessions yet</Text>
-                <Text style={styles.emptySub}>Tap + to start your first inspection.</Text>
+                <Text style={styles.emptySub}>
+                  {source === "appsheet" ? "No AppSheet visits found." : "Tap + to start your first inspection."}
+                </Text>
               </View>
             }
             renderItem={({ item }) => {
@@ -128,7 +151,13 @@ export default function SessionsScreen() {
               return (
                 <TouchableOpacity
                   style={styles.card}
-                  onPress={() => router.push(`/tabs/sessions/${item.id}`)}
+                  onPress={() => {
+                    if (source === "appsheet") {
+                      Alert.alert("Not available", "Session detail isn't available for AppSheet-sourced visits yet.");
+                      return;
+                    }
+                    router.push(`/tabs/sessions/${item.id}`);
+                  }}
                   activeOpacity={0.75}
                 >
                   <View style={styles.top}>
@@ -241,6 +270,11 @@ const styles = StyleSheet.create({
   container:   { flex: 1, backgroundColor: "#F5F7FA" },
   loader:      { flex: 1 },
   list:        { padding: 16, gap: 12, paddingBottom: 100 },
+
+  errorWrap:   { flex: 1, alignItems: "center", justifyContent: "center", padding: 32 },
+  error:       { textAlign: "center", color: "#E74C3C", marginBottom: 16, lineHeight: 20 },
+  retryBtn:    { paddingHorizontal: 24, paddingVertical: 10, borderRadius: 8, backgroundColor: "#1E3A5F" },
+  retryBtnText:{ color: "#fff", fontWeight: "700", fontSize: 14 },
 
   card:        { backgroundColor: "#FFF", borderRadius: 12, padding: 16,
                  elevation: 2, shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 4 },

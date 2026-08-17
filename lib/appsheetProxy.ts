@@ -77,6 +77,32 @@ export async function fetchAppsheetBuildings(): Promise<AppsheetBuilding[]> {
   return data.buildings;
 }
 
+export interface AppsheetSessionSummary {
+  id: string;
+  org_id: string;
+  building_id: string;
+  inspector_id: string;
+  session_code: string;
+  status: string;
+  started_at: string;
+  completed_at: string | null;
+  total_measurements: number;
+  anomaly_count: number;
+  sync_status: string;
+  is_active: boolean;
+  inspector_name: string;
+  building_address: string;
+  building_city: string;
+}
+
+export async function fetchAppsheetSessions(buildingId?: string): Promise<AppsheetSessionSummary[]> {
+  const path = buildingId
+    ? `/api/appsheet/mobile/sessions?buildingId=${encodeURIComponent(buildingId)}`
+    : "/api/appsheet/mobile/sessions";
+  const data = await callProxy<{ sessions: AppsheetSessionSummary[] }>(path);
+  return data.sessions;
+}
+
 export async function materializeAppsheetBuilding(objectId: string): Promise<string> {
   const data = await callProxy<{ id: string }>("/api/appsheet/mobile/buildings", { action: "materialize", objectId });
   return data.id;
