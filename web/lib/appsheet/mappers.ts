@@ -54,6 +54,17 @@ export function mapBedrijvenRow(row: Record<string, unknown>): Organisation {
 // splits it heuristically using the known house number as an anchor; it's
 // a best-effort parse of observed AppSheet data, not a guaranteed-correct
 // address parser.
+// AppSheet's own live automation on Objecten rewrites Adres to this literal
+// Dutch error string ("Postcode Huisnummer niet gevonden, pas regel aan...")
+// when it can't resolve a postcode+house number to a real address — it's
+// not a street name, and parsing it with parseAdres() below produces
+// garbage that looks like a real (if odd) address rather than an obvious
+// error. Callers that display a building's address as a title/label should
+// check this first rather than trust parseAdres()'s output blindly.
+export function isUnresolvedAdres(adres: unknown): boolean {
+  return String(adres ?? '').toLowerCase().includes('niet gevonden');
+}
+
 export function parseAdres(adres: string, huisnummer: string, huisletter: string, huistoevoeging: string) {
   const [addrPart, cityPart] = String(adres ?? '').split(',').map((s) => s.trim());
   const numberSuffix = `${huisnummer ?? ''}${huisletter ?? ''}${huistoevoeging ?? ''}`.trim();
@@ -73,12 +84,20 @@ export function parseAdres(adres: string, huisnummer: string, huisletter: string
 // 774 rows. Rows with no BAG Data match get 0 as an explicit placeholder
 // (decided with the user over relaxing the shared Building type).
 export function mapObjectenRow(row: Record<string, unknown>, bagRow: Record<string, unknown> | undefined): Building {
-  const { street, city } = parseAdres(
-    String(row['Adres'] ?? ''),
-    String(row['Huisnummer'] ?? ''),
-    String(row['Huisletter'] ?? ''),
-    String(row['Huistoevoeging'] ?? '')
-  );
+  const rawAdres = String(row['Adres'] ?? '');
+  const addressUnresolved = isUnresolvedAdres(rawAdres);
+  // Don't feed the error string through parseAdres() — its comma/suffix
+  // heuristics produce a plausible-looking but bogus street+city (see
+  // isUnresolvedAdres above), worse than leaving them blank for callers to
+  // detect via address_unresolved and show a real "needs review" message.
+  const { street, city } = addressUnresolved
+    ? { street: '', city: '' }
+    : parseAdres(
+        rawAdres,
+        String(row['Huisnummer'] ?? ''),
+        String(row['Huisletter'] ?? ''),
+        String(row['Huistoevoeging'] ?? '')
+      );
 
   const bagBouwjaar = bagRow?.['BAG Bouwjaar'] ? Number(bagRow['BAG Bouwjaar']) : null;
   const bagOppervlakte = bagRow?.['BAG Oppervlakte'] ? Number(bagRow['BAG Oppervlakte']) : null;
@@ -104,6 +123,7 @@ export function mapObjectenRow(row: Record<string, unknown>, bagRow: Record<stri
     bag_gebruiksdoel: bagRow?.['BAG Gebruiksdoel'] ? String(bagRow['BAG Gebruiksdoel']) : null,
     dbag_hoogte_m: dbagHoogte,
     bag_fetched_at: null,
+    address_unresolved: addressUnresolved,
   };
 }
 
@@ -133,6 +153,22 @@ export interface NewBuildingInput {
   postalCode: string;
   city: string;
   bedrijfsId: string;
+}
+
+// Construction year has no column on Objecten itself (confirmed live — see
+// mapObjectenRow above) — it only exists via a separate "BAG Data" row
+// joined on Object ID. So unlike every other buildNewObjectenRow field,
+// entering a year on Add means a second, separate Add call against BAG
+// Data once the new Object ID comes back (see AppsheetAddBuildingForm).
+// "BAG Bouwjaar" and "Object ID" are the two columns confirmed live via a
+// real Find against BAG Data; this row deliberately carries nothing else
+// so it can't collide with the BAG-lookup automation's own columns
+// (BAG Pand ID etc.) on a row it didn't populate.
+export function buildNewBagDataRow(objectId: string, bouwjaar: number): Record<string, unknown> {
+  return {
+    'Object ID': objectId,
+    'BAG Bouwjaar': bouwjaar,
+  };
 }
 
 const WONING_VIRTUAL_DEFAULTS = {
@@ -300,6 +336,53 @@ export function parseAppsheetDateTime(v: unknown): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+// Shared by mapObjectenToSessionSummary below and the buildings list's
+// "Last inspected" column (toBuildingSummary in buildings/page.tsx and the
+// mobile buildings route) — same past-due/synthetic-default completion
+// logic, factored out so both call sites agree on what "completed" means
+// without duplicating the synthetic-default detection.
+export function objectenSessionStatus(
+  row: Record<string, unknown>
+): { status: SessionSummary['status']; completedAt: string | null } {
+  const opnameDatum = String(row['Opname Datum'] ?? '');
+  const opnameTijd = String(row['Opname Tijd'] ?? '');
+  const startedAt = opnameDatum ? `${opnameDatum} ${opnameTijd}`.trim() : '';
+
+  // "Eind Opname Compleet" is the survey's real scheduled end — once it's
+  // passed, the visit is complete in the real world even though AppSheet's
+  // own Status column hasn't been updated to reflect that. BUT: AppSheet
+  // auto-populates this column with "Opname Tijd + 1 hour" on every new
+  // Objecten row when it's left blank on Add (confirmed live — every
+  // freshly created row carries exactly a 60-minute gap from Opname
+  // Datum/Tijd, regardless of whether any inspection ever happened). That
+  // synthetic default isn't a real completion timestamp, so a brand new
+  // building was flipping to "completed" the moment that default hour
+  // elapsed. Only trust it once it has been edited away from that default.
+  const opnameStart = parseAppsheetDateTime(startedAt);
+  const eindOpname = parseAppsheetDateTime(row['Eind Opname Compleet']);
+  const SYNTHETIC_DEFAULT_GAP_MS = 60 * 60 * 1000;
+  const looksLikeUntouchedDefault =
+    opnameStart != null && eindOpname != null &&
+    Math.abs(eindOpname.getTime() - opnameStart.getTime() - SYNTHETIC_DEFAULT_GAP_MS) < 60 * 1000;
+  const isPastDue = eindOpname != null && !looksLikeUntouchedDefault && eindOpname.getTime() <= Date.now();
+  const status: SessionSummary['status'] = isPastDue
+    ? 'completed'
+    : (OBJECTEN_STATUS_MAP[String(row['Status'] ?? '').trim()] ?? 'active');
+
+  return { status, completedAt: isPastDue ? (eindOpname as Date).toISOString() : null };
+}
+
+// "Related X" ref-list columns (e.g. "Related Verdiepingen", "Related
+// Gevels") are comma-joined id lists ("id1 , id2 , id3") — same shape
+// firstRelatedId already reads above. Counting non-empty entries gives a
+// real zone/element count straight off the Objecten row already fetched
+// for the buildings list, with no extra per-building Find call needed.
+export function countRelatedIds(v: unknown): number {
+  const s = String(v ?? '').trim();
+  if (!s) return 0;
+  return s.split(',').map(x => x.trim()).filter(Boolean).length;
+}
+
 export function mapObjectenToSessionSummary(
   row: Record<string, unknown>,
   inspecteurNameById: Map<string, string>
@@ -315,15 +398,7 @@ export function mapObjectenToSessionSummary(
   const opnameDatum = String(row['Opname Datum'] ?? '');
   const opnameTijd = String(row['Opname Tijd'] ?? '');
   const startedAt = opnameDatum ? `${opnameDatum} ${opnameTijd}`.trim() : '';
-
-  // "Eind Opname Compleet" is the survey's real scheduled end — once it's
-  // passed, the visit is complete in the real world even though AppSheet's
-  // own Status column hasn't been updated to reflect that.
-  const eindOpname = parseAppsheetDateTime(row['Eind Opname Compleet']);
-  const isPastDue = eindOpname != null && eindOpname.getTime() <= Date.now();
-  const status: SessionSummary['status'] = isPastDue
-    ? 'completed'
-    : (OBJECTEN_STATUS_MAP[String(row['Status'] ?? '').trim()] ?? 'active');
+  const { status, completedAt } = objectenSessionStatus(row);
 
   return {
     id: objectId,
@@ -333,7 +408,7 @@ export function mapObjectenToSessionSummary(
     session_code: `OBJ-${objectId}`,
     status,
     started_at: startedAt,
-    completed_at: isPastDue ? (eindOpname as Date).toISOString() : null,
+    completed_at: completedAt,
     total_measurements: 0,
     anomaly_count: 0,
     sync_status: 'n/a',
@@ -763,11 +838,12 @@ export function buildGevelEditRow(
 export function buildDakEditRow(
   dakId: string,
   fields: {
-    lengthM?: number | null; widthM?: number | null; areaM2?: number | null; tiltDeg?: number | null;
+    name?: string | null; lengthM?: number | null; widthM?: number | null; areaM2?: number | null; tiltDeg?: number | null;
     roofType?: string | null; nokhoogteM?: number | null; grenztAanOmschrijving?: string | null; notes?: string | null;
   }
 ): Record<string, unknown> {
   const row: Record<string, unknown> = { 'Dak ID': dakId };
+  if (fields.name !== undefined) row['Naam'] = fields.name ?? '';
   if (fields.lengthM !== undefined) row['Lengte Dak'] = fields.lengthM ?? '';
   if (fields.widthM !== undefined) row['Breedte Dak'] = fields.widthM ?? '';
   if (fields.areaM2 !== undefined) row['Bruto Oppervlakte'] = fields.areaM2 ?? '';
@@ -787,11 +863,12 @@ export function buildVloerEditRow(
     // Bodemisolatie deliberately omitted — confirmed live it's a
     // constrained Enum with no accepted boolean-ish value found (see
     // app/api/appsheet/[table]/route.ts EDIT_TABLES.Vloeren comment).
-    lengthM?: number | null; widthM?: number | null; areaM2?: number | null; vloerisolatie?: string | null;
+    name?: string | null; lengthM?: number | null; widthM?: number | null; areaM2?: number | null; vloerisolatie?: string | null;
     grenztAanOmschrijving?: string | null; notes?: string | null;
   }
 ): Record<string, unknown> {
   const row: Record<string, unknown> = { 'Vloer ID': vloerId };
+  if (fields.name !== undefined) row['Naam'] = fields.name ?? '';
   if (fields.lengthM !== undefined) row['Lengte'] = fields.lengthM ?? '';
   if (fields.widthM !== undefined) row['Breedte'] = fields.widthM ?? '';
   if (fields.areaM2 !== undefined) row['Bruto Oppervlakte'] = fields.areaM2 ?? '';
@@ -821,12 +898,36 @@ export function buildVloerEditRow(
 // must treat each row's Add as independently failable and report failures
 // back rather than assuming success.
 
-export function buildNewVerdiepingRow(
+// Confirmed live via a real Add+Delete round-trip: only "Object ID" +
+// "Naam Rekenzone" are required — no landmine, no Number-typed sequential
+// ID like Bedrijven. "Notities Rekenzone" is free text, optional. The
+// Daken/Gevels/Vloeren/Installaties/Related-* columns on a Rekenzone row
+// are read-only reverse-reference lists computed by AppSheet itself, never
+// something an Add/Edit payload sets.
+export function buildNewRekenzoneRow(
   objectId: string,
-  fields: { naam: string; grossAreaM2?: number | null; ceilingHeightM?: number | null; notes?: string | null }
+  fields: { naam: string; notes?: string | null }
 ): Record<string, unknown> {
   return {
     'Object ID': objectId,
+    'Naam Rekenzone': fields.naam,
+    ...(fields.notes ? { 'Notities Rekenzone': fields.notes } : {}),
+  };
+}
+
+// Confirmed live via a real Add+Delete round-trip: "Rekenzone ID" is a hard
+// requirement, not an optional link. An Add with "Object ID" alone returns
+// 200 and looks successful, but AppSheet silently drops the Object ID —
+// the row comes back with a blank Object ID and never shows up as a
+// "Related Verdieping" under the building (an invisible orphan row). Every
+// caller must resolve or create a Rekenzone first (see session-close/route.ts).
+export function buildNewVerdiepingRow(
+  objectId: string,
+  fields: { naam: string; rekenzoneId: string; grossAreaM2?: number | null; ceilingHeightM?: number | null; notes?: string | null }
+): Record<string, unknown> {
+  return {
+    'Object ID': objectId,
+    'Rekenzone ID': fields.rekenzoneId,
     'Naam Verdieping': fields.naam,
     ...(fields.grossAreaM2 != null ? { GBO: fields.grossAreaM2 } : {}),
     ...(fields.ceilingHeightM != null ? { Hoogte: fields.ceilingHeightM } : {}),
@@ -834,15 +935,19 @@ export function buildNewVerdiepingRow(
   };
 }
 
+// Confirmed live: Gevels Add hard-requires "Rekenzone ID" — a 400 "Missing
+// value in column: Rekenzone ID" otherwise — in addition to "Verdieping ID",
+// even though a Gevel conceptually only hangs off a floor (Verdieping).
 export function buildNewGevelRow(
   verdiepingId: string,
   fields: {
-    name?: string | null; positie: string; widthM?: number | null; heightM?: number | null;
+    name?: string | null; positie: string; rekenzoneId: string; widthM?: number | null; heightM?: number | null;
     areaM2?: number | null; orientationDeg?: number | null; grenztAanOmschrijving?: string | null; notes?: string | null;
   }
 ): Record<string, unknown> {
   return {
     'Verdieping ID': verdiepingId,
+    'Rekenzone ID': fields.rekenzoneId,
     Positie: fields.positie,
     ...(fields.name ? { Naam: fields.name } : {}),
     ...(fields.widthM != null ? { Breedte: fields.widthM } : {}),
@@ -940,5 +1045,34 @@ export function buildInstallatieEditRow(
   if (fields.locatie !== undefined) row['Locatie in huis'] = fields.locatie ?? '';
   if (fields.merkModel !== undefined) row['Merk/Model'] = fields.merkModel ?? '';
   if (fields.notes !== undefined) row['Notities Installatie'] = fields.notes ?? '';
+  return row;
+}
+
+// Confirmed live: "Type Deel"/"Materiaal"/"Glastype" are constrained Enum
+// columns (a free-text Edit 400s: "cannot be converted to type 'Enum'"),
+// same shape as Grenzend-aan-code — see TYPE_DEEL_OPTIONS/MATERIAAL_OPTIONS/
+// GLASTYPE_OPTIONS in AppsheetOpeningEditPanel.tsx for the observed
+// vocabulary. "Bruto Oppervlakte"/"Netto Oppervlakte" are deliberately
+// omitted — confirmed live they're formula columns (Breedte × Hoogte),
+// not something an Edit payload should try to set. Zonwering/Overstek/
+// Belemmering are deliberately left off the write path for now — they're a
+// cluster of related numeric-code + detail columns that would need their
+// own live-confirmed vocabulary, and aren't needed to close the "no write
+// path at all" gap (dimensions/type/material/glazing/notes cover the
+// primary use case).
+export function buildTransparantDeelEditRow(
+  deelId: string,
+  fields: {
+    typeDeel?: string | null; widthM?: number | null; heightM?: number | null;
+    glastype?: string | null; materiaal?: string | null; notes?: string | null;
+  }
+): Record<string, unknown> {
+  const row: Record<string, unknown> = { 'Deel ID': deelId };
+  if (fields.typeDeel !== undefined) row['Type Deel'] = fields.typeDeel ?? '';
+  if (fields.widthM !== undefined) row['Breedte'] = fields.widthM ?? '';
+  if (fields.heightM !== undefined) row['Hoogte'] = fields.heightM ?? '';
+  if (fields.glastype !== undefined) row['Glastype'] = fields.glastype ?? '';
+  if (fields.materiaal !== undefined) row['Materiaal'] = fields.materiaal ?? '';
+  if (fields.notes !== undefined) row['Notities Deel'] = fields.notes ?? '';
   return row;
 }
