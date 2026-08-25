@@ -794,7 +794,7 @@ export default function InspectScreen() {
           <Text style={styles.glmBannerText}>
             {isConnected
               ? cmdEnabled
-                ? "GLM ready — press trigger to auto-fill"
+                ? "GLM ready — press trigger, or tap Capture below"
                 : "GLM streaming — tap Capture or enter manually"
               : "No GLM — scan from the session screen, or enter manually"}
           </Text>
@@ -804,6 +804,27 @@ export default function InspectScreen() {
             </Text>
           )}
         </View>
+        {/* Bridge from a live decoded reading into the active/next slot. Shown
+            regardless of cmdEnabled: even when CMD_ENABLE gets a GATT ACK, some
+            GLM 50C units only ever emit 4-byte continuous packets and never a
+            real trigger-press indication (PATH A in useBLEDevice never fires),
+            so relying on cmdEnabled alone silently strands the reading in the
+            console log and never fills a slot. Capture always works. */}
+        {isConnected && lastMeasurement && (() => {
+          const targetSlot = activeSlotRef.current ?? (slots.find(s => {
+            const v = parseFloat(values[s.key] ?? "");
+            return isNaN(v) || v <= 0;
+          })?.key ?? null);
+          if (!targetSlot) return null;
+          const targetLabel = slots.find(s => s.key === targetSlot)?.label ?? targetSlot.replace("_mm", "");
+          return (
+            <TouchableOpacity style={styles.captureBtn} onPress={() => captureNow(lastMeasurement.value_mm)}>
+              <Text style={styles.captureBtnText}>
+                ⊙ Capture {lastMeasurement.value_mm.toFixed(0)} mm → {targetLabel}
+              </Text>
+            </TouchableOpacity>
+          );
+        })()}
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
