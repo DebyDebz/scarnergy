@@ -35,17 +35,29 @@ export function GridCanvas({ zones, onConfirmed }: Props) {
   const [calLen, setCalLen] = useState('');
 
   const activeZone = zonesWithPlan[activeIdx];
-  if (!activeZone) return null;
+  // Reachable if flow.tsx resumes a stale saved stage that no longer matches
+  // current zone state (e.g. a plan-less zone was added another way after
+  // this stage was last saved) — show a real empty state instead of
+  // silently rendering nothing under a header that still says "Grid
+  // Analysis".
+  if (!activeZone) {
+    return (
+      <View style={styles.emptyWrap}>
+        <Text style={styles.emptyTitle}>No floor plan traced yet</Text>
+        <Text style={styles.emptySub}>Go back and draw a floor plan for at least one zone before setting its scale here.</Text>
+      </View>
+    );
+  }
 
   // Image zones project the outline through the same contain transform as the
   // displayed image (once its dims are known); bbox-fit is the pre-load fallback
   // so it's never blank. No-image zones keep the original bbox-fit behaviour.
-  // A hand-drawn sketch is treated the same as "no image" here — it's a rough
-  // doodle, not something worth tracing over — so it falls back to the same
-  // grid-only rendering already used for blank-canvas zones; the sketch image
-  // itself is untouched and still shown elsewhere (ElementPlacer, review, print).
+  // A hand-drawn sketch still shows its own drawing as the background image
+  // (otherwise the canvas is totally blank with nothing to calibrate against) —
+  // only the clipped outline/stroke is skipped for it below, since the sketch's
+  // stored "outline" is just a full-canvas placeholder rectangle, not a real trace.
   const isSketchZone = !!(activeZone.metadata as any)?.is_sketch;
-  const hasImage = !!activeZone.floor_plan_image_url && !isSketchZone;
+  const hasImage = !!activeZone.floor_plan_image_url;
   // A hand-traced sketch outline is wobbly by construction — clipping the grid
   // to it (and stroking it) just makes the freehand line show through in a
   // different form. Sketch zones get a plain full-canvas grid instead, same as
@@ -273,6 +285,9 @@ export function GridCanvas({ zones, onConfirmed }: Props) {
 
 const styles = StyleSheet.create({
   flex:        { flex: 1 },
+  emptyWrap:   { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 8 },
+  emptyTitle:  { fontSize: 15, fontWeight: '700', color: '#374151', textAlign: 'center' },
+  emptySub:    { fontSize: 13, color: '#9CA3AF', textAlign: 'center', lineHeight: 18 },
   wrap:        { padding: 16, paddingBottom: 32 },
   header:      { fontSize: 20, fontWeight: '700', color: PRIMARY, marginBottom: 4 },
   sub:         { fontSize: 13, color: '#6B7280', marginBottom: 12 },

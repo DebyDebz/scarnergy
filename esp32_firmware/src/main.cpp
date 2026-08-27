@@ -1,10 +1,17 @@
 /*
  * SCARNERGY v2.0 — ESP32 BLE Bridge Firmware
- * Bosch GLM 50C BLE → WiFi → MQTT gateway
+ * Bosch GLM 50C BLE → WiFi → MQTT gateway, with BLE provisioning (M7)
  *
  * Hardware: ESP32-WROOM-32
  * Framework: PlatformIO + NimBLE (50% less RAM than Bluedroid)
  * Build: pio run --target upload
+ *
+ * NOTE: the provisioning section below (loadConfig/saveConfigAndReboot/
+ * ProvisionConfigCallback/startProvisioningServer, plus the setup()/loop()/
+ * setupWiFi()/reconnectMQTT() changes that read from it) was written and
+ * reviewed but NOT compiled — this dev environment has no PlatformIO CLI.
+ * `pio run` (and a real BLE round-trip against a physical unit) is the
+ * actual verification gate before flashing a fleet.
  */
 
 #include <Arduino.h>
@@ -17,7 +24,10 @@
 #include <esp_task_wdt.h>
 
 // ─── Configuration ────────────────────────────────────────────────────────────
-// Edit these or provision via BLE config characteristic
+// Compiled-in fallbacks only — a unit that has never been provisioned over
+// BLE (see the Provisioning section below) uses these; once provisioned,
+// runtime config loaded from NVS (Preferences) always takes precedence,
+// even across reflashes with different defaults here.
 
 #define WIFI_SSID       "YOUR_WIFI_SSID"
 #define WIFI_PASSWORD   "YOUR_WIFI_PASSWORD"
@@ -38,6 +48,153 @@
 
 // Watchdog timeout (seconds)
 #define WDT_TIMEOUT          30
+
+// ─── Provisioning (BLE GATT server, NVS-backed) ──────────────────────────────
+// Standard ESP32 BLE-provisioning pattern: an unprovisioned unit advertises
+// as a distinct BLE peripheral (PROVISIONING_ADV_NAME) exposing one config
+// characteristic (write JSON: ssid/password/mqtt_host/mqtt_port/org_id/
+// device_id) and one status characteristic (notify ok/error back to the
+// phone app). A valid write persists to NVS and reboots into normal
+// operation. CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1 (platformio.ini) means the
+// provisioning-server role and the GLM-client role never run
+// concurrently — decided by the `provisioned` flag at boot, not a runtime
+// switch — so that build flag (and its RAM budget) is untouched.
+//
+// Own UUIDs (distinct from the GLM 50C's, which belong to Bosch's protocol,
+// not this app) — generated for this feature, not reused from anywhere.
+#define PROVISION_SERVICE_UUID      "6f0eaf00-2e33-4c60-9b1a-8f0a2f2b6a01"
+#define PROVISION_CONFIG_CHAR_UUID  "6f0eaf00-2e33-4c60-9b1a-8f0a2f2b6a02"
+#define PROVISION_STATUS_CHAR_UUID  "6f0eaf00-2e33-4c60-9b1a-8f0a2f2b6a03"
+#define PROVISIONING_ADV_NAME       "Scarnergy-ESP32-Setup"
+
+// After this many consecutive setupWiFi() failures, assume the stored
+// credentials are wrong (not just a transient outage) and drop back into
+// provisioning mode — recovers a misconfigured unit over BLE instead of
+// requiring a USB reflash in the field.
+#define WIFI_FAIL_THRESHOLD  5
+
+Preferences prefs;
+String   cfgWifiSsid, cfgWifiPassword, cfgMqttHost, cfgOrgId, cfgDeviceId;
+uint16_t cfgMqttPort  = MQTT_PORT;
+bool     provisioned  = false;
+
+NimBLEServer*         provisionServer = nullptr;
+NimBLECharacteristic*  provisionStatusChar = nullptr;
+
+void notifyProvisionStatus(const char* json) {
+  if (!provisionStatusChar) return;
+  provisionStatusChar->setValue(json);
+  provisionStatusChar->notify();
+}
+
+// Loads runtime config from NVS, falling back to the compiled #defines for
+// any key that's never been set — so a freshly-flashed-but-not-yet-
+// provisioned unit still has a value for every field (used only while
+// `provisioned` is false and setup() is deciding which mode to enter; once
+// provisioned, every field below is expected to have been written by
+// saveConfigAndReboot()).
+void loadConfig() {
+  prefs.begin("scarnergy", true);
+  provisioned    = prefs.getBool("provisioned", false);
+  cfgWifiSsid    = prefs.getString("wifi_ssid", WIFI_SSID);
+  cfgWifiPassword = prefs.getString("wifi_pw", WIFI_PASSWORD);
+  cfgMqttHost    = prefs.getString("mqtt_host", MQTT_HOST);
+  cfgMqttPort    = (uint16_t)prefs.getUInt("mqtt_port", MQTT_PORT);
+  cfgOrgId       = prefs.getString("org_id", ORG_ID);
+  cfgDeviceId    = prefs.getString("device_id", DEVICE_ID);
+  prefs.end();
+}
+
+void saveConfigAndReboot(const String& ssid, const String& password, const String& mqttHost,
+                          uint16_t mqttPort, const String& orgId, const String& deviceId) {
+  prefs.begin("scarnergy", false);
+  prefs.putBool("provisioned", true);
+  prefs.putString("wifi_ssid", ssid);
+  prefs.putString("wifi_pw", password);
+  prefs.putString("mqtt_host", mqttHost);
+  prefs.putUInt("mqtt_port", mqttPort);
+  prefs.putString("org_id", orgId);
+  prefs.putString("device_id", deviceId);
+  prefs.putUInt("wifi_fail_count", 0);
+  prefs.end();
+  Serial.println("[PROVISION] Config saved — rebooting into normal operation");
+  delay(300);
+  ESP.restart();
+}
+
+// Called from setupWiFi() on failure. Only clears `provisioned` (dropping
+// back into BLE setup mode on the next boot) once WIFI_FAIL_THRESHOLD
+// consecutive failures have accumulated — a single flaky reconnect
+// shouldn't throw away good credentials.
+void recordWifiFailureAndMaybeReprovision() {
+  prefs.begin("scarnergy", false);
+  uint32_t fails = prefs.getUInt("wifi_fail_count", 0) + 1;
+  if (fails >= WIFI_FAIL_THRESHOLD) {
+    Serial.println("[WiFi] Too many consecutive failures — clearing provisioning, will re-enter setup mode");
+    prefs.putBool("provisioned", false);
+    prefs.putUInt("wifi_fail_count", 0);
+  } else {
+    prefs.putUInt("wifi_fail_count", fails);
+    Serial.printf("[WiFi] Failure %u/%u\n", fails, (unsigned)WIFI_FAIL_THRESHOLD);
+  }
+  prefs.end();
+}
+
+class ProvisionConfigCallback : public NimBLECharacteristicCallbacks {
+  void onWrite(NimBLECharacteristic* pChar) override {
+    std::string raw = pChar->getValue();
+    StaticJsonDocument<512> doc;
+    DeserializationError err = deserializeJson(doc, raw);
+    if (err) {
+      Serial.printf("[PROVISION] Invalid JSON: %s\n", err.c_str());
+      notifyProvisionStatus("{\"status\":\"error\",\"message\":\"invalid JSON\"}");
+      return;
+    }
+
+    const char* ssid     = doc["ssid"];
+    const char* password = doc["password"];
+    const char* mqttHost = doc["mqtt_host"];
+    const char* orgId    = doc["org_id"];
+    const char* deviceId = doc["device_id"];
+    int mqttPort = doc["mqtt_port"] | MQTT_PORT;
+
+    if (!ssid || !password || !mqttHost || !orgId || !deviceId) {
+      Serial.println("[PROVISION] Missing required field in config write");
+      notifyProvisionStatus("{\"status\":\"error\",\"message\":\"missing required field\"}");
+      return;
+    }
+
+    Serial.printf("[PROVISION] Received config for SSID '%s', org %s\n", ssid, orgId);
+    notifyProvisionStatus("{\"status\":\"ok\"}");
+    // Give the notification a moment to actually go out over BLE before
+    // this device disappears mid-restart.
+    delay(200);
+    saveConfigAndReboot(ssid, password, mqttHost, (uint16_t)mqttPort, orgId, deviceId);
+  }
+};
+
+void startProvisioningServer() {
+  NimBLEDevice::init(PROVISIONING_ADV_NAME);
+  NimBLEDevice::setPower(ESP_PWR_LVL_P9);
+
+  provisionServer = NimBLEDevice::createServer();
+  NimBLEService* svc = provisionServer->createService(PROVISION_SERVICE_UUID);
+
+  NimBLECharacteristic* configChar =
+    svc->createCharacteristic(PROVISION_CONFIG_CHAR_UUID, NIMBLE_PROPERTY::WRITE);
+  configChar->setCallbacks(new ProvisionConfigCallback());
+
+  provisionStatusChar =
+    svc->createCharacteristic(PROVISION_STATUS_CHAR_UUID, NIMBLE_PROPERTY::NOTIFY);
+
+  svc->start();
+
+  NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
+  adv->addServiceUUID(PROVISION_SERVICE_UUID);
+  adv->start();
+
+  Serial.println("[PROVISION] Advertising as \"" PROVISIONING_ADV_NAME "\" — waiting for config over BLE...");
+}
 
 // ─── Globals ──────────────────────────────────────────────────────────────────
 
@@ -91,8 +248,8 @@ void onNotification(NimBLERemoteCharacteristic* pChar, uint8_t* data, size_t len
   StaticJsonDocument<256> doc;
   doc["value_mm"]       = valueMm;
   doc["unit"]           = "mm";
-  doc["org_id"]         = ORG_ID;
-  doc["device_id"]      = DEVICE_ID;
+  doc["org_id"]         = cfgOrgId;
+  doc["device_id"]      = cfgDeviceId;
   doc["ingestion_path"] = "esp32";
   doc["battery_level"]  = batteryLevel;
   doc["is_continuous"]  = isContinuous;
@@ -185,8 +342,8 @@ class ScanCallback : public NimBLEAdvertisedDeviceCallbacks {
 // ─── WiFi + MQTT Setup ───────────────────────────────────────────────────────
 
 void setupWiFi() {
-  Serial.printf("[WiFi] Connecting to %s", WIFI_SSID);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.printf("[WiFi] Connecting to %s", cfgWifiSsid.c_str());
+  WiFi.begin(cfgWifiSsid.c_str(), cfgWifiPassword.c_str());
   int attempts = 0;
   while (WiFi.status() != WL_CONNECTED && attempts < 30) {
     delay(500);
@@ -197,18 +354,19 @@ void setupWiFi() {
     Serial.printf("\n[WiFi] Connected — IP: %s\n", WiFi.localIP().toString().c_str());
   } else {
     Serial.println("\n[WiFi] Connection failed — restarting...");
+    recordWifiFailureAndMaybeReprovision();
     ESP.restart();
   }
 }
 
 void reconnectMQTT() {
   while (!mqttClient.connected()) {
-    Serial.printf("[MQTT] Connecting to %s:%d...\n", MQTT_HOST, MQTT_PORT);
+    Serial.printf("[MQTT] Connecting to %s:%d...\n", cfgMqttHost.c_str(), cfgMqttPort);
     if (mqttClient.connect(MQTT_CLIENT_ID)) {
       Serial.println("[MQTT] Connected ✓");
       // Subscribe to OTA topic
       char otaTopic[64];
-      snprintf(otaTopic, sizeof(otaTopic), "scarnergy/%s/esp32/ota", ORG_ID);
+      snprintf(otaTopic, sizeof(otaTopic), "scarnergy/%s/esp32/ota", cfgOrgId.c_str());
       mqttClient.subscribe(otaTopic);
     } else {
       Serial.printf("[MQTT] Failed (rc=%d) — retry in 5s\n", mqttClient.state());
@@ -227,19 +385,29 @@ void setup() {
   esp_task_wdt_init(WDT_TIMEOUT, true);
   esp_task_wdt_add(NULL);
 
+  loadConfig();
+
+  if (!provisioned) {
+    Serial.println("[SETUP] Not provisioned — entering BLE provisioning mode");
+    startProvisioningServer();
+    return;  // loop() stays idle; NimBLE's own event handling runs the GATT server
+  }
+
   // Build MQTT topic
-  snprintf(mqttTopic, sizeof(mqttTopic), MQTT_TOPIC_TEMPLATE, ORG_ID, DEVICE_ID);
+  snprintf(mqttTopic, sizeof(mqttTopic), MQTT_TOPIC_TEMPLATE, cfgOrgId.c_str(), cfgDeviceId.c_str());
   Serial.printf("[MQTT] Topic: %s\n", mqttTopic);
 
   // WiFi
   setupWiFi();
 
   // MQTT
-  mqttClient.setServer(MQTT_HOST, MQTT_PORT);
+  mqttClient.setServer(cfgMqttHost.c_str(), cfgMqttPort);
   mqttClient.setBufferSize(512);
   reconnectMQTT();
 
-  // BLE
+  // BLE (GLM client role only — the provisioning GATT server from above is
+  // never started on this path, keeping exactly one BLE role active per
+  // CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1)
   NimBLEDevice::init("Scarnergy-ESP32");
   NimBLEDevice::setPower(ESP_PWR_LVL_P9);  // Max TX power for range
 
@@ -255,6 +423,13 @@ void setup() {
 
 void loop() {
   esp_task_wdt_reset();
+
+  if (!provisioned) {
+    // Provisioning GATT server runs entirely on NimBLE's own event/callback
+    // path — nothing to poll here.
+    delay(100);
+    return;
+  }
 
   // Keep MQTT alive
   if (!mqttClient.connected()) {

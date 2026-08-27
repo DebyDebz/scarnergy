@@ -111,11 +111,18 @@ export interface Building {
   bag_bouwjaar: number | null; bag_oppervlakte_m2: number | null;
   bag_gebruiksdoel: string | null; dbag_hoogte_m: number | null;
   bag_fetched_at: string | null;
+  // Set when this row is a "shadow" building materialized from an AppSheet
+  // Objecten row (see web/app/api/appsheet/mobile/buildings/route.ts POST) —
+  // null for buildings created natively.
+  appsheet_object_id: string | null;
+  created_at: string;
 }
 export interface Rekenzone {
   id: string; org_id: string; building_id: string; name: string;
   description: string | null; notes: string | null;
   sort_order: number; is_active: boolean;
+  // AppSheet-only correlation (migration 031) — mirrors Zone/appsheet_row_key.
+  appsheet_row_key?: string | null;
 }
 export interface Zone {
   id: string; building_id: string; zone_code: string; name: string;

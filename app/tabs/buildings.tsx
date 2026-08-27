@@ -25,7 +25,15 @@ export default function BuildingsScreen() {
     setLoading(true);
     if (source === "appsheet") {
       fetchAppsheetBuildings()
-        .then((data) => { setBuildings(data as unknown as BuildingSummary[]); setError(null); })
+        .then((data) => {
+          // AppSheet has no building "created" date to sort by (Opname
+          // Datum/Tijd are inspection-visit dates, not creation dates) —
+          // Objecten rows come back in sheet order (oldest appended first),
+          // so reversing puts the newest-added building first, same intent
+          // as the native `created_at desc` order below.
+          setBuildings((data as unknown as BuildingSummary[]).slice().reverse());
+          setError(null);
+        })
         .catch((e) => setError(e instanceof AppsheetProxyError ? e.message : "Could not load AppSheet buildings."))
         .finally(() => setLoading(false));
       return;
@@ -34,7 +42,7 @@ export default function BuildingsScreen() {
       .from("building_summary")
       .select("*")
       .eq("org_id", profile.org_id)
-      .order("city")
+      .order("created_at", { ascending: false })
       .then(({ data, error }) => {
         if (error) setError(error.message);
         else setBuildings((data ?? []) as BuildingSummary[]);

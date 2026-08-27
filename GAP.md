@@ -231,6 +231,168 @@ Details, Grenst aan Readonly, mobile session detail) against the current apps.
 
 ---
 
+## W6 — AppSheet write-path completeness (mobile + web, 2026-08-21)
+
+Source: a chat-session audit of the AppSheet dual-source integration found
+six gaps; this closes four fully and wires the plumbing for a fifth, with
+one sub-item left honestly open pending a live test this session didn't run.
+
+- [x] **Openings (Transparante_Delen) full write path + cascade delete.**
+      `web/app/api/appsheet/[table]/route.ts` (WRITE_TABLES/EDIT_TABLES/
+      DELETE_TABLES), `web/lib/appsheet/mappers.ts` (`buildTransparantDeelEditRow`),
+      new `web/components/elements/AppsheetOpeningEditPanel.tsx` (add/edit/delete
+      UI per opening, slotted into `ElementTypeSections` via a new optional
+      `OpeningEditPanel` prop — native mode passes nothing, zero behavior change
+      there), cascade-delete in `AppsheetElementEditPanel.tsx`'s `handleDelete`.
+      ✅ 2026-08-21 — live Add+Delete AND Edit+revert round-trips run directly
+      against production AppSheet (Deel ID auto-gen confirmed hex; Type Deel/
+      Materiaal/Glastype confirmed constrained Enums — free text 400s; Bruto/
+      Netto Oppervlakte confirmed formula columns, left out of Edit) · web
+      `tsc` clean · `next build` ok · 120 tests green.
+- [ ] **Dak/Vloer/Installatie sync-back + Retake Measurement generalization.**
+      Migration 031 (`rekenzones.appsheet_row_key`, applied to local stack,
+      dry-run + verified) · `buildNewRekenzoneRow` (mappers.ts) · Rekenzone
+      find-or-create loop + per-type branches in
+      `web/app/api/appsheet/mobile/session-close/route.ts` (replacing the old
+      gevel-only short-circuit) · `materialize-element/route.ts` generalized
+      to gevel/dak/vloer/installatie (Rekenzone → first related Verdieping
+      resolution) · `lib/appsheetProxy.ts` + `app/tabs/sessions/appsheet-detail.tsx`
+      updated to offer "Retake Measurement" for all four types.
+      ✅ 2026-08-21 — `buildNewDakRow`/`buildNewVloerRow`/`buildNewInstallatieRow`
+      (previously flagged "NOT confirmed against a live Add call") each got
+      a real live Add+Delete round-trip:
+      - **Dak**: confirmed clean, no changes needed.
+      - **Vloer**: found a real landmine — "Grenzend aan code" is
+        unconditionally required on Add (400s otherwise, unlike Dak where it
+        silently defaults). Fixed: `session-close/route.ts` now passes
+        `el.description || 'Grond'` (ground is the safe default absent a
+        real classification) — confirmed live with the corrected payload.
+      - **Installatie**: confirmed genuinely blocked — "Ventilatie Code" is
+        an unconditionally required Ref column with no discoverable valid
+        value (every real row has it blank; no lookup table exists in
+        mappers.ts). **Not fixed, by design**: `session-close/route.ts` now
+        explicitly skips a brand-new Installatie Add with a clear reason
+        instead of attempting a call that always 400s — Edit (for an
+        already-linked Installatie) is unaffected and still works, since
+        `buildInstallatieEditRow` never touches that column.
+      **Still not ticked `[x]`** because Installatie Add genuinely can't
+      ship yet — needs someone with the AppSheet editor to identify what
+      "Ventilatie Code" references. Dak/Vloer sync-back is now fully correct
+      and could be split into its own done item if useful. Web+mobile `tsc`
+      clean, `next build` ok, 120 tests green.
+- [x] **Retake-measurement zone → Grid Analysis entry point.**
+      `app/tabs/sessions/flow.tsx`'s `forceStage` extended with a `'2'` +
+      `zoneId`/`zoneName` branch (reuses the existing stage-2
+      `FloorPlanImageUpload` path `handleDrawZone` already uses) ·
+      `appsheet-detail.tsx` zone chips got a "📐 Trace floor plan" action
+      (materializes via the first element in that zone, then routes into
+      the wizard at stage 2). ✅ 2026-08-21 mobile `tsc` clean · code-level
+      verification only — **needs the same on-device pass already open
+      below** (this is additive to that existing open item, not a new one).
+- [x] **AppSheet building detail "Visit" section.**
+      `web/app/(dashboard)/buildings/[id]/page.tsx`'s `AppsheetBuildingDetail`
+      gained a "Visit" card (`mapObjectenToSessionSummary`/`objectenSessionStatus`,
+      already live-proven by the AppSheet Sessions list) plus an explicit
+      "not available in AppSheet mode" notice for facade photos/floor-plan
+      images/energy label history (genuine schema-level gaps, not just
+      unbuilt — confirmed via `docs/APPSHEET_SCANERGYV2_TOGGLE_ANALYSIS.md`'s
+      full entity list). ✅ 2026-08-21 — read-only, no schema changes, web
+      `tsc` clean, `next build` ok.
+- [x] **Perf fix**: `app/tabs/sessions/[id].tsx`'s `syncToAppsheetIfLinked`
+      scoped its `openings` query to the session's actual element ids
+      instead of fetching all active openings org-wide. ✅ 2026-08-21 mobile
+      `tsc` clean, same result, no behavior change.
+- [ ] **Vloeren `Bodemisolatie` enum** — still blocked: confirmed live no
+      obvious boolean-ish value is accepted, and the actual allowed values
+      live only in AppSheet's no-code editor (not visible via the Find/
+      Action API). Needs Deborah to check the editor and report the exact
+      valid strings.
+- [ ] **On-device physical verification** of this session's mobile-side
+      fixes (BLE Capture button, Grid Analysis resume, dashboard error
+      banner, Retake Measurement for dak/vloer/installatie, Trace-floor-plan
+      zone action) — inherently manual, folds into the existing open
+      "On-device verification pass" item below.
+- **Verify gate:** ✅ mobile `tsc` clean · web `tsc` clean · `next build` ok ·
+  120 tests green (`npm test`, root) · migration 031 dry-run + applied to
+  local stack, column verified present.
+
+---
+
+## W7 — Sign-up screen + ESP32 provisioning + security hardening (2026-08-21)
+
+Both "deferred, decision needed" items from the list above, decided and
+built. Research before writing code surfaced two real pre-existing security
+gaps that got fixed as part of this work rather than shipped around.
+
+- [x] **Auth hardening (found while scoping sign-up, fixed regardless)**:
+      `/api/organisations` and `/api/users/invite` had **zero server-side
+      auth checks** — `web/middleware.ts`'s ADMIN_ONLY protection only
+      covers page paths, its matcher explicitly excludes `api/`. New shared
+      `web/lib/requireAdmin.ts` (cookie-session admin check, mirrors the
+      AppSheet mobile routes' own Bearer-token equivalent) wired into both.
+      Separately, `handle_new_user()` (migration `006_auth_hooks.sql`)
+      trusted a client-supplied `role` from `auth.signUp()`'s metadata,
+      defaulting to `'inspector'` only when absent — meaning anyone could
+      call `signUp()` directly with the public anon key and `role: 'admin'`
+      in metadata and be granted admin. Migration `032_signup_role_hardening.sql`
+      makes the trigger always insert `'inspector'` regardless of metadata;
+      the invite route's own explicit post-insert `user_profiles` upsert
+      (unaffected) still assigns real roles correctly.
+      ✅ 2026-08-21 — migration 032 dry-run + applied to local stack;
+      verified via a direct SQL test (inserted an `auth.users` row with
+      `role:'admin'` in `raw_user_meta_data` inside a rolled-back
+      transaction — resulting profile landed as `'inspector'`, confirmed,
+      then rolled back with zero residue) · web `tsc` clean.
+- [x] **Sign-up screen** — scoped to "create a brand-new organisation and
+      become its first admin" (not joining an existing org — that already
+      has a working, admin-initiated path via the invite flow; a self-serve
+      "pick any org_id" flow would mean trusting a client-supplied org_id,
+      the exact privilege-boundary problem just closed above). Web-only —
+      mobile field inspectors join via invite, no mobile signup screen.
+      New `POST /api/auth/signup` (service-role, mirrors `/api/organisations`
+      + `/api/users/invite`'s proven shape: create the org, `admin.createUser`
+      — not the public `signUp()` API — then an explicit `user_profiles`
+      upsert with `role:'admin'`, so it never depends on trusting client
+      metadata). New `web/app/auth/sign-up/{page,SignUpForm}.tsx`, matching
+      `LoginForm.tsx`'s exact card/input/button styling; linked from the
+      login page. ✅ 2026-08-21 — web `tsc` clean. **Not yet exercised
+      end-to-end via HTTP**: `web/.env.local` points the running app at a
+      remote Supabase instance (`supabase.krontiva.africa`), not the local
+      docker stack — running the route live would create a real org/user
+      there, so that step needs Deborah (or a local-stack-pointed env).
+- [x] **ESP32 provisioning** — standard BLE-provisioning pattern confirmed
+      from `MILESTONES.md` M7 + the existing `esp32_firmware/src/main.cpp`
+      (not a blank slate). Firmware: unprovisioned unit advertises a BLE
+      GATT *server* ("SCARNERGY-ESP32-SETUP") with a config characteristic
+      (JSON: ssid/password/mqtt_host/mqtt_port/org_id/device_id) and a
+      status characteristic (ack/error); a valid write persists to NVS
+      (`Preferences`) and reboots into normal GLM-bridge operation reading
+      that config instead of the old hardcoded `#define`s; a
+      consecutive-WiFi-failure counter drops a misconfigured unit back into
+      provisioning mode without a USB reflash.
+      `CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1` (platformio.ini) untouched — the
+      two BLE roles (provisioning server vs. GLM client) are mutually
+      exclusive by boot-mode, never concurrent. Mobile: new
+      `hooks/useESP32Provisioning.ts` (deliberately separate from
+      `useBLEDevice.ts` — that hook is hardcoded end-to-end for the GLM's
+      protocol) + new `app/tabs/esp32-provisioning.tsx` screen (matches
+      `device.tsx`'s status-card/instructions pattern), linked from the GLM
+      Device screen. No migration — `ble_devices.device_type` stays
+      `'other'` for an ESP32 gateway (extending the enum is a real
+      transactional-migration landmine not worth it for a cosmetic value);
+      WiFi/MQTT/provisioning state rides in the existing `metadata JSONB`
+      column.
+      ✅ 2026-08-21 mobile `tsc` clean. **Not compiled or flashed** — this
+      dev environment has no PlatformIO CLI; `pio run` + a real BLE
+      round-trip against a physical ESP32 is the actual verification gate,
+      and it's Deborah's to run.
+- **Verify gate:** web+mobile `tsc` clean · 120 tests green · migration 032
+  dry-run + applied to local stack + SQL-verified. Sign-up HTTP round-trip
+  and ESP32 firmware compile/flash explicitly NOT done here — see notes
+  above, both need Deborah.
+
+---
+
 ## Already covered (no action)
 
 For orientation — these AppSheet features exist on the web today:

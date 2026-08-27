@@ -18,6 +18,7 @@ export default function Dashboard() {
   const [stats, setStats] = useState({ activeSessions: 0, buildings: 0, measurements: 0 });
   const [recentSessions, setRecentSessions] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // useFocusEffect (not a plain mount-only effect) so this refetches every
   // time the Dashboard tab regains focus — including right after switching
@@ -30,11 +31,18 @@ export default function Dashboard() {
         const data = await fetchAppsheetDashboardStats();
         setStats({ activeSessions: data.activeSessions, buildings: data.totalBuildings, measurements: data.measurementsToday });
         setRecentSessions(data.recentSessions);
+        setError(null);
       } catch (e) {
-        console.warn("[Dashboard]", e instanceof AppsheetProxyError ? e.message : "Could not load AppSheet dashboard.");
+        // Unlike buildings.tsx/sessions/index.tsx (which replace their whole
+        // screen with an error state), this only logs — silently leaving
+        // stale numbers on screen with no visible sign the fetch failed.
+        // Surface it the same way those two screens do instead.
+        setError(e instanceof AppsheetProxyError ? e.message : "Could not load AppSheet dashboard.");
+        console.warn("[Dashboard]", e instanceof AppsheetProxyError ? e.message : e);
       }
       return;
     }
+    setError(null);
 
     const [sessRes, buildRes, measRes, recentRes] = await Promise.all([
       supabase.from("inspection_sessions").select("id", { count: "exact" }).eq("org_id", profile.org_id).eq("status", "active"),
@@ -66,6 +74,12 @@ export default function Dashboard() {
           )}
         </View>
       </View>
+
+      {error && (
+        <View style={styles.errorBanner}>
+          <Text style={styles.errorBannerText}>{error}</Text>
+        </View>
+      )}
 
       {/* Stats row */}
       <View style={styles.statsRow}>
@@ -208,6 +222,8 @@ const styles = StyleSheet.create({
   greeting:       { fontSize: 20, fontWeight: "700", color: "#1E3A5F", flexShrink: 1 },
   syncBadge:      { backgroundColor: "#FEF9E7", borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: "#F39C12" },
   syncText:       { fontSize: 12, color: "#D68910", fontWeight: "600" },
+  errorBanner:      { backgroundColor: "#FDEDEC", borderRadius: 10, marginHorizontal: 16, marginBottom: 12, padding: 12 },
+  errorBannerText:  { color: "#E74C3C", fontSize: 13, lineHeight: 18 },
   statsRow:       { flexDirection: "row", paddingHorizontal: 16, gap: 8, marginBottom: 16 },
   statCard:       { flex: 1, backgroundColor: "#FFF", borderRadius: 12, padding: 16, borderTopWidth: 3, elevation: 2, shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 4 },
   statValue:      { fontSize: 28, fontWeight: "800" },

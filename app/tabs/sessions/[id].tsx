@@ -27,6 +27,8 @@ export default function SessionDetailScreen() {
   const [elementsLoading, setElementsLoading] = useState(false);
   const [closing,         setClosing]         = useState(false);
   const [pausing,         setPausing]         = useState(false);
+  const [appsheetLinked,  setAppsheetLinked]  = useState(false);
+  const [retryingSync,    setRetryingSync]    = useState(false);
 
 // ── Data loading ───────────────────────────────────────────────────────────
 
@@ -81,6 +83,20 @@ export default function SessionDetailScreen() {
     });
   }, [session?.building_id]);
 
+  // Whether this building has an AppSheet source to sync to — drives the
+  // "Retry AppSheet Sync" button below (only meaningful for AppSheet-linked
+  // buildings, same check syncToAppsheetIfLinked already makes on its own).
+  useEffect(() => {
+    if (!session?.building_id) { setAppsheetLinked(false); return; }
+    let cancelled = false;
+    (supabase.from("buildings") as any)
+      .select("appsheet_object_id")
+      .eq("id", session.building_id)
+      .maybeSingle()
+      .then(({ data }: any) => { if (!cancelled) setAppsheetLinked(!!data?.appsheet_object_id); });
+    return () => { cancelled = true; };
+  }, [session?.building_id]);
+
   const loadElements = useCallback(() => {
     if (!selectedZoneId) return;
     setElementsLoading(true);
@@ -115,12 +131,16 @@ export default function SessionDetailScreen() {
   // AppSheet (buildings.appsheet_object_id set — see the "materialize"
   // step in tabs/buildings.tsx). Supabase is always the write of record;
   // this never blocks or reverts session close on failure.
+  // Returns a summary so callers that need explicit feedback (the manual
+  // retry button below) can report it — the original auto-sync-on-close
+  // call site ignores the return value and keeps its existing silent-on-
+  // success behavior unchanged.
   const syncToAppsheetIfLinked = useCallback(async (buildingId: string) => {
     const buildingRes = await (supabase.from("buildings") as any)
       .select("appsheet_object_id")
       .eq("id", buildingId)
       .maybeSingle();
-    if (!buildingRes.data?.appsheet_object_id) return;
+    if (!buildingRes.data?.appsheet_object_id) return { linked: false as const };
 
     try {
       const zonesRes = await supabase.from("zones").select("*").eq("building_id", buildingId).eq("is_active", true);
@@ -128,11 +148,11 @@ export default function SessionDetailScreen() {
       const elementsRes = zoneIds.length
         ? await supabase.from("building_elements").select("*").in("zone_id", zoneIds).eq("is_active", true)
         : { data: [] };
-      const elementIds = new Set((elementsRes.data ?? []).map((e: BuildingElement) => e.id));
-      const openingsRes = zoneIds.length
-        ? await supabase.from("openings").select("*").eq("is_active", true)
+      const elementIds = Array.from(new Set((elementsRes.data ?? []).map((e: BuildingElement) => e.id)));
+      const openingsRes = elementIds.length
+        ? await supabase.from("openings").select("*").in("element_id", elementIds).eq("is_active", true)
         : { data: [] };
-      const openings = (openingsRes.data ?? []).filter((o: any) => elementIds.has(o.element_id));
+      const openings = openingsRes.data ?? [];
 
       const results = await pushSessionResultsToAppsheet({
         buildingId,
@@ -144,11 +164,37 @@ export default function SessionDetailScreen() {
       if (failed.length) {
         console.warn("[AppSheet sync] some rows failed:", failed);
       }
+      return {
+        linked: true as const,
+        total: results.length,
+        added: results.filter(r => r.status === "added").length,
+        edited: results.filter(r => r.status === "edited").length,
+        skipped: results.filter(r => r.status === "skipped").length,
+        failed: failed.length,
+      };
     } catch (e: any) {
       console.warn("[AppSheet sync] session-close export failed:", e.message);
       Alert.alert("Saved locally", "Your session is saved, but syncing results to AppSheet failed. You can retry later.");
+      return { linked: true as const, error: e.message as string };
     }
   }, []);
+
+  // Manual re-run of the same export, for a session whose auto-sync-on-close
+  // already failed (or partially failed) — the failure alert above has always
+  // said "you can retry later" but there was previously no control to do so.
+  const retrySync = useCallback(async () => {
+    if (!session?.building_id || retryingSync) return;
+    setRetryingSync(true);
+    const summary = await syncToAppsheetIfLinked(session.building_id);
+    setRetryingSync(false);
+    if (!summary || 'error' in summary) return; // failure alert already shown above
+    if (!summary.linked) return; // building isn't AppSheet-linked; button shouldn't be visible anyway
+    const { added, edited, skipped, failed } = summary;
+    Alert.alert(
+      failed > 0 ? "Sync finished with errors" : "AppSheet sync complete",
+      `${added} added, ${edited} updated, ${skipped} skipped${failed > 0 ? `, ${failed} failed` : ""}.`
+    );
+  }, [session?.building_id, retryingSync, syncToAppsheetIfLinked]);
 
   const closeSession = useCallback(() => {
     if (!sessionId || !session || session.status !== "active") return;
@@ -468,6 +514,17 @@ export default function SessionDetailScreen() {
                     >
                       <Text style={styles.resultsBtnText}>⚡  Energy Results</Text>
                     </TouchableOpacity>
+                    {appsheetLinked && (
+                      <TouchableOpacity
+                        style={[styles.resumeBtn, retryingSync && styles.btnDisabled]}
+                        onPress={retrySync}
+                        disabled={retryingSync}
+                      >
+                        <Text style={styles.resumeBtnText}>
+                          {retryingSync ? "Syncing…" : "↻  Retry AppSheet Sync"}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
                   </>
                 )}
 

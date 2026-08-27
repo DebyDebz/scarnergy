@@ -57,6 +57,7 @@ export interface AppsheetBuilding {
   id: string;
   full_address: string;
   street: string;
+  house_number: string;
   city: string;
   postal_code: string;
   building_type: string;
@@ -114,9 +115,57 @@ export async function fetchAppsheetDashboardStats(): Promise<AppsheetDashboardSt
   return callProxy<AppsheetDashboardStats>("/api/appsheet/mobile/dashboard-stats");
 }
 
+export interface AppsheetSessionDetail {
+  session: AppsheetSessionSummary;
+  zones: Array<{ id: string; name: string; floor_level: number; rekenzone_id: string | null }>;
+  elements: Array<{
+    id: string; zone_id: string; element_type: string; name: string;
+    length_mm: number | null; width_mm: number | null; height_mm: number | null;
+    is_complete: boolean;
+  }>;
+  openings: Array<{ id: string; element_id: string; opening_type: string }>;
+  rekenzones: Array<{ id: string; name: string; sort_order: number }>;
+}
+
+export async function fetchAppsheetSessionDetail(objectId: string): Promise<AppsheetSessionDetail> {
+  return callProxy<AppsheetSessionDetail>(
+    `/api/appsheet/mobile/session-detail?objectId=${encodeURIComponent(objectId)}`
+  );
+}
+
 export async function materializeAppsheetBuilding(objectId: string): Promise<string> {
   const data = await callProxy<{ id: string }>("/api/appsheet/mobile/buildings", { action: "materialize", objectId });
   return data.id;
+}
+
+export interface MaterializedElement {
+  buildingId: string;
+  zoneId: string;
+  elementId: string;
+  sessionId: string;
+}
+
+// Turns an AppSheet-sourced element (gevel/dak/vloer/installatie) shown on
+// the read-only AppSheet session detail screen into a real Supabase
+// building/zone/element/session chain, so the existing BLE inspect flow can
+// measure it — see materialize-element/route.ts for how each type resolves
+// its parent (Verdieping directly for gevel, via a Rekenzone for the rest).
+export async function materializeAppsheetElement(
+  objectId: string, elementId: string, elementType: "gevel" | "dak" | "vloer" | "installatie"
+): Promise<MaterializedElement> {
+  return callProxy<MaterializedElement>("/api/appsheet/mobile/materialize-element", { objectId, elementId, elementType });
+}
+
+export interface MaterializedSession {
+  buildingId: string;
+  sessionId: string;
+}
+
+// Draws a floor plan from scratch on an AppSheet building with no zones
+// recorded yet — materializes the shadow building + an active session, then
+// the caller hands off to /tabs/sessions/flow (same as "Start Inspection").
+export async function materializeAppsheetSession(objectId: string): Promise<MaterializedSession> {
+  return callProxy<MaterializedSession>("/api/appsheet/mobile/materialize-session", { objectId });
 }
 
 export interface SessionCloseSyncResult {

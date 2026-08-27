@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
-  View, Text, Image, TouchableOpacity, StyleSheet, ActivityIndicator,
+  View, Text, Image, TouchableOpacity, StyleSheet,
 } from 'react-native';
 import { Zone, BuildingElement } from '../../lib/supabase';
 import { projectPointsOnImage, fitPointsToInner, imageOffsets, gridLengthMeters } from '../../lib/floorplanGeometry';
@@ -41,14 +41,26 @@ interface Props {
 }
 
 export function FloorPlanReview({ zone, elements, onMeasure }: Props) {
-  // A hand-drawn sketch is treated like "no image" here too, matching
-  // GridCanvas/ElementPlacer: it's a rough doodle, not worth tracing over, and
-  // elements were placed against the bbox-fit frame for sketch zones, so this
-  // must stay bbox-fit or placed elements would drift off the sketch photo.
+  // The original photo/sketch is intentionally not displayed here — by review
+  // time the scale is already calibrated (Grid Analysis) and elements are
+  // already placed, so only the grid + zone outline + elements are shown. The
+  // image's intrinsic dims are still resolved (headlessly, via Image.getSize)
+  // because they drive the contain-fit frame the outline/elements were placed
+  // against — without it, image-backed zones would render in the wrong frame.
   const isSketchZone = !!(zone.metadata as any)?.is_sketch;
-  const hasImage = !!zone.floor_plan_image_url && !isSketchZone;
-  const [imgLoaded, setImgLoaded] = useState(false);
-  const [imgDims,   setImgDims]   = useState<{ w: number; h: number } | null>(null);
+  const hasImage = !!zone.floor_plan_image_url;
+  const [imgDims, setImgDims] = useState<{ w: number; h: number } | null>(null);
+
+  useEffect(() => {
+    if (!zone.floor_plan_image_url) { setImgDims(null); return; }
+    let cancelled = false;
+    Image.getSize(
+      zone.floor_plan_image_url,
+      (w, h) => { if (!cancelled) setImgDims({ w, h }); },
+      () => { if (!cancelled) setImgDims(null); },
+    );
+    return () => { cancelled = true; };
+  }, [zone.floor_plan_image_url]);
 
   // Outline points: image-anchored when the photo dims are known, bbox-fit
   // otherwise. A hand-traced sketch outline is wobbly by construction —
@@ -75,25 +87,6 @@ export function FloorPlanReview({ zone, elements, onMeasure }: Props) {
       <Text style={styles.sub}>Tap an element on the plan to measure it. Captured values are shown in place.</Text>
 
       <View style={styles.canvas}>
-        {/* Background image (image-upload zones) */}
-        {hasImage && (
-          <>
-            {!imgLoaded && (
-              <View style={styles.imgLoading}><ActivityIndicator color={PRIMARY} /></View>
-            )}
-            <Image
-              source={{ uri: zone.floor_plan_image_url! }}
-              style={[styles.img, imgLoaded ? styles.imgVisible : styles.imgHidden]}
-              resizeMode="contain"
-              onLoad={(e) => {
-                const s = e.nativeEvent?.source;
-                if (s?.width && s?.height) setImgDims({ w: s.width, h: s.height });
-                setImgLoaded(true);
-              }}
-            />
-          </>
-        )}
-
         {/* Grid clipped to the footprint outline (full grid when not yet traced) */}
         <ClippedGrid size={CANVAS} cellPx={CELL_PX} points={outlinePts} />
 
@@ -158,11 +151,6 @@ const styles = StyleSheet.create({
   canvas:     { width: CANVAS, height: CANVAS, alignSelf: 'center',
                 backgroundColor: '#fafafa', borderRadius: 8, overflow: 'hidden',
                 borderWidth: 1, borderColor: '#E5E7EB' },
-  img:        { position: 'absolute', top: 0, left: 0, width: CANVAS, height: CANVAS },
-  imgVisible: { opacity: 1 },
-  imgHidden:  { opacity: 0 },
-  imgLoading: { position: 'absolute', top: 0, left: 0, width: CANVAS, height: CANVAS,
-                alignItems: 'center', justifyContent: 'center' },
   chipWrap:   { position: 'absolute', width: 80, alignItems: 'center' },
   chip:       { backgroundColor: 'rgba(30,58,95,0.92)', alignItems: 'center',
                 borderRadius: 4, paddingHorizontal: 4, paddingVertical: 1, maxWidth: 80 },
