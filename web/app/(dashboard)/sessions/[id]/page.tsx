@@ -19,6 +19,14 @@ interface Props {
   searchParams: { anomalies?: string };
 }
 
+// Same fix as organizations/[id]/page.tsx, buildings/page.tsx, dashboard/
+// page.tsx, sessions/page.tsx, buildings/[id]/page.tsx: this page branches on
+// the data-source cookie (getServerDataSource()) before rendering, and
+// OpenNext's Cloudflare incremental cache keys on URL only, not on cookies —
+// without revalidate=0 the source-dependent redirect/render decision below
+// could get cached and served to a visitor whose toggle state disagrees with it.
+export const revalidate = 0;
+
 export default async function SessionDetailPage({ params, searchParams }: Props) {
   // AppSheet has no repeatable-session concept — /sessions already treats
   // each Objecten row as a pseudo-session and links straight to

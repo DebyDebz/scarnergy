@@ -290,7 +290,9 @@ async function AppsheetOrgDetail({ bedrijfId }: { bedrijfId: string }) {
                       {b.reference_code}
                     </Link>
                   </td>
-                  <td className="px-5 py-3 text-gray-700">{`${b.street} ${b.house_number}, ${b.city}`.trim()}</td>
+                  <td className="px-5 py-3 text-gray-700">
+                    {b.address_unresolved ? 'Address not yet resolved' : `${b.street} ${b.house_number}, ${b.city}`.trim()}
+                  </td>
                   <td className="px-5 py-3 text-gray-500 capitalize">{b.building_type}</td>
                   <td className="px-5 py-3 text-gray-500">{b.construction_year || '—'}</td>
                 </tr>

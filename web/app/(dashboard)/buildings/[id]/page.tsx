@@ -6,7 +6,7 @@ import { appsheetFind } from '@/lib/appsheet/client';
 import {
   mapObjectenRow, mapVerdiepingRow, mapRekenzoneRow, mapGevelRow, mapDakRow,
   mapVloerRow, mapInstallatieRow, mapTransparantDeelRow, firstZoneIdForRekenzone,
-  escapeForSelector,
+  mapObjectenToSessionSummary, escapeForSelector,
 } from '@/lib/appsheet/mappers';
 import { EnergyLabelBadge } from '@/components/buildings/EnergyLabelBadge';
 import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
@@ -19,6 +19,7 @@ import { BuildingContactCard } from '@/components/buildings/BuildingContactCard'
 import { MapPanel } from '@/components/buildings/MapPanel';
 import { AppsheetZoneEditButton } from '@/components/buildings/AppsheetZoneEditButton';
 import { AppsheetElementEditPanel } from '@/components/elements/AppsheetElementEditPanel';
+import { AppsheetOpeningEditPanel } from '@/components/elements/AppsheetOpeningEditPanel';
 import { geocodeAddress } from '@/lib/geocode';
 import { ZoneEditButton } from '@/components/buildings/ZoneEditButton';
 import { ElementTypeSections, type ElementWithRelations } from '@/components/elements/ElementTypeSections';
@@ -32,6 +33,16 @@ import { fmtDate } from '@/lib/format';
 import { areaByFloor, totalZoneArea, fmtArea } from '@/lib/calc';
 
 interface Props { params: { id: string } }
+
+// Same fix as buildings/page.tsx, dashboard/page.tsx, sessions/page.tsx: this
+// page reads the data-source cookie (getServerDataSource()) and OpenNext's
+// Cloudflare incremental cache keys on URL only, not on cookies — without
+// revalidate=0 a rendered response gets cached for whichever source/data
+// happened to render it, and every subsequent visitor to this same building
+// sees that stale snapshot until the cache window expires. Missing here
+// meant a just-synced AppSheet building (or a stale pre-sync one) could keep
+// showing outdated zones/elements/session-status after the source data changed.
+export const revalidate = 0;
 
 // label = original Dutch term (kept for continuity); en = English translation
 // shown underneath. The `key` is a stored data value and must not change.
@@ -496,16 +507,20 @@ export default async function BuildingDetailPage({ params }: Props) {
 
 // AppSheet-sourced building detail. Organisations/buildings/contacts and now
 // zones/elements/rekenzones have an AppSheet-side read path (see
-// docs/APPSHEET_SCANERGYV2_TOGGLE_ANALYSIS.md §6 for build history); facade
-// photos, floor plans (AppSheet hosts sketches in its own file storage, not
-// signable from here), energy label history, and inspection sessions have no
-// AppSheet-side equivalent at all, so those stay an explicit notice instead
-// of silently showing "no data".
+// docs/APPSHEET_SCANERGYV2_TOGGLE_ANALYSIS.md §6 for build history). AppSheet
+// has no repeatable-session concept, so a single "Visit" card built from
+// this Objecten row's own Opname Datum/Tijd/Status stands in for the native
+// "Inspection sessions" table (mapObjectenToSessionSummary — same helper the
+// AppSheet Sessions list page already uses). Facade photos, floor plans
+// (AppSheet hosts sketches in its own file storage, not signable from here),
+// and energy label history have no AppSheet-side equivalent at all, so those
+// stay an explicit notice instead of silently showing "no data".
 async function AppsheetBuildingDetail({ objectId }: { objectId: string }) {
   const idFilter = escapeForSelector(objectId);
   const [
     objectenResult, bagResult, verdiepingenResult, rekenzonesResult,
     gevelsResult, dakenResult, vloerenResult, installatiesResult, openingenResult,
+    inspecteursResult,
   ] = await Promise.all([
     appsheetFind('Objecten', `FILTER(Objecten, [Object ID] = "${idFilter}")`),
     appsheetFind('BAG Data', `FILTER("BAG Data", [Object ID] = "${idFilter}")`),
@@ -516,13 +531,22 @@ async function AppsheetBuildingDetail({ objectId }: { objectId: string }) {
     appsheetFind('Vloeren', `FILTER(Vloeren, [Object ID virtual] = "${idFilter}")`),
     appsheetFind('Installaties', `FILTER(Installaties, [Object ID virtual] = "${idFilter}")`),
     appsheetFind('Transparante_Delen', `FILTER(Transparante_Delen, [Object ID virtual] = "${idFilter}")`),
+    appsheetFind('Inspecteurs'),
   ]);
   const row = Array.isArray(objectenResult) ? objectenResult[0] : undefined;
   if (!row) notFound();
 
   const bagRow = Array.isArray(bagResult) ? bagResult[0] : undefined;
   const building = mapObjectenRow(row, bagRow);
-  const fullAddress = `${building.street} ${building.house_number}, ${building.postal_code} ${building.city}`.trim();
+  const fullAddress = building.address_unresolved
+    ? `Address not yet resolved (postcode ${building.postal_code || '?'}, house number ${building.house_number || '?'})`
+    : `${building.street} ${building.house_number}, ${building.postal_code} ${building.city}`.trim();
+
+  const inspecteurNameById = new Map(
+    (Array.isArray(inspecteursResult) ? inspecteursResult : [])
+      .map((r: Record<string, unknown>) => [String(r['Inspecteur ID']), String(r['Inspecteur Naam'] ?? '')])
+  );
+  const visit = mapObjectenToSessionSummary(row, inspecteurNameById);
 
   // No AppSheet column caches resolved coordinates, so geocode live on every
   // render instead of the Scanergy button+persist flow (see lib/geocode.ts).
@@ -597,6 +621,12 @@ async function AppsheetBuildingDetail({ objectId }: { objectId: string }) {
             <BuildingExportButtons buildingId={objectId} buildingCode={building.reference_code} />
           </div>
         </div>
+        {building.address_unresolved && (
+          <p className="text-sm text-amber-700 bg-amber-50 rounded-lg px-3 py-2 mt-3">
+            AppSheet couldn&apos;t resolve this building&apos;s postcode/house number to a real address.
+            Fix the address in AppSheet, then reload this page.
+          </p>
+        )}
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -641,6 +671,26 @@ async function AppsheetBuildingDetail({ objectId }: { objectId: string }) {
               </tr>
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* ── Floor Plans (synced from Verdiepingen's "Plattegrond Schets") ── */}
+      {zones.some(z => z.floor_plan_image_url) && (
+        <div className="bg-white rounded-xl border border-gray-200">
+          <div className="px-5 py-4 border-b border-gray-100">
+            <h2 className="font-semibold text-gray-900">Overzicht Plattegronden</h2>
+          </div>
+          <div className="p-5 flex flex-wrap gap-5">
+            {zones.filter(z => z.floor_plan_image_url).map(z => (
+              <div key={z.id} className="flex flex-col gap-2">
+                <p className="text-xs font-semibold text-gray-700">{z.name}</p>
+                <FloorPlanViewer zone={z} imageUrl={z.floor_plan_image_url ?? ''} width={320} />
+                {z.gross_area_m2 != null && (
+                  <p className="text-xs text-gray-400 text-center">{z.gross_area_m2} m²</p>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -708,7 +758,13 @@ async function AppsheetBuildingDetail({ objectId }: { objectId: string }) {
                 <p className="text-xs text-gray-500">
                   Area: <span className="font-medium text-gray-700">{fmtArea(zone.gross_area_m2)}</span>
                 </p>
-                <ElementTypeSections elements={zone.elements} photoUrls={{}} EditPanel={AppsheetElementEditPanel} />
+                {zone.floor_plan_image_url && (
+                  <FloorPlanViewer zone={zone} imageUrl={zone.floor_plan_image_url} width={320} />
+                )}
+                <ElementTypeSections
+                  elements={zone.elements} photoUrls={{}}
+                  EditPanel={AppsheetElementEditPanel} OpeningEditPanel={AppsheetOpeningEditPanel}
+                />
               </div>
             </details>
           ))}
@@ -717,6 +773,45 @@ async function AppsheetBuildingDetail({ objectId }: { objectId: string }) {
           )}
         </div>
       </div>
+
+      {/* ── Visit ── AppSheet has no repeatable-session concept — this
+          Objecten row IS the one visit, unlike native mode's multi-row
+          "Inspection sessions" table above. */}
+      <div className="bg-white rounded-xl border border-gray-200">
+        <div className="px-5 py-4 border-b border-gray-100">
+          <h2 className="font-semibold text-gray-900">Visit</h2>
+        </div>
+        <div className="px-5 py-4 grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
+          <div>
+            <p className="text-xs text-gray-400">Inspector</p>
+            <p className="text-gray-800 font-medium mt-0.5">{visit.inspector_name}</p>
+          </div>
+          <div>
+            <p className="text-xs text-gray-400">Started</p>
+            <p className="text-gray-800 font-medium mt-0.5">{visit.started_at ? fmtDate(visit.started_at) : '—'}</p>
+          </div>
+          <div>
+            <p className="text-xs text-gray-400">Completed</p>
+            <p className="text-gray-800 font-medium mt-0.5">{visit.completed_at ? fmtDate(visit.completed_at) : '—'}</p>
+          </div>
+          <div>
+            <p className="text-xs text-gray-400">Status</p>
+            <div className="mt-0.5"><SessionStatusBadge status={visit.status} /></div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Not available in AppSheet mode ── genuine data gaps (confirmed:
+          no such column exists anywhere in the live schema), not just
+          unbuilt — kept explicit rather than silently showing "no data".
+          Floor-plan IMAGES do sync (Verdiepingen's "Plattegrond Schets",
+          confirmed live-writable via a full external URL — see
+          session-close/route.ts) — only the traced outline/scale
+          calibration stays Scanergy-only, since AppSheet has no columns
+          for that grid geometry at all. */}
+      <p className="text-xs text-gray-400 text-center px-5">
+        Facade photos and energy label history have no AppSheet-side equivalent and aren&apos;t shown here.
+      </p>
 
     </div>
   );

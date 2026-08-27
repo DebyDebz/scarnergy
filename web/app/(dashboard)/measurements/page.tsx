@@ -8,7 +8,12 @@ import { AppsheetNotAvailable } from '@/components/shared/AppsheetNotAvailable';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { RecentMeasurement } from '@/lib/types';
 
-export const revalidate = 30;
+// 0, not a positive window: OpenNext's Cloudflare incremental cache keys on
+// URL only, not the `scanergy:data-source` cookie, so a positive revalidate
+// here could serve a response rendered under the *other* data source for up
+// to that window after a toggle switch — same bug class dashboard/buildings/
+// sessions/organizations pages were already set to revalidate=0 to avoid.
+export const revalidate = 0;
 
 const PAGE_SIZE = 50;
 

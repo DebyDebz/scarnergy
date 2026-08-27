@@ -3,25 +3,42 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Building2 } from 'lucide-react';
 import type { Organisation } from '@/lib/types';
-import { buildNewObjectenRow } from '@/lib/appsheet/mappers';
+import { buildNewObjectenRow, buildNewBagDataRow } from '@/lib/appsheet/mappers';
 
 interface Props {
   orgs: Organisation[];
 }
 
+// Same shape AppSheet's own address parsing expects on the read side (see
+// mappers.ts's parseAdres city regex) — 4 digits + 2 letters, optional
+// space. Catches a malformed postcode (e.g. "0244", missing the letter
+// suffix) before it's sent to AppSheet's Add, which otherwise accepts it
+// silently and only surfaces the problem after the fact via its own
+// address-resolution automation (see the "niet gevonden" warning below).
+const NL_POSTCODE_RE = /^\d{4}\s?[A-Za-z]{2}$/;
+
 // AppSheet-side counterpart to AddBuildingForm. Deliberately a different
 // field set, not a relabeled copy — Objecten has no reference_code,
-// building_type enum, construction_year, or gross_floor_area_m2 columns
-// (see lib/appsheet/mappers.ts buildNewObjectenRow for what's confirmed
-// live). A real, resolvable Dutch address is required: AppSheet runs a
-// live automation on Add that validates postcode+house number and
-// overwrites Adres with an error message if it can't resolve them — the
-// success banner below surfaces that instead of a client-side geocoder.
+// building_type enum, or gross_floor_area_m2 columns (see
+// lib/appsheet/mappers.ts buildNewObjectenRow for what's confirmed live). A
+// real, resolvable Dutch address is required: AppSheet runs a live
+// automation on Add that validates postcode+house number and overwrites
+// Adres with an error message if it can't resolve them — the success
+// banner below surfaces that instead of a client-side geocoder.
+//
+// Construction year is optional and, unlike every other field here, isn't
+// part of the Objecten row at all — Objecten has no year column (confirmed
+// live), only BAG Data does via "BAG Bouwjaar" joined on Object ID. So
+// entering a year fires a second Add, into BAG Data, once the Objecten Add
+// has returned the new Object ID (see handleSubmit below). Read-side
+// (mapObjectenRow) already surfaces BAG Data's Bouwjaar as
+// construction_year, so no other read-path change is needed.
 export function AppsheetAddBuildingForm({ orgs }: Props) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [addressWarning, setAddressWarning] = useState('');
+  const [yearWarning, setYearWarning] = useState('');
 
   const [form, setForm] = useState({
     objecttype: 'Woning' as 'Woning' | 'Utiliteit',
@@ -32,6 +49,7 @@ export function AppsheetAddBuildingForm({ orgs }: Props) {
     houseAddition: '',
     postalCode: '',
     city: '',
+    constructionYear: '',
   });
 
   function set<K extends keyof typeof form>(field: K, value: typeof form[K]) {
@@ -40,9 +58,16 @@ export function AppsheetAddBuildingForm({ orgs }: Props) {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setLoading(true);
     setError('');
     setAddressWarning('');
+    setYearWarning('');
+
+    if (!NL_POSTCODE_RE.test(form.postalCode.trim())) {
+      setError('Postal code must be 4 digits + 2 letters, e.g. "1234 AB"');
+      return;
+    }
+
+    setLoading(true);
 
     const row = buildNewObjectenRow({
       objecttype: form.objecttype,
@@ -77,6 +102,20 @@ export function AppsheetAddBuildingForm({ orgs }: Props) {
       setError('AppSheet did not return a new Object ID');
       setLoading(false);
       return;
+    }
+
+    if (form.constructionYear) {
+      const bagRow = buildNewBagDataRow(objectId, Number(form.constructionYear));
+      const bagRes = await fetch(`/api/appsheet/${encodeURIComponent('BAG Data')}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'add', rows: [bagRow] }),
+      });
+      if (!bagRes.ok) {
+        // The building itself was created successfully — don't block
+        // navigation over the year, just surface that it wasn't saved.
+        setYearWarning('Building created, but the construction year could not be saved. You can add it later.');
+      }
     }
 
     if (adres.toLowerCase().includes('niet gevonden')) {
@@ -158,12 +197,12 @@ export function AppsheetAddBuildingForm({ orgs }: Props) {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div>
           <label className={labelClass}>Postal code</label>
           <input
             required value={form.postalCode} onChange={e => set('postalCode', e.target.value)}
-            placeholder="1234 AB"
+            placeholder="1234 AB" pattern="\d{4}\s?[A-Za-z]{2}" title="4 digits + 2 letters, e.g. 1234 AB"
             className={inputClass}
           />
         </div>
@@ -175,6 +214,15 @@ export function AppsheetAddBuildingForm({ orgs }: Props) {
             className={inputClass}
           />
         </div>
+        <div>
+          <label className={labelClass}>Year built</label>
+          <input
+            type="number" min={1800} max={new Date().getFullYear()}
+            value={form.constructionYear} onChange={e => set('constructionYear', e.target.value)}
+            placeholder="1985"
+            className={inputClass}
+          />
+        </div>
       </div>
 
       {error && (
@@ -182,6 +230,9 @@ export function AppsheetAddBuildingForm({ orgs }: Props) {
       )}
       {addressWarning && (
         <p className="text-sm text-amber-700 bg-amber-50 rounded-lg px-3 py-2">{addressWarning}</p>
+      )}
+      {yearWarning && (
+        <p className="text-sm text-amber-700 bg-amber-50 rounded-lg px-3 py-2">{yearWarning}</p>
       )}
 
       <div className="flex gap-3">

@@ -27,8 +27,19 @@ const ALLOWED_TABLES = new Set([
 // table here — auto-generation produces a hex string ("75dd7925") that gets
 // rejected ("cannot be converted to type 'Number'"); callers must supply
 // the next sequential integer explicitly (see buildNewBedrijfRow).
+// BAG Data added for the construction-year Add flow only: the new-building
+// form writes a narrow {Object ID, BAG Bouwjaar} row here (see
+// buildNewBagDataRow) since Objecten itself has no year column. Nothing
+// else in this app Adds to BAG Data — every other BAG Data row is
+// populated by the workbook's own external BAG lookup automation, not by
+// this proxy.
+// Transparante_Delen (openings) Add confirmed live clean with
+// buildNewTransparantDeelRow's exact payload shape (parent Gevel/Dak/Vloer
+// ID + Type Deel + optional Breedte/Hoogte/Glastype/Materiaal/notes) — real
+// Add+Delete round-trip, no landmine. "Materiaal" silently defaults to
+// "Hout/Kunststof" when omitted (AppSheet's own default, not this app's).
 const WRITE_TABLES = new Set([
-  'Objecten', 'Inspecteurs', 'Bedrijven',
+  'Objecten', 'Inspecteurs', 'Bedrijven', 'BAG Data', 'Transparante_Delen',
 ]);
 
 // Edit-capable tables — a narrower set than WRITE_TABLES's Add/Delete
@@ -45,7 +56,7 @@ const EDIT_TABLES: Record<string, { key: string; fields: string[] }> = {
   },
   Daken: {
     key: 'Dak ID',
-    fields: ['Lengte Dak', 'Breedte Dak', 'Bruto Oppervlakte', 'Hoek', 'Type Dak', 'Nokhoogte/Lengte Vloer', 'Grenzend aan code', 'Notities'],
+    fields: ['Naam', 'Lengte Dak', 'Breedte Dak', 'Bruto Oppervlakte', 'Hoek', 'Type Dak', 'Nokhoogte/Lengte Vloer', 'Grenzend aan code', 'Notities'],
   },
   // Bodemisolatie is a constrained Enum column — confirmed live that none
   // of 'Y'/'N'/'Ja'/'Nee'/'1'/'0'/etc. are accepted values, and every real
@@ -53,7 +64,7 @@ const EDIT_TABLES: Record<string, { key: string; fields: string[] }> = {
   // rather than shipping a field that always 400s.
   Vloeren: {
     key: 'Vloer ID',
-    fields: ['Lengte', 'Breedte', 'Bruto Oppervlakte', 'Vloerisolatie', 'Grenzend aan code', 'Notities'],
+    fields: ['Naam', 'Lengte', 'Breedte', 'Bruto Oppervlakte', 'Vloerisolatie', 'Grenzend aan code', 'Notities'],
   },
   // 'Locatie in huis' is a constrained Enum — confirmed live it only
   // accepts exactly 'Binnen de thermische zone' / 'Buiten de thermische
@@ -65,6 +76,15 @@ const EDIT_TABLES: Record<string, { key: string; fields: string[] }> = {
   // Rol/Actief are Inspecteurs' own two-value fields (see mapInspecteurRow's
   // INSPECTEUR_ROLE_MAP) — confirmed live, edit + revert clean.
   Inspecteurs: { key: 'Inspecteur ID', fields: ['Rol', 'Actief'] },
+  // "Type Deel"/"Materiaal"/"Glastype" are constrained Enums — confirmed
+  // live a free-text Edit 400s ("cannot be converted to type 'Enum'");
+  // "Bruto Oppervlakte"/"Netto Oppervlakte" are formula columns (Breedte ×
+  // Hoogte, confirmed via a live Add), left out of Edit for the same reason
+  // Rc/kJ-m2K-style derived fields never appear in these allowlists.
+  Transparante_Delen: {
+    key: 'Deel ID',
+    fields: ['Type Deel', 'Breedte', 'Hoogte', 'Glastype', 'Materiaal', 'Notities Deel'],
+  },
 };
 
 // Delete-capable tables — deliberately separate from WRITE_TABLES/EDIT_TABLES
@@ -81,9 +101,13 @@ const EDIT_TABLES: Record<string, { key: string; fields: string[] }> = {
 // confirmed the same graceful, uniform no-op response AppSheet's generic
 // Delete action gives on every other table tested, rather than a table-
 // specific code path that could behave differently.
+// Transparante_Delen Delete confirmed live clean (real Add+Delete
+// round-trip on a throwaway row, same as Verdiepingen/Daken/Vloeren) —
+// added so a deleted parent Gevel/Dak/Vloer's openings can be cascade-
+// deleted instead of left orphaned (see AppsheetElementEditPanel.tsx).
 const DELETE_TABLES = new Set([
   'Objecten', 'Inspecteurs', 'Bedrijven',
-  'Verdiepingen', 'Gevels', 'Daken', 'Vloeren', 'Installaties',
+  'Verdiepingen', 'Gevels', 'Daken', 'Vloeren', 'Installaties', 'Transparante_Delen',
 ]);
 
 async function requireAdmin(req: NextRequest) {

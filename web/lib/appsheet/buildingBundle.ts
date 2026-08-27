@@ -63,8 +63,8 @@ export async function fetchAppsheetBuildingBundle(objectId: string): Promise<App
   const opnameDatum = String(row['Opname Datum'] ?? '');
   const opnameTijd = String(row['Opname Tijd'] ?? '');
   const session = {
-    building_address: `${building.street} ${building.house_number}`.trim(),
-    building_city: building.city,
+    building_address: building.address_unresolved ? 'Address not yet resolved' : `${building.street} ${building.house_number}`.trim(),
+    building_city: building.address_unresolved ? '' : building.city,
     inspector_name: inspecteurNameById.get(String(row['Inspecteur'] ?? '')) ?? '—',
     started_at: opnameDatum ? `${opnameDatum} ${opnameTijd}`.trim() : null,
   };

@@ -48,6 +48,12 @@ export interface Building {
   bag_gebruiksdoel: string | null;
   dbag_hoogte_m: number | null;
   bag_fetched_at: string | null;
+  // AppSheet-only: set when the source Objecten row's Adres column is that
+  // workbook's own live automation's error string ("...niet gevonden, pas
+  // regel aan...") rather than a real address — see
+  // lib/appsheet/mappers.ts isUnresolvedAdres(). Native/Supabase buildings
+  // never set this (always undefined there).
+  address_unresolved?: boolean;
 }
 export interface Rekenzone {
   id: string;
@@ -58,6 +64,10 @@ export interface Rekenzone {
   notes: string | null;
   sort_order: number;
   is_active: boolean;
+  // AppSheet-only: this rekenzone's correlated Rekenzone ID once a
+  // dak/vloer/installatie under it has synced to/from AppSheet (migration
+  // 031) — mirrors zones/building_elements/openings' appsheet_row_key (030).
+  appsheet_row_key?: string | null;
 }
 export interface ElementDefault {
   id: string;

@@ -336,6 +336,25 @@ export function parseAppsheetDateTime(v: unknown): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+// "Eind Opname Compleet" (used by objectenSessionStatus's past-due check
+// above) LOOKS writable — AppSheet auto-populates it with "Opname Tijd + 1
+// hour" on every new row — but is actually a read-only formula column
+// (confirmed live via a real Edit round-trip: writing an unrelated date to
+// it had no effect; the response kept returning Opname Datum/Tijd + Duur).
+// "Duur" (duration, HH:mm:ss) is the real writable input that formula
+// depends on — confirmed live: editing Duur moved the returned Eind Opname
+// Compleet by exactly the same delta. Formats ms elapsed since the visit's
+// Opname Datum/Tijd into that HH:mm:ss shape, for session-close to push a
+// real completion duration (see session-close/route.ts).
+export function formatAppsheetDuration(elapsedMs: number): string {
+  const totalSeconds = Math.max(0, Math.round(elapsedMs / 1000));
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  const p2 = (n: number) => String(n).padStart(2, '0');
+  return `${p2(h)}:${p2(m)}:${p2(s)}`;
+}
+
 // Shared by mapObjectenToSessionSummary below and the buildings list's
 // "Last inspected" column (toBuildingSummary in buildings/page.tsx and the
 // mobile buildings route) — same past-due/synthetic-default completion
@@ -452,9 +471,17 @@ export function mapVerdiepingRow(row: Record<string, unknown>): Zone {
     description: row['Notities'] ? String(row['Notities']) : null,
     energy_label: null,
     rekenzone_id: row['Rekenzone ID'] ? String(row['Rekenzone ID']) : null,
-    // "Plattegrond Schets" is a path into AppSheet's own file storage, not a
-    // URL this app can sign/serve — floor plans stay unavailable in this mode.
-    floor_plan_image_url: null,
+    // "Plattegrond Schets" holds an opaque app-relative path when a human
+    // uploads a photo through AppSheet's own client (not something this app
+    // can sign/serve), but confirmed live: writing a full external URL into
+    // it via the Action API round-trips unchanged as that same URL — so a
+    // Scanergy-pushed floor plan (see session-close/route.ts) comes back as
+    // a directly usable image URL. Only trust it when it actually looks like
+    // one, so an AppSheet-native upload doesn't render as a broken image.
+    floor_plan_image_url: /^https?:\/\//.test(String(row['Plattegrond Schets'] ?? '')) ? String(row['Plattegrond Schets']) : null,
+    // Grid geometry (traced outline, calibrated scale) is a Scanergy-only
+    // mid-session mechanic with no AppSheet column at all — only the flat
+    // image itself syncs, not the polygon/scale it was traced with.
     floor_plan_points: null,
     floor_plan_scale_m: null,
   };
@@ -803,12 +830,19 @@ export const ORIENTATIE_LABELS: Record<number, string> = {
 
 export function buildVerdiepingEditRow(
   zoneId: string,
-  fields: { grossAreaM2?: number | null; ceilingHeightM?: number | null; notes?: string | null }
+  fields: {
+    grossAreaM2?: number | null; ceilingHeightM?: number | null; notes?: string | null;
+    plattegrondSchets?: string | null;
+  }
 ): Record<string, unknown> {
   const row: Record<string, unknown> = { 'Verdieping ID': zoneId };
   if (fields.grossAreaM2 !== undefined) row['GBO'] = fields.grossAreaM2 ?? '';
   if (fields.ceilingHeightM !== undefined) row['Hoogte'] = fields.ceilingHeightM ?? '';
   if (fields.notes !== undefined) row['Notities'] = fields.notes ?? '';
+  // Confirmed live (session-close/route.ts): a full external URL written
+  // here round-trips unchanged, unlike most Image/File columns elsewhere in
+  // this schema which have never been confirmed writable.
+  if (fields.plattegrondSchets !== undefined) row['Plattegrond Schets'] = fields.plattegrondSchets ?? '';
   return row;
 }
 
@@ -923,7 +957,10 @@ export function buildNewRekenzoneRow(
 // caller must resolve or create a Rekenzone first (see session-close/route.ts).
 export function buildNewVerdiepingRow(
   objectId: string,
-  fields: { naam: string; rekenzoneId: string; grossAreaM2?: number | null; ceilingHeightM?: number | null; notes?: string | null }
+  fields: {
+    naam: string; rekenzoneId: string; grossAreaM2?: number | null; ceilingHeightM?: number | null; notes?: string | null;
+    plattegrondSchets?: string | null;
+  }
 ): Record<string, unknown> {
   return {
     'Object ID': objectId,
@@ -932,6 +969,7 @@ export function buildNewVerdiepingRow(
     ...(fields.grossAreaM2 != null ? { GBO: fields.grossAreaM2 } : {}),
     ...(fields.ceilingHeightM != null ? { Hoogte: fields.ceilingHeightM } : {}),
     ...(fields.notes ? { Notities: fields.notes } : {}),
+    ...(fields.plattegrondSchets ? { 'Plattegrond Schets': fields.plattegrondSchets } : {}),
   };
 }
 

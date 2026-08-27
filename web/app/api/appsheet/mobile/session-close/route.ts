@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthFromRequest } from '../../_auth';
-import { appsheetAction, AppSheetConfigError } from '@/lib/appsheet/client';
+import { appsheetAction, appsheetFind, AppSheetConfigError } from '@/lib/appsheet/client';
 import {
   buildNewVerdiepingRow, buildVerdiepingEditRow,
   buildNewRekenzoneRow,
@@ -8,7 +8,8 @@ import {
   buildNewDakRow, buildDakEditRow,
   buildNewVloerRow, buildVloerEditRow,
   buildNewInstallatieRow, buildInstallatieEditRow,
-  buildNewTransparantDeelRow,
+  buildNewTransparantDeelRow, buildTransparantDeelEditRow,
+  formatAppsheetDuration, parseAppsheetDateTime, escapeForSelector,
 } from '@/lib/appsheet/mappers';
 
 // Fires once, when an inspector closes a session on a building whose
@@ -28,7 +29,7 @@ import {
 // A dak/vloer/installatie whose zone has no rekenzone assigned still can't
 // be pushed — there's no Rekenzone to attach it to in AppSheet's model —
 // and is reported back as skipped rather than silently dropped.
-interface ZoneInput { id: string; appsheet_row_key: string | null; rekenzone_id: string | null; name: string; gross_area_m2: number | null; ceiling_height_m: number | null; description: string | null; }
+interface ZoneInput { id: string; appsheet_row_key: string | null; rekenzone_id: string | null; name: string; gross_area_m2: number | null; ceiling_height_m: number | null; description: string | null; floor_plan_image_url: string | null; }
 interface ElementInput {
   id: string; appsheet_row_key: string | null; zone_id: string; element_type: string; name: string;
   length_mm: number | null; width_mm: number | null; height_mm: number | null; area_m2: number | null;
@@ -50,6 +51,41 @@ const ELEMENT_SYNC_SPEC: Record<string, { table: string; key: string; parentOpen
 
 function mmToM(v: number | null): number | undefined {
   return v != null ? v / 1000 : undefined;
+}
+
+// Every buildXEditRow() in mappers.ts treats a field as "leave this AppSheet
+// column untouched" only when it's `undefined`; `null` is treated as "clear
+// it to empty" (see buildVerdiepingEditRow etc — `!== undefined` gates
+// inclusion, `?? ''` blanks it). Supabase returns `null`, not `undefined`,
+// for an unset column, and mmToM(null) below normally already returns
+// undefined but was being coerced back to `null` via `?? null` at several
+// call sites — so every Edit call ended up actively blanking any dimension
+// or enum-backed field (Positie, Type Dak, Vloerisolatie, Type Installatie,
+// Orientatie, Glastype, Materiaal…) that just happened to be unset locally,
+// even when AppSheet already had a real value for it. Confirmed live: a
+// blank "Positie" 400s the whole Edit ("Missing value in column: Positie",
+// an Enum column) — other blanked enum columns either 400 the same way or
+// silently erase real data, neither of which is intended by "this field
+// wasn't touched this session." orUndef() converts null -> undefined so
+// these edit-row builders correctly skip the field instead.
+function orUndef<T>(v: T | null | undefined): T | undefined {
+  return v == null ? undefined : v;
+}
+
+// appsheetAction('Add', ...) responds with { Rows: [...] } — NOT a bare
+// array like appsheetFind does. Every `Array.isArray(added)` check below
+// used to assume the Find shape, so it was always false for an Add
+// response and silently treated every successful Add as if it returned no
+// row — the new row's key was never read back, so appsheet_row_key was
+// never persisted to Supabase and the same zone/element got re-Added (or
+// reported as unresolvable, e.g. "could not create a Rekenzone") on every
+// subsequent close, even though AppSheet had already created the row.
+function firstAddedRow(added: unknown): Record<string, unknown> | undefined {
+  if (added && typeof added === 'object' && Array.isArray((added as any).Rows)) {
+    return (added as any).Rows[0];
+  }
+  if (Array.isArray(added)) return added[0];
+  return undefined;
 }
 
 // The mobile app's opening_type is English ('window'/'door'/'skylight' —
@@ -104,7 +140,7 @@ export async function POST(req: NextRequest) {
       if (rz.appsheet_row_key) return rz.appsheet_row_key;
       const row = buildNewRekenzoneRow(objectId!, { naam: rz.name });
       const added = await appsheetAction('Rekenzones', 'Add', [row]);
-      const newKey = Array.isArray(added) ? String(added[0]?.['Rekenzone ID'] ?? '') : '';
+      const newKey = String(firstAddedRow(added)?.['Rekenzone ID'] ?? '');
       if (newKey) {
         await (supabase.from('rekenzones') as any).update({ appsheet_row_key: newKey }).eq('id', rekenzoneId);
         rz.appsheet_row_key = newKey;
@@ -125,7 +161,7 @@ export async function POST(req: NextRequest) {
       if (zone.rekenzone_id) return ensureRekenzoneKey(zone.rekenzone_id);
       const rzRow = buildNewRekenzoneRow(objectId!, { naam: zone.name });
       const addedRz = await appsheetAction('Rekenzones', 'Add', [rzRow]);
-      const rekenzoneKey = Array.isArray(addedRz) ? String(addedRz[0]?.['Rekenzone ID'] ?? '') || null : null;
+      const rekenzoneKey = String(firstAddedRow(addedRz)?.['Rekenzone ID'] ?? '') || null;
       if (!rekenzoneKey) return null;
       const insertedRz = await (supabase.from('rekenzones') as any)
         .insert({ org_id: orgId, building_id: buildingId, appsheet_row_key: rekenzoneKey, name: zone.name })
@@ -142,7 +178,8 @@ export async function POST(req: NextRequest) {
     for (const zone of zones) {
       if (zone.appsheet_row_key) {
         const row = buildVerdiepingEditRow(zone.appsheet_row_key, {
-          grossAreaM2: zone.gross_area_m2, ceilingHeightM: zone.ceiling_height_m, notes: zone.description,
+          grossAreaM2: orUndef(zone.gross_area_m2), ceilingHeightM: orUndef(zone.ceiling_height_m), notes: orUndef(zone.description),
+          plattegrondSchets: orUndef(zone.floor_plan_image_url),
         });
         await appsheetAction('Verdiepingen', 'Edit', [row]);
         results.push({ table: 'Verdiepingen', id: zone.id, status: 'edited', appsheetKey: zone.appsheet_row_key });
@@ -157,9 +194,10 @@ export async function POST(req: NextRequest) {
 
       const row = buildNewVerdiepingRow(objectId, {
         naam: zone.name, rekenzoneId: rekenzoneKey, grossAreaM2: zone.gross_area_m2, ceilingHeightM: zone.ceiling_height_m, notes: zone.description,
+        plattegrondSchets: zone.floor_plan_image_url,
       });
       const added = await appsheetAction('Verdiepingen', 'Add', [row]);
-      const newKey = Array.isArray(added) ? String(added[0]?.['Verdieping ID'] ?? '') : '';
+      const newKey = String(firstAddedRow(added)?.['Verdieping ID'] ?? '');
       if (newKey) {
         await (supabase.from('zones') as any).update({ appsheet_row_key: newKey }).eq('id', zone.id);
         zone.appsheet_row_key = newKey;
@@ -240,22 +278,22 @@ export async function POST(req: NextRequest) {
       if (el.appsheet_row_key) {
         const row = el.element_type === 'gevel'
           ? buildGevelEditRow(el.appsheet_row_key, {
-              name: el.name, widthM: mmToM(el.length_mm) ?? null, heightM: mmToM(el.height_mm) ?? null,
-              areaM2: el.area_m2, orientationDeg: el.orientation_deg, positie: el.construction_type, notes: el.notes,
+              name: orUndef(el.name), widthM: mmToM(el.length_mm), heightM: mmToM(el.height_mm),
+              areaM2: orUndef(el.area_m2), orientationDeg: orUndef(el.orientation_deg), positie: orUndef(el.construction_type), notes: orUndef(el.notes),
             })
           : el.element_type === 'dak'
           ? buildDakEditRow(el.appsheet_row_key, {
-              name: el.name, lengthM: mmToM(el.length_mm) ?? null, widthM: mmToM(el.width_mm) ?? null,
-              areaM2: el.area_m2, tiltDeg: el.tilt_deg, roofType: el.construction_type,
-              nokhoogteM: el.nokhoogte_m, notes: el.notes,
+              name: orUndef(el.name), lengthM: mmToM(el.length_mm), widthM: mmToM(el.width_mm),
+              areaM2: orUndef(el.area_m2), tiltDeg: orUndef(el.tilt_deg), roofType: orUndef(el.construction_type),
+              nokhoogteM: orUndef(el.nokhoogte_m), notes: orUndef(el.notes),
             })
           : el.element_type === 'vloer'
           ? buildVloerEditRow(el.appsheet_row_key, {
-              name: el.name, lengthM: mmToM(el.length_mm) ?? null, widthM: mmToM(el.width_mm) ?? null,
-              areaM2: el.area_m2, vloerisolatie: el.insulation_type, notes: el.notes,
+              name: orUndef(el.name), lengthM: mmToM(el.length_mm), widthM: mmToM(el.width_mm),
+              areaM2: orUndef(el.area_m2), vloerisolatie: orUndef(el.insulation_type), notes: orUndef(el.notes),
             })
           : buildInstallatieEditRow(el.appsheet_row_key, {
-              installationType: el.installation_type, merkModel: el.brand, notes: el.notes,
+              installationType: orUndef(el.installation_type), merkModel: orUndef(el.brand), notes: orUndef(el.notes),
             });
         await appsheetAction(spec.table, 'Edit', [row]);
         newKey = el.appsheet_row_key;
@@ -289,7 +327,7 @@ export async function POST(req: NextRequest) {
               installationType: el.installation_type || 'Onbekend', merkModel: el.brand, notes: el.notes,
             });
         const added = await appsheetAction(spec.table, 'Add', [row]);
-        newKey = Array.isArray(added) ? String(added[0]?.[spec.key] ?? '') : '';
+        newKey = String(firstAddedRow(added)?.[spec.key] ?? '');
         if (newKey) {
           await (supabase.from('building_elements') as any).update({ appsheet_row_key: newKey }).eq('id', el.id);
         }
@@ -330,6 +368,23 @@ export async function POST(req: NextRequest) {
     }
 
     for (const opening of openings) {
+      // Already linked to an AppSheet row from a prior session-close on this
+      // same building — Edit it in place instead of re-Adding, otherwise
+      // every closed session after the first would push a duplicate
+      // Transparante_Delen row for the same physical window/door. Mirrors
+      // the zone/element branching above. No parent-wall resolution needed
+      // here — the row already carries its Gevel/Dak/Vloer ID link in AppSheet.
+      if (opening.appsheet_row_key) {
+        const row = buildTransparantDeelEditRow(opening.appsheet_row_key, {
+          typeDeel: OPENING_TYPE_TO_APPSHEET[opening.opening_type] ?? 'Raam',
+          widthM: mmToM(opening.width_mm), heightM: mmToM(opening.height_mm),
+          glastype: orUndef(opening.glazing_type), materiaal: orUndef(opening.frame_type), notes: orUndef(opening.notes),
+        });
+        await appsheetAction('Transparante_Delen', 'Edit', [row]);
+        results.push({ table: 'Transparante_Delen', id: opening.id, status: 'edited', appsheetKey: opening.appsheet_row_key });
+        continue;
+      }
+
       const wallElementId = wallParentByOpeningElementId.get(opening.element_id) ?? opening.element_id;
       const parent = parentKeyByElementId.get(wallElementId);
       if (!parent) {
@@ -342,11 +397,54 @@ export async function POST(req: NextRequest) {
         areaM2: opening.area_m2, glastype: opening.glazing_type, materiaal: opening.frame_type, notes: opening.notes,
       });
       const added = await appsheetAction('Transparante_Delen', 'Add', [row]);
-      const newKey = Array.isArray(added) ? String(added[0]?.['Deel ID'] ?? '') : '';
+      const newKey = String(firstAddedRow(added)?.['Deel ID'] ?? '');
       if (newKey) {
         await (supabase.from('openings') as any).update({ appsheet_row_key: newKey }).eq('id', opening.id);
       }
       results.push({ table: 'Transparante_Delen', id: opening.id, status: 'added', appsheetKey: newKey || undefined });
+    }
+
+    // Mark the visit complete on the Objecten row itself, so AppSheet-mode
+    // admin views (dashboard "Active sessions", /sessions list) stop
+    // counting this building's session as active. AppSheet's own "Status"
+    // column has no confirmed-valid "completed" enum value (only "Nieuw"/
+    // "Besteld" are known — see OBJECTEN_STATUS_MAP). "Eind Opname Compleet"
+    // — the column objectenSessionStatus() actually reads for its past-due
+    // check — LOOKS writable but is a read-only formula column (confirmed
+    // live: an Edit to it has no effect). "Duur" is the real writable input
+    // that formula is computed from (Opname Datum/Tijd + Duur — confirmed
+    // live too), so this pushes the real elapsed time since the visit
+    // started instead. Wrapped separately so a failure here doesn't discard
+    // the zone/element/opening results above.
+    try {
+      const idf = escapeForSelector(objectId);
+      const objRows = await appsheetFind('Objecten', `FILTER(Objecten, [Object ID] = "${idf}")`);
+      const objRow = Array.isArray(objRows) ? objRows[0] : undefined;
+      const opnameStart = objRow
+        ? parseAppsheetDateTime(`${objRow['Opname Datum'] ?? ''} ${objRow['Opname Tijd'] ?? ''}`.trim())
+        : null;
+      if (!opnameStart) {
+        results.push({ table: 'Objecten', id: buildingId, status: 'skipped', reason: 'could not read this visit\'s start time from AppSheet' });
+      } else {
+        let elapsedMs = Math.max(0, Date.now() - opnameStart.getTime());
+        // objectenSessionStatus() ignores an Eind Opname Compleet that sits
+        // within ~1 minute of exactly Opname Tijd + 60 minutes — that's
+        // AppSheet's own synthetic default for a never-touched row, not a
+        // real completion. A genuine ~1-hour inspection would collide with
+        // that same window and get ignored the same way, so nudge clear of
+        // it — this doesn't need to be exact, only "clearly not the
+        // untouched default and clearly in the past."
+        const SYNTHETIC_DEFAULT_MS = 60 * 60 * 1000;
+        if (Math.abs(elapsedMs - SYNTHETIC_DEFAULT_MS) < 2 * 60 * 1000) {
+          elapsedMs = SYNTHETIC_DEFAULT_MS + 2 * 60 * 1000;
+        }
+        await appsheetAction('Objecten', 'Edit', [
+          { 'Object ID': objectId, Duur: formatAppsheetDuration(elapsedMs) },
+        ]);
+        results.push({ table: 'Objecten', id: buildingId, status: 'edited', appsheetKey: objectId });
+      }
+    } catch (e: any) {
+      results.push({ table: 'Objecten', id: buildingId, status: 'failed', reason: e?.message ?? 'could not mark the visit complete' });
     }
   } catch (err) {
     if (err instanceof AppSheetConfigError) {

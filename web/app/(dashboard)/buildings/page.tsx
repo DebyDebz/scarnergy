@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase-server';
 import { getServerDataSource } from '@/lib/dataSource/serverSource';
 import { appsheetFind } from '@/lib/appsheet/client';
-import { mapObjectenRow } from '@/lib/appsheet/mappers';
+import { mapObjectenRow, objectenSessionStatus, countRelatedIds } from '@/lib/appsheet/mappers';
 import { EnergyLabelBadge } from '@/components/buildings/EnergyLabelBadge';
 import { DeleteBuildingButton } from '@/components/buildings/DeleteBuildingButton';
 import { AppsheetDeleteBuildingButton } from '@/components/buildings/AppsheetDeleteBuildingButton';
@@ -20,19 +20,25 @@ interface Props {
   searchParams: { q?: string };
 }
 
-// AppSheet-sourced buildings only carry the fields Objecten/BAG Data
-// actually provide (see lib/appsheet/mappers.ts) — zone/element/session
-// counts, last-inspection date, and energy label have no AppSheet-side
-// equivalent in this build's scope, so they're defaulted rather than faked.
+// AppSheet has no energy-label equivalent at all, so that stays defaulted.
+// Zone/element counts come straight off the Objecten row's own "Related X"
+// ref-list columns (countRelatedIds — no extra Find call needed), and
+// session/last-inspected reuse the same pseudo-session model the AppSheet
+// Sessions page already established: every Objecten row IS one session
+// (objectenSessionStatus), so session_count is always 1 here.
 function toBuildingSummary(row: Record<string, unknown>, bagRow: Record<string, unknown> | undefined): BuildingSummary {
   const building = mapObjectenRow(row, bagRow);
+  const { completedAt } = objectenSessionStatus(row);
   return {
     ...building,
-    full_address: `${building.street} ${building.house_number}, ${building.postal_code} ${building.city}`.trim(),
-    zone_count: 0,
-    element_count: 0,
-    session_count: 0,
-    last_inspection_at: null,
+    full_address: building.address_unresolved
+      ? 'Address not yet resolved'
+      : `${building.street} ${building.house_number}, ${building.postal_code} ${building.city}`.trim(),
+    zone_count: countRelatedIds(row['Related Verdiepingen']),
+    element_count: countRelatedIds(row['Related Gevels']) + countRelatedIds(row['Related Dakens'])
+      + countRelatedIds(row['Related Vloerens']) + countRelatedIds(row['Related Installaties']),
+    session_count: 1,
+    last_inspection_at: completedAt,
     latest_energy_label: null,
   };
 }
@@ -146,9 +152,9 @@ function BuildingsTable({ buildings, q, isAdmin, source }: TableProps) {
                 <td className="px-5 py-3 text-gray-700">{b.full_address}</td>
                 <td className="px-5 py-3 text-gray-500 capitalize">{b.building_type}</td>
                 <td className="px-5 py-3 text-gray-500">{b.construction_year || '—'}</td>
-                <td className="px-5 py-3 text-gray-700">{source === 'appsheet' ? '—' : b.zone_count}</td>
-                <td className="px-5 py-3 text-gray-700">{source === 'appsheet' ? '—' : b.element_count}</td>
-                <td className="px-5 py-3 text-gray-700">{source === 'appsheet' ? '—' : b.session_count}</td>
+                <td className="px-5 py-3 text-gray-700">{b.zone_count}</td>
+                <td className="px-5 py-3 text-gray-700">{b.element_count}</td>
+                <td className="px-5 py-3 text-gray-700">{b.session_count}</td>
                 <td className="px-5 py-3 text-gray-500">
                   {b.last_inspection_at
                     ? fmtDate(b.last_inspection_at)

@@ -33,6 +33,13 @@ type EditPanelProps = {
   onSaved: () => void;
 };
 
+type OpeningEditPanelProps = {
+  element: ElementWithRelations;
+  opening: Opening | null;
+  onClose: () => void;
+  onSaved: () => void;
+};
+
 interface Props {
   elements: ElementWithRelations[];
   /** element id → signed photo URLs (inspection-photos bucket) */
@@ -41,6 +48,14 @@ interface Props {
   readOnly?: boolean;
   /** swap the edit UI — AppsheetBuildingDetail passes AppsheetElementEditPanel */
   EditPanel?: React.ComponentType<EditPanelProps>;
+  /**
+   * Per-opening add/edit UI (AppsheetBuildingDetail passes
+   * AppsheetOpeningEditPanel) — omitted entirely for native mode, which has
+   * no opening-level write path of its own here, so TransparanteDelen keeps
+   * rendering exactly as before (no pencil, no "+ add" button) when this
+   * is undefined.
+   */
+  OpeningEditPanel?: React.ComponentType<OpeningEditPanelProps>;
 }
 
 const SECTIONS: { type: string; nl: string; en: string }[] = [
@@ -113,8 +128,24 @@ function NotesPhotos({ el, urls }: { el: BuildingElement; urls: string[] }) {
   );
 }
 
-function TransparanteDelen({ openings }: { openings: Opening[] }) {
-  if (openings.length === 0) return null;
+function TransparanteDelen({ openings, onEdit, onAdd }: {
+  openings: Opening[]; onEdit?: (opening: Opening) => void; onAdd?: () => void;
+}) {
+  if (openings.length === 0 && !onAdd) return null;
+
+  // onAdd set (AppSheet mode) but nothing to disclose yet — a <details> with
+  // no content reads oddly, so this is a plain action bar instead.
+  if (openings.length === 0) {
+    return (
+      <button
+        onClick={onAdd}
+        className="mt-2 flex items-center gap-2 text-xs font-medium text-indigo-700 bg-indigo-50/60 rounded-lg px-3 py-2 hover:bg-indigo-100/60 w-full text-left"
+      >
+        + Voeg Transparant Deel toe <span className="font-normal text-gray-400">Add window/door</span>
+      </button>
+    );
+  }
+
   return (
     <details className="group/td mt-2">
       <summary className="flex items-center gap-2 cursor-pointer list-none text-xs font-medium text-indigo-700 bg-indigo-50/60 rounded-lg px-3 py-2">
@@ -122,6 +153,14 @@ function TransparanteDelen({ openings }: { openings: Opening[] }) {
         Transparante Delen
         <span className="bg-indigo-100 text-indigo-700 rounded-full px-1.5 py-0.5 text-[11px] font-semibold">{openings.length}</span>
         <span className="font-normal text-gray-400">Windows / doors</span>
+        {onAdd && (
+          <button
+            onClick={e => { e.preventDefault(); onAdd(); }}
+            className="ml-auto text-indigo-600 hover:underline font-medium"
+          >
+            + Voeg toe
+          </button>
+        )}
       </summary>
       <div className="mt-2 space-y-2">
         {openings.map(o => {
@@ -129,8 +168,17 @@ function TransparanteDelen({ openings }: { openings: Opening[] }) {
           const w = mmToM(o.width_mm);
           const bruto = h != null && w != null ? r2(h * w) : null;
           return (
-            <div key={o.id} className="rounded-lg border border-indigo-100 bg-indigo-50/30 px-3 py-2.5">
-              <p className="text-xs font-semibold text-gray-800 capitalize mb-2">
+            <div key={o.id} className="relative rounded-lg border border-indigo-100 bg-indigo-50/30 px-3 py-2.5">
+              {onEdit && (
+                <button
+                  onClick={() => onEdit(o)}
+                  className="absolute right-2 top-2 p-1 rounded hover:bg-white text-gray-400 hover:text-gray-700"
+                  title="Deel bewerken"
+                >
+                  <Pencil className="w-3 h-3" />
+                </button>
+              )}
+              <p className="text-xs font-semibold text-gray-800 capitalize mb-2 pr-6">
                 {o.opening_type}{o.name ? <span className="text-gray-400 font-normal"> · {o.name}</span> : null}
               </p>
               <dl className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2">
@@ -163,7 +211,12 @@ function TransparanteDelen({ openings }: { openings: Opening[] }) {
   );
 }
 
-function GevelRow({ el, urls }: { el: ElementWithRelations; urls: string[] }) {
+type RowProps = {
+  el: ElementWithRelations; urls: string[];
+  onEditOpening?: (opening: Opening) => void; onAddOpening?: () => void;
+};
+
+function GevelRow({ el, urls, onEditOpening, onAddOpening }: RowProps) {
   const positie    = gevelpositie(el);
   const orientatie = toCardinal(el.orientation_deg);
   const hoogte     = mmToM(el.height_mm);
@@ -195,13 +248,13 @@ function GevelRow({ el, urls }: { el: ElementWithRelations; urls: string[] }) {
         <Field label="Bruto Oppervlakte" value={fmtArea(bruto)} />
         <Field label="Rc"          value={<RcValue el={el} />} />
       </dl>
-      <TransparanteDelen openings={el.openings} />
+      <TransparanteDelen openings={el.openings} onEdit={onEditOpening} onAdd={onAddOpening} />
       <NotesPhotos el={el} urls={urls} />
     </div>
   );
 }
 
-function DakRow({ el, urls }: { el: ElementWithRelations; urls: string[] }) {
+function DakRow({ el, urls, onEditOpening, onAddOpening }: RowProps) {
   const breakdown = roofAreaBreakdown(el, el.openings, el.dakkapellen);
   return (
     <div className="px-4 py-3">
@@ -241,7 +294,7 @@ function DakRow({ el, urls }: { el: ElementWithRelations; urls: string[] }) {
           </div>
         </div>
       )}
-      <TransparanteDelen openings={el.openings} />
+      <TransparanteDelen openings={el.openings} onEdit={onEditOpening} onAdd={onAddOpening} />
       <NotesPhotos el={el} urls={urls} />
     </div>
   );
@@ -289,7 +342,7 @@ function InstallatieRow({ el, urls }: { el: ElementWithRelations; urls: string[]
   );
 }
 
-function GenericRow({ el, urls }: { el: ElementWithRelations; urls: string[] }) {
+function GenericRow({ el, urls, onEditOpening, onAddOpening }: RowProps) {
   const dims = [el.length_mm, el.width_mm, el.height_mm]
     .map(v => (v != null ? `${v}mm` : null)).filter(Boolean).join(' × ');
   return (
@@ -305,13 +358,13 @@ function GenericRow({ el, urls }: { el: ElementWithRelations; urls: string[] }) 
         <Field label="Rc" value={el.rc_value ?? '—'} />
         <Field label="U" value={el.u_value ?? '—'} />
       </dl>
-      <TransparanteDelen openings={el.openings} />
+      <TransparanteDelen openings={el.openings} onEdit={onEditOpening} onAdd={onAddOpening} />
       <NotesPhotos el={el} urls={urls} />
     </div>
   );
 }
 
-const ROW_BY_TYPE: Record<string, (p: { el: ElementWithRelations; urls: string[] }) => React.ReactNode> = {
+const ROW_BY_TYPE: Record<string, (p: RowProps) => React.ReactNode> = {
   gevel:       GevelRow,
   dak:         DakRow,
   vloer:       VloerRow,
@@ -344,9 +397,12 @@ function ChipRow({ label, options, active, onToggle }: {
   );
 }
 
-export function ElementTypeSections({ elements, photoUrls, readOnly = false, EditPanel = ElementEditPanel }: Props) {
+export function ElementTypeSections({
+  elements, photoUrls, readOnly = false, EditPanel = ElementEditPanel, OpeningEditPanel,
+}: Props) {
   const router = useRouter();
   const [editing, setEditing] = useState<ElementWithRelations | null>(null);
+  const [editingOpening, setEditingOpening] = useState<{ element: ElementWithRelations; opening: Opening | null } | null>(null);
   const [grenstFilter, setGrenstFilter] = useState<string | null>(null);
   const [orientFilter, setOrientFilter] = useState<string | null>(null);
 
@@ -423,7 +479,11 @@ export function ElementTypeSections({ elements, photoUrls, readOnly = false, Edi
                       <Pencil className="w-3.5 h-3.5" />
                     </button>
                   )}
-                  <Row el={el} urls={photoUrls[el.id] ?? []} />
+                  <Row
+                    el={el} urls={photoUrls[el.id] ?? []}
+                    onEditOpening={!readOnly && OpeningEditPanel ? (o) => setEditingOpening({ element: el, opening: o }) : undefined}
+                    onAddOpening={!readOnly && OpeningEditPanel ? () => setEditingOpening({ element: el, opening: null }) : undefined}
+                  />
                 </div>
               );
             })}
@@ -437,6 +497,15 @@ export function ElementTypeSections({ elements, photoUrls, readOnly = false, Edi
           opening={editing.element_type === 'transparant_deel' ? (editing.openings[0] ?? null) : null}
           onClose={() => setEditing(null)}
           onSaved={() => router.refresh()}
+        />
+      )}
+
+      {!readOnly && OpeningEditPanel && editingOpening && (
+        <OpeningEditPanel
+          element={editingOpening.element}
+          opening={editingOpening.opening}
+          onClose={() => setEditingOpening(null)}
+          onSaved={() => { setEditingOpening(null); router.refresh(); }}
         />
       )}
     </div>

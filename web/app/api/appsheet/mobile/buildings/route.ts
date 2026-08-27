@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthFromRequest } from '../../_auth';
 import { appsheetFind, AppSheetConfigError } from '@/lib/appsheet/client';
-import { mapObjectenRow } from '@/lib/appsheet/mappers';
+import { mapObjectenRow, objectenSessionStatus, countRelatedIds } from '@/lib/appsheet/mappers';
+import { materializeBuilding, MaterializeNotFoundError } from '@/lib/appsheet/materializeBuilding';
 
 // Mobile-facing AppSheet reads/writes live under mobile/ rather than the
 // dashboard's [table] proxy: the dashboard proxy's write actions are
@@ -10,15 +11,23 @@ import { mapObjectenRow } from '@/lib/appsheet/mappers';
 // Mapping stays server-side (mapObjectenRow) so the mobile app never needs
 // its own copy of lib/appsheet/mappers.ts.
 
+// AppSheet has no energy-label equivalent at all, so that stays defaulted.
+// Zone/element counts and session/last-inspected mirror the web buildings
+// list (see toBuildingSummary in web/app/(dashboard)/buildings/page.tsx) —
+// same countRelatedIds/objectenSessionStatus helpers, no extra Find call.
 function toBuildingSummary(row: Record<string, unknown>, bagRow: Record<string, unknown> | undefined) {
   const building = mapObjectenRow(row, bagRow);
+  const { completedAt } = objectenSessionStatus(row);
   return {
     ...building,
-    full_address: `${building.street} ${building.house_number}, ${building.postal_code} ${building.city}`.trim(),
-    zone_count: 0,
-    element_count: 0,
-    session_count: 0,
-    last_inspection_at: null,
+    full_address: building.address_unresolved
+      ? 'Address not yet resolved'
+      : `${building.street} ${building.house_number}, ${building.postal_code} ${building.city}`.trim(),
+    zone_count: countRelatedIds(row['Related Verdiepingen']),
+    element_count: countRelatedIds(row['Related Gevels']) + countRelatedIds(row['Related Dakens'])
+      + countRelatedIds(row['Related Vloerens']) + countRelatedIds(row['Related Installaties']),
+    session_count: 1,
+    last_inspection_at: completedAt,
     latest_energy_label: null,
   };
 }
@@ -74,55 +83,17 @@ export async function POST(req: NextRequest) {
   const orgId = profileResult.data?.org_id;
   if (!orgId) return NextResponse.json({ error: 'No organisation on profile' }, { status: 403 });
 
-  const existing = await (supabase.from('buildings') as any)
-    .select('id')
-    .eq('appsheet_object_id', objectId)
-    .maybeSingle() as unknown as { data: { id: string } | null };
-  if (existing.data) {
-    return NextResponse.json({ id: existing.data.id });
-  }
-
-  let objectenRow: Record<string, unknown> | undefined;
-  let bagRow: Record<string, unknown> | undefined;
   try {
-    const [objectenResult, bagResult] = await Promise.all([
-      appsheetFind('Objecten', `FILTER(Objecten, [Object ID] = "${objectId}")`),
-      appsheetFind('BAG Data', `FILTER("BAG Data", [Object ID] = "${objectId}")`),
-    ]);
-    objectenRow = Array.isArray(objectenResult) ? objectenResult[0] : undefined;
-    bagRow = Array.isArray(bagResult) ? bagResult[0] : undefined;
+    const id = await materializeBuilding(supabase, orgId, objectId);
+    return NextResponse.json({ id });
   } catch (err) {
     if (err instanceof AppSheetConfigError) {
       return NextResponse.json({ error: err.message }, { status: 503 });
     }
+    if (err instanceof MaterializeNotFoundError) {
+      return NextResponse.json({ error: err.message }, { status: 404 });
+    }
     const message = err instanceof Error ? err.message : 'Unknown AppSheet error';
     return NextResponse.json({ error: message }, { status: 502 });
   }
-  if (!objectenRow) {
-    return NextResponse.json({ error: `No AppSheet building found for objectId "${objectId}"` }, { status: 404 });
-  }
-
-  const building = mapObjectenRow(objectenRow, bagRow);
-  const buildingType = building.building_type === 'Woning' ? 'residential_single' : 'other';
-
-  const inserted = await (supabase.from('buildings') as any)
-    .insert({
-      org_id: orgId,
-      appsheet_object_id: objectId,
-      reference_code: building.reference_code,
-      street: building.street || 'Unknown',
-      house_number: building.house_number || '',
-      postal_code: building.postal_code || '',
-      city: building.city || 'Unknown',
-      building_type: buildingType,
-      construction_year: building.construction_year || null,
-      gross_floor_area_m2: building.gross_floor_area_m2 || null,
-    })
-    .select('id')
-    .single() as unknown as { data: { id: string } | null; error: { message: string } | null };
-
-  if (inserted.error || !inserted.data) {
-    return NextResponse.json({ error: inserted.error?.message ?? 'Failed to materialize building' }, { status: 500 });
-  }
-  return NextResponse.json({ id: inserted.data.id });
 }

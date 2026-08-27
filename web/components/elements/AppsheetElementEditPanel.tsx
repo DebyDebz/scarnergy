@@ -7,7 +7,7 @@ import {
   buildGevelEditRow, buildDakEditRow, buildVloerEditRow, buildInstallatieEditRow,
   GRENST_AAN_OMSCHRIJVING, ORIENTATIE_LABELS,
 } from '@/lib/appsheet/mappers';
-import type { BuildingElement } from '@/lib/types';
+import type { ElementWithRelations } from './ElementTypeSections';
 
 // AppSheet-mode counterpart to ElementEditPanel — same slide-over shape and
 // field-driven layout, but the field set per element type is only what the
@@ -19,10 +19,9 @@ import type { BuildingElement } from '@/lib/types';
 //
 // Delete has no Scanergy-mode equivalent (elements aren't deletable there
 // either) — added specifically for AppSheet per explicit request. Any
-// Transparante Delen (openings) attached to the element aren't cascade-
-// deleted — that table has no write path at all today — so they're left as
-// orphaned rows, never rendered without a parent element; an accepted,
-// low-risk limitation rather than something solved here.
+// Transparante Delen (openings) attached to the element ARE cascade-deleted
+// first (see handleDelete) — Transparante_Delen got a real write path
+// (Add/Edit/Delete, confirmed live) once this was closed.
 
 type FieldType = 'select' | 'number' | 'text';
 interface FieldDef {
@@ -89,7 +88,7 @@ const FIELDS_BY_TYPE: Record<string, FieldDef[]> = {
 // Populates form state from the already-mapped BuildingElement (mm -> m for
 // display, degrees -> Dutch label, omschrijving already carried in
 // description).
-function initialValues(element: BuildingElement): Record<string, string> {
+function initialValues(element: ElementWithRelations): Record<string, string> {
   const orientationLabel = element.orientation_deg != null ? (ORIENTATIE_LABELS[element.orientation_deg] ?? '') : '';
   switch (element.element_type) {
     case 'gevel':
@@ -137,7 +136,7 @@ function initialValues(element: BuildingElement): Record<string, string> {
   }
 }
 
-function buildRow(element: BuildingElement, values: Record<string, string>): { table: string; row: Record<string, unknown> } | null {
+function buildRow(element: ElementWithRelations, values: Record<string, string>): { table: string; row: Record<string, unknown> } | null {
   const num = (v: string) => (v === '' ? null : Number(v));
   switch (element.element_type) {
     case 'gevel':
@@ -158,6 +157,7 @@ function buildRow(element: BuildingElement, values: Record<string, string>): { t
       return {
         table: 'Daken',
         row: buildDakEditRow(element.id, {
+          name: values.name || null,
           lengthM: num(values.lengthM),
           widthM: num(values.widthM),
           areaM2: num(values.areaM2),
@@ -172,6 +172,7 @@ function buildRow(element: BuildingElement, values: Record<string, string>): { t
       return {
         table: 'Vloeren',
         row: buildVloerEditRow(element.id, {
+          name: values.name || null,
           lengthM: num(values.lengthM),
           widthM: num(values.widthM),
           areaM2: num(values.areaM2),
@@ -196,7 +197,7 @@ function buildRow(element: BuildingElement, values: Record<string, string>): { t
 }
 
 interface Props {
-  element: BuildingElement | null;
+  element: ElementWithRelations | null;
   // Accepted for interface parity with ElementEditPanel (see
   // ElementTypeSections' EditPanel prop) — AppSheet elements have no
   // transparant_deel edit surface here, so this is always ignored.
@@ -255,6 +256,23 @@ export function AppsheetElementEditPanel({ element, onClose, onSaved }: Props) {
     startDeleteTransition(async () => {
       setError(null);
       try {
+        // Cascade: delete this element's openings first — otherwise they're
+        // left orphaned in AppSheet (never rendered without a parent, but
+        // never cleaned up either). Abort before touching the parent row if
+        // this fails, rather than leaving a partially-cleaned-up state.
+        if (element.openings.length > 0) {
+          const openingsRes = await fetch('/api/appsheet/Transparante_Delen', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rows: element.openings.map(o => ({ 'Deel ID': o.id })) }),
+          });
+          if (!openingsRes.ok) {
+            const data = await openingsRes.json().catch(() => ({}));
+            setError(data.error ?? 'Could not delete this element’s openings');
+            return;
+          }
+        }
+
         const res = await fetch(`/api/appsheet/${spec.table}`, {
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json' },
