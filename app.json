@@ -7,7 +7,7 @@
     "newArchEnabled": false,
     "ios": {
       "bundleIdentifier": "com.krontivaafrica.scarnergyapp",
-      "buildNumber": "17",
+      "buildNumber": "19",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSBluetoothAlwaysUsageDescription": "This app uses Bluetooth to connect to and communicate with your GLM device.",
@@ -56,11 +56,11 @@
       ],
       "@sentry/react-native"
     ],
-    "owner": "krontivaorg",
+    "owner": "krontiva-africa",
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "70f0b188-6dce-49a4-a3b8-73e9c6f3a668"
+        "projectId": "e41c9a9f-d0c2-4076-9392-3e36e42169c0"
       }
     }
   }

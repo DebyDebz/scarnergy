@@ -86,11 +86,11 @@ verify_token() {
   [[ -z "$username" ]] && die "Could not read viewer.username from Expo response — token may be invalid."
   ok "Authenticated as Expo user: ${BOLD}${username}${RESET}"
 
-  # Confirm the token can see the 'fabricelaba' owner account that owns this project.
-  if echo "$resp" | grep -q '"name"[[:space:]]*:[[:space:]]*"fabricelaba"'; then
-    ok "Token has access to the 'fabricelaba' account (project owner)"
+  # Confirm the token can see the 'krontiva-africa' owner account that owns this project.
+  if echo "$resp" | grep -q '"name"[[:space:]]*:[[:space:]]*"krontiva-africa"'; then
+    ok "Token has access to the 'krontiva-africa' account (project owner)"
   else
-    warn "The 'fabricelaba' account was not listed for this token."
+    warn "The 'krontiva-africa' account was not listed for this token."
     warn "The build may fail if this token cannot access project $PROJECT_ID."
     warn "Accounts visible to this token: $(echo "$resp" | grep -oE '"name"[[:space:]]*:[[:space:]]*"[^"]+"' | sed -E 's/.*"([^"]+)"$/\1/' | paste -sd ', ' -)"
   fi
@@ -120,5 +120,5 @@ EXPO_TOKEN="$EXPO_TOKEN" npx --yes eas-cli@latest build \
 
 echo ""
 ok "Build submitted. Watch progress at:"
-log "https://expo.dev/accounts/fabricelaba/projects/scarnergy-app/builds"
+log "https://expo.dev/accounts/krontiva-africa/projects/scarnergy-app/builds"
 echo ""
