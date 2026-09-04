@@ -67,6 +67,7 @@ export async function POST(req: NextRequest) {
     role: 'admin',
     full_name: fullName.trim(),
     is_active: true,
+    status: 'approved',
   });
   if (profileResult.error) {
     return NextResponse.json({ error: profileResult.error.message }, { status: 500 });

@@ -4,13 +4,16 @@ import { LogOut, ChevronDown } from 'lucide-react';
 import { createClient } from '@/lib/supabase';
 import { useState } from 'react';
 import { DataSourceToggle } from './DataSourceToggle';
+import { NotificationBell, type PendingUser } from './NotificationBell';
 
 interface Props {
   fullName: string;
   orgName: string;
+  orgId?: string;
+  pendingUsers?: PendingUser[];
 }
 
-export function TopBar({ fullName, orgName }: Props) {
+export function TopBar({ fullName, orgName, orgId, pendingUsers }: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
 
@@ -29,6 +32,7 @@ export function TopBar({ fullName, orgName }: Props) {
         Admin Panel
       </div>
       <div className="flex items-center gap-4">
+      {pendingUsers && orgId && <NotificationBell pending={pendingUsers} orgId={orgId} />}
       <DataSourceToggle />
       <div className="relative">
         <button

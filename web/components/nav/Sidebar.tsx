@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard, Building2, ClipboardList, Users,
-  Building, Bluetooth, Zap, Ruler
+  Building, Bluetooth, Zap, Ruler, Bell
 } from 'lucide-react';
 import type { Role } from '@/lib/types';
 
@@ -13,11 +13,12 @@ const NAV = [
   { href: '/sessions', label: 'Sessions', icon: ClipboardList, roles: ['supervisor', 'admin'] as Role[] },
   { href: '/measurements', label: 'Measurements', icon: Ruler, roles: ['supervisor', 'admin'] as Role[] },
   { href: '/users', label: 'Users', icon: Users, roles: ['admin'] as Role[] },
+  { href: '/notifications', label: 'Notifications', icon: Bell, roles: ['admin'] as Role[] },
   { href: '/organizations', label: 'Organizations', icon: Building, roles: ['admin'] as Role[] },
   { href: '/devices', label: 'BLE Devices', icon: Bluetooth, roles: ['admin'] as Role[] },
 ];
 
-export function Sidebar({ role }: { role: Role }) {
+export function Sidebar({ role, pendingCount = 0 }: { role: Role; pendingCount?: number }) {
   const path = usePathname();
   const visible = NAV.filter(n => n.roles.includes(role));
 
@@ -47,6 +48,11 @@ export function Sidebar({ role }: { role: Role }) {
             >
               <Icon className="w-4 h-4 shrink-0" />
               {label}
+              {href === '/notifications' && pendingCount > 0 && (
+                <span className="ml-auto flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-semibold leading-none">
+                  {pendingCount > 9 ? '9+' : pendingCount}
+                </span>
+              )}
             </Link>
           );
         })}

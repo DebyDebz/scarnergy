@@ -68,7 +68,7 @@ export function AppsheetInviteUserForm({ orgs }: Props) {
         />
       </div>
       <div>
-        <label className="block text-xs font-medium text-gray-700 mb-1">Bedrijf</label>
+        <label className="block text-xs font-medium text-gray-700 mb-1">Bedrijf (Company)</label>
         <select
           required value={bedrijfId} onChange={e => setBedrijfId(e.target.value)}
           className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -80,13 +80,13 @@ export function AppsheetInviteUserForm({ orgs }: Props) {
         </select>
       </div>
       <div>
-        <label className="block text-xs font-medium text-gray-700 mb-1">Rol</label>
+        <label className="block text-xs font-medium text-gray-700 mb-1">Rol (Role)</label>
         <select
           value={rol} onChange={e => setRol(e.target.value as 'Inspecteur' | 'Beheerder')}
           className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
         >
-          <option value="Inspecteur">Inspecteur</option>
-          <option value="Beheerder">Beheerder</option>
+          <option value="Inspecteur">Inspecteur (Inspector)</option>
+          <option value="Beheerder">Beheerder (Administrator)</option>
         </select>
       </div>
       <button

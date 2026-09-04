@@ -250,6 +250,9 @@ export function mapInspecteurRow(row: Record<string, unknown>): UserProfile {
     role: INSPECTEUR_ROLE_MAP[String(row['Rol'] ?? '').trim()] ?? 'inspector',
     full_name: String(row['Inspecteur Naam'] ?? ''),
     is_active: String(row['Actief'] ?? '').trim().toUpperCase() === 'Y',
+    // AppSheet has no request-to-join/approval flow — its Inspecteurs are
+    // always admin-added directly, so they're always 'approved'.
+    status: 'approved',
   };
 }
 

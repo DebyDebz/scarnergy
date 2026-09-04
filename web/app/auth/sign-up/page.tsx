@@ -15,7 +15,11 @@ export default function SignUpPage() {
         <h1 className="text-xl font-semibold text-gray-900 mb-1">Create your organisation</h1>
         <p className="text-sm text-gray-500 mb-6">You&apos;ll be the first admin — invite your team once you&apos;re in.</p>
         <SignUpForm />
-        <p className="text-sm text-gray-500 mt-6 text-center">
+        <p className="text-sm text-gray-500 mt-4 text-center">
+          Joining a team that already uses Scarnergy?{' '}
+          <Link href="/auth/request-access" className="text-indigo-600 hover:underline font-medium">Request access</Link>
+        </p>
+        <p className="text-sm text-gray-500 mt-2 text-center">
           Already have an account?{' '}
           <Link href="/auth/login" className="text-indigo-600 hover:underline font-medium">Sign in</Link>
         </p>

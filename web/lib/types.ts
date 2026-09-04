@@ -10,12 +10,14 @@ export interface Organisation {
   longitude: number | null;
   settings: Record<string, unknown>;
 }
+export type UserStatus = 'pending' | 'approved' | 'rejected';
 export interface UserProfile {
   id: string;
   org_id: string;
   role: Role;
   full_name: string;
   is_active: boolean;
+  status: UserStatus;
 }
 export interface BleDevice {
   id: string;

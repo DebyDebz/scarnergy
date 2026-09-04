@@ -9,7 +9,7 @@ import { ChangeRoleButton } from '@/components/admin/ChangeRoleButton';
 import { AppsheetChangeRoleButton } from '@/components/admin/AppsheetChangeRoleButton';
 import { AppsheetToggleActiveButton } from '@/components/admin/AppsheetToggleActiveButton';
 import { Users } from 'lucide-react';
-import type { UserProfile, InspectionSession } from '@/lib/types';
+import type { UserProfile, InspectionSession, Organisation } from '@/lib/types';
 import { fmtDate } from '@/lib/format';
 
 export const revalidate = 0;
@@ -104,13 +104,15 @@ export default async function UsersPage() {
 
   const orgId = adminProfileResult.data!.org_id;
 
-  const [usersResult, sessionsResult] = await Promise.all([
+  const [usersResult, sessionsResult, orgsResult] = await Promise.all([
     supabase.from('user_profiles').select('*').eq('org_id', orgId).order('full_name'),
     supabase.from('inspection_sessions').select('inspector_id, started_at').eq('org_id', orgId).eq('is_active', true).order('started_at', { ascending: false }),
+    supabase.from('organisations').select('*').order('name'),
   ]);
 
   const users = (usersResult as unknown as { data: UserProfile[] | null }).data ?? [];
   const sessions = (sessionsResult as unknown as { data: Pick<InspectionSession, 'inspector_id' | 'started_at'>[] | null }).data ?? [];
+  const orgs = (orgsResult as unknown as { data: Organisation[] | null }).data ?? [];
 
   const lastSession = (id: string) =>
     sessions.find(s => s.inspector_id === id)?.started_at;
@@ -132,7 +134,7 @@ export default async function UsersPage() {
           <Users className="w-4 h-4 text-indigo-600" />
           <h2 className="font-semibold text-gray-900 text-sm">Invite new user</h2>
         </div>
-        <InviteUserForm orgId={orgId} />
+        <InviteUserForm orgId={orgId} orgs={orgs} />
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">

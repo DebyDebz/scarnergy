@@ -32,6 +32,7 @@ export async function POST(req: NextRequest) {
     role,
     full_name,
     is_active: true,
+    status: 'approved',
   });
 
   return NextResponse.json({ ok: true });
