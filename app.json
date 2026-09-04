@@ -2,7 +2,7 @@
   "expo": {
     "name": "scarnergy-app",
     "slug": "scarnergy-app",
-    "version": "2.0.0",
+    "version": "2.0.1",
     "jsEngine": "hermes",
     "newArchEnabled": false,
     "ios": {
