@@ -94,6 +94,7 @@ export interface Organisation {
 }
 export interface UserProfile {
   id: string; org_id: string; role: string; full_name: string; is_active: boolean;
+  status?: 'pending' | 'approved' | 'rejected';
 }
 export interface BleDevice {
   id: string; org_id: string; mac_address: string; nickname: string; device_type: string;

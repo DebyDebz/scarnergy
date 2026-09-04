@@ -10,12 +10,14 @@ import { buildVabiXml } from "@scarnergy/opname-calc";
 import { elementTypeLabel } from "../../../lib/elementTypes";
 import { FloorPlanReview } from "../../../components/inspection/FloorPlanReview";
 import { pushSessionResultsToAppsheet } from "../../../lib/appsheetProxy";
+import { useRoomScanner } from "../../../hooks/useRoomScanner";
 
 export default function SessionDetailScreen() {
   const { id: sessionId } = useLocalSearchParams<{ id: string }>();
   const router     = useRouter();
   const navigation = useNavigation();
   const { state: bleState, deviceName, isConnected, scan, disconnect } = useBLE();
+  const { isSupported: roomScanSupported } = useRoomScanner();
 
   const [session,         setSession]         = useState<SessionSummary | null>(null);
   const [sessionLoading,  setSessionLoading]  = useState(true);
@@ -422,6 +424,17 @@ export default function SessionDetailScreen() {
                 >
                   <Text style={styles.floorPlanBtnText}>⊞</Text>
                 </TouchableOpacity>
+                {roomScanSupported && (
+                  <TouchableOpacity
+                    style={styles.scanBtn}
+                    onPress={() => router.push({
+                      pathname: "/tabs/sessions/roomscan",
+                      params: { zoneId: z.id, sessionId: sessionId ?? "" },
+                    })}
+                  >
+                    <Text style={styles.scanBtnText}>📡</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             ))}
           </ScrollView>
@@ -635,6 +648,9 @@ const styles = StyleSheet.create({
   floorPlanBtn:        { width: 32, height: 32, borderRadius: 8, backgroundColor: "#2E86C1",
                          alignItems: "center", justifyContent: "center" },
   floorPlanBtnText:    { fontSize: 16, color: "#fff", fontWeight: "700", lineHeight: 20 },
+  scanBtn:             { width: 32, height: 32, borderRadius: 8, backgroundColor: "#1E3A5F",
+                         alignItems: "center", justifyContent: "center", marginLeft: 6 },
+  scanBtnText:         { fontSize: 14 },
 
   list:                { padding: 16, gap: 12 },
   emptyWrap:           { padding: 40, alignItems: 'center', gap: 16 },

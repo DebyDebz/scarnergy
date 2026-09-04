@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, KeyboardAvoidingView, Platform } from "react-native";
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, KeyboardAvoidingView, Platform, Linking } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuthStore } from "../../store/authStore";
@@ -50,6 +50,15 @@ export default function SignIn() {
           onPress={() => router.push("/auth/forgot-password")} disabled={loading}>
           <Text style={styles.forgotText}>Forgot password?</Text>
         </TouchableOpacity>
+        <View style={styles.signUpRow}>
+          <Text style={styles.signUpPrompt}>Don't have an account?</Text>
+          <TouchableOpacity
+            onPress={() => Linking.openURL("https://scanergy.krontiva.africa/auth/sign-up")}
+            disabled={loading}
+          >
+            <Text style={styles.signUpLink}>Sign up</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     </KeyboardAvoidingView>
   );
@@ -71,4 +80,7 @@ const styles = StyleSheet.create({
   buttonText:     { color: "#FFF", fontSize: 16, fontWeight: "700" },
   forgotBtn:      { alignItems: "center", marginTop: 16 },
   forgotText:     { color: "#2E86C1", fontSize: 14, fontWeight: "600" },
+  signUpRow:      { flexDirection: "row", justifyContent: "center", alignItems: "center", marginTop: 20 },
+  signUpPrompt:   { color: "#888", fontSize: 14 },
+  signUpLink:     { color: "#2E86C1", fontSize: 14, fontWeight: "700", marginLeft: 6 },
 });
