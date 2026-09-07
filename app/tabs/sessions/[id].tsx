@@ -424,17 +424,24 @@ export default function SessionDetailScreen() {
                 >
                   <Text style={styles.floorPlanBtnText}>⊞</Text>
                 </TouchableOpacity>
-                {roomScanSupported && (
-                  <TouchableOpacity
-                    style={styles.scanBtn}
-                    onPress={() => router.push({
+                <TouchableOpacity
+                  style={[styles.scanBtn, !roomScanSupported && styles.scanBtnDisabled]}
+                  onPress={() => {
+                    if (!roomScanSupported) {
+                      Alert.alert(
+                        "Room Scan Unavailable",
+                        "This device doesn't support LiDAR room scanning. Room scan requires an iPhone or iPad Pro with a LiDAR sensor."
+                      );
+                      return;
+                    }
+                    router.push({
                       pathname: "/tabs/sessions/roomscan",
                       params: { zoneId: z.id, sessionId: sessionId ?? "" },
-                    })}
-                  >
-                    <Text style={styles.scanBtnText}>📡</Text>
-                  </TouchableOpacity>
-                )}
+                    });
+                  }}
+                >
+                  <Text style={styles.scanBtnText}>📡</Text>
+                </TouchableOpacity>
               </View>
             ))}
           </ScrollView>
@@ -650,6 +657,7 @@ const styles = StyleSheet.create({
   floorPlanBtnText:    { fontSize: 16, color: "#fff", fontWeight: "700", lineHeight: 20 },
   scanBtn:             { width: 32, height: 32, borderRadius: 8, backgroundColor: "#1E3A5F",
                          alignItems: "center", justifyContent: "center", marginLeft: 6 },
+  scanBtnDisabled:     { backgroundColor: "#B0B8C1" },
   scanBtnText:         { fontSize: 14 },
 
   list:                { padding: 16, gap: 12 },
