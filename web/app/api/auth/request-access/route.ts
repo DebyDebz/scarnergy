@@ -51,6 +51,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: userResult.error?.message ?? 'Could not create user' }, { status: 400 });
   }
 
+  // createUser's email_confirm flag is unreliable on this self-hosted
+  // GoTrue instance — it silently leaves some accounts unconfirmed, which
+  // then fail sign-in with "Invalid login credentials" despite the correct
+  // password. A follow-up updateUserById with the same flag confirms them
+  // deterministically (verified directly against the auth server).
+  await serviceClient.auth.admin.updateUserById(userResult.data.user.id, { email_confirm: true });
+
   const profileResult = await (serviceClient.from('user_profiles') as any).upsert({
     id: userResult.data.user.id,
     org_id: orgId,
