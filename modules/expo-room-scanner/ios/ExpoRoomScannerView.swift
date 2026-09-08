@@ -64,6 +64,17 @@ class ExpoRoomScannerView: ExpoView {
     }
   }
 
+  // RoomCaptureView is created with a zero frame in init() (before RN has laid out this
+  // wrapper), so its internal AR camera layer can end up stuck at that initial size and
+  // never show the live passthrough even once autoresizing masks resolve the outer frame.
+  // Explicitly re-syncing the frame on every layout pass guarantees it always matches.
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    if let captureView = roomCaptureView as? UIView, captureView.frame != bounds {
+      captureView.frame = bounds
+    }
+  }
+
   override func removeFromSuperview() {
     if #available(iOS 16.0, *), let captureView = roomCaptureView as? RoomCaptureView, isCurrentlyScanning {
       captureView.captureSession.stop()
