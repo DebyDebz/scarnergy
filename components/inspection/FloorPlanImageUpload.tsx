@@ -11,6 +11,7 @@ import {
   SketchSymbol, sketchSymbolsToElements, elementsToDrafts,
 } from '../../lib/floorplanDetect';
 import { uploadImageToStorage } from '../../lib/uploadImage';
+import { syncToAppsheetIfLinked } from '../../lib/appsheetSync';
 import { PaintCanvas, isSketchAvailable } from './PaintCanvas';
 
 let ImagePicker: typeof import('expo-image-picker') | null = null;
@@ -386,6 +387,11 @@ export function FloorPlanImageUpload({ zoneId, zoneName, buildingId, onSaved, on
         );
         if (drafts.length) await supabase.from('building_elements').insert(drafts);
       }
+
+      // Best-effort push to AppSheet if this building is linked (no-op
+      // otherwise). Never blocks or reverts the save above on failure — same
+      // fire-and-forget contract as the session-close sync it's shared with.
+      if (buildingId) syncToAppsheetIfLinked(buildingId);
 
       setSaving(false);
 

@@ -125,9 +125,25 @@ export default function RoomScanScreen() {
     );
   }
 
+  const tryAgain = useCallback(() => {
+    scanner.reset();
+    scanner.startScan();
+  }, [scanner]);
+
   return (
     <View style={styles.container}>
-      {scanner.state !== "done" ? (
+      {scanner.state === "error" ? (
+        <View style={styles.errorWrap}>
+          <Text style={styles.errorTitle}>Scan failed</Text>
+          <Text style={styles.errorMessage}>{scanner.errorMessage}</Text>
+          <TouchableOpacity style={styles.startBtn} onPress={tryAgain}>
+            <Text style={styles.startBtnText}>Try Again</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.errorBackBtn} onPress={() => router.back()}>
+            <Text style={styles.errorBackBtnText}>Back</Text>
+          </TouchableOpacity>
+        </View>
+      ) : scanner.state !== "done" ? (
         <>
           <ExpoRoomScannerView
             style={styles.scannerView}
@@ -206,6 +222,11 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#000" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24, backgroundColor: "#F5F7FA" },
   centerText: { fontSize: 15, color: "#374151", textAlign: "center", marginBottom: 20 },
+  errorWrap: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24, backgroundColor: "#F5F7FA", gap: 12 },
+  errorTitle: { fontSize: 18, fontWeight: "700", color: "#C0392B" },
+  errorMessage: { fontSize: 14, color: "#374151", textAlign: "center", lineHeight: 20, marginBottom: 12 },
+  errorBackBtn: { paddingVertical: 10, paddingHorizontal: 20 },
+  errorBackBtnText: { color: "#6b7280", fontWeight: "600", fontSize: 14 },
   scannerView: { flex: 1 },
   controls: { padding: 20, backgroundColor: "#1E3A5F" },
   finishingRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, paddingVertical: 14 },

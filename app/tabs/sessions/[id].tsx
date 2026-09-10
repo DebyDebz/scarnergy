@@ -9,7 +9,7 @@ import { useBLE } from "../../../lib/BLEContext";
 import { buildVabiXml } from "@scarnergy/opname-calc";
 import { elementTypeLabel } from "../../../lib/elementTypes";
 import { FloorPlanReview } from "../../../components/inspection/FloorPlanReview";
-import { pushSessionResultsToAppsheet } from "../../../lib/appsheetProxy";
+import { syncToAppsheetIfLinked } from "../../../lib/appsheetSync";
 import { useRoomScanner } from "../../../hooks/useRoomScanner";
 
 export default function SessionDetailScreen() {
@@ -129,57 +129,8 @@ export default function SessionDetailScreen() {
   // ── Session lifecycle actions ──────────────────────────────────────────────
 
   // Best-effort export of this session's finished zone/gevel/opening
-  // dimensions to AppSheet, IF this building was originally sourced from
-  // AppSheet (buildings.appsheet_object_id set — see the "materialize"
-  // step in tabs/buildings.tsx). Supabase is always the write of record;
-  // this never blocks or reverts session close on failure.
-  // Returns a summary so callers that need explicit feedback (the manual
-  // retry button below) can report it — the original auto-sync-on-close
-  // call site ignores the return value and keeps its existing silent-on-
-  // success behavior unchanged.
-  const syncToAppsheetIfLinked = useCallback(async (buildingId: string) => {
-    const buildingRes = await (supabase.from("buildings") as any)
-      .select("appsheet_object_id")
-      .eq("id", buildingId)
-      .maybeSingle();
-    if (!buildingRes.data?.appsheet_object_id) return { linked: false as const };
-
-    try {
-      const zonesRes = await supabase.from("zones").select("*").eq("building_id", buildingId).eq("is_active", true);
-      const zoneIds = (zonesRes.data ?? []).map((z: Zone) => z.id);
-      const elementsRes = zoneIds.length
-        ? await supabase.from("building_elements").select("*").in("zone_id", zoneIds).eq("is_active", true)
-        : { data: [] };
-      const elementIds = Array.from(new Set((elementsRes.data ?? []).map((e: BuildingElement) => e.id)));
-      const openingsRes = elementIds.length
-        ? await supabase.from("openings").select("*").in("element_id", elementIds).eq("is_active", true)
-        : { data: [] };
-      const openings = openingsRes.data ?? [];
-
-      const results = await pushSessionResultsToAppsheet({
-        buildingId,
-        zones: zonesRes.data ?? [],
-        elements: elementsRes.data ?? [],
-        openings,
-      });
-      const failed = results.filter(r => r.status === "failed");
-      if (failed.length) {
-        console.warn("[AppSheet sync] some rows failed:", failed);
-      }
-      return {
-        linked: true as const,
-        total: results.length,
-        added: results.filter(r => r.status === "added").length,
-        edited: results.filter(r => r.status === "edited").length,
-        skipped: results.filter(r => r.status === "skipped").length,
-        failed: failed.length,
-      };
-    } catch (e: any) {
-      console.warn("[AppSheet sync] session-close export failed:", e.message);
-      Alert.alert("Saved locally", "Your session is saved, but syncing results to AppSheet failed. You can retry later.");
-      return { linked: true as const, error: e.message as string };
-    }
-  }, []);
+  // dimensions to AppSheet — see lib/appsheetSync.ts. Supabase is always the
+  // write of record; this never blocks or reverts session close on failure.
 
   // Manual re-run of the same export, for a session whose auto-sync-on-close
   // already failed (or partially failed) — the failure alert above has always
@@ -187,7 +138,7 @@ export default function SessionDetailScreen() {
   const retrySync = useCallback(async () => {
     if (!session?.building_id || retryingSync) return;
     setRetryingSync(true);
-    const summary = await syncToAppsheetIfLinked(session.building_id);
+    const summary = await syncToAppsheetIfLinked(session.building_id, session.notes);
     setRetryingSync(false);
     if (!summary || 'error' in summary) return; // failure alert already shown above
     if (!summary.linked) return; // building isn't AppSheet-linked; button shouldn't be visible anyway
@@ -217,7 +168,7 @@ export default function SessionDetailScreen() {
                 body: { session_id: sessionId },
               });
               if (fnErr) throw fnErr;
-              if (session.building_id) await syncToAppsheetIfLinked(session.building_id);
+              if (session.building_id) await syncToAppsheetIfLinked(session.building_id, session.notes);
               loadSession();
               router.push({ pathname: "/tabs/sessions/results", params: { id: sessionId } });
             } catch (fnEx: any) {
@@ -229,7 +180,7 @@ export default function SessionDetailScreen() {
               });
               if (rpcErr) Alert.alert("Error", rpcErr.message);
               else {
-                if (session.building_id) await syncToAppsheetIfLinked(session.building_id);
+                if (session.building_id) await syncToAppsheetIfLinked(session.building_id, session.notes);
                 loadSession();
                 router.push({ pathname: "/tabs/sessions/results", params: { id: sessionId } });
               }

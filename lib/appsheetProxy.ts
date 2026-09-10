@@ -180,6 +180,8 @@ export async function pushSessionResultsToAppsheet(payload: {
   zones: unknown[];
   elements: unknown[];
   openings: unknown[];
+  facadePhotos?: unknown[];
+  sessionNotes?: string | null;
 }): Promise<SessionCloseSyncResult[]> {
   const data = await callProxy<{ results: SessionCloseSyncResult[] }>("/api/appsheet/mobile/session-close", payload);
   return data.results;

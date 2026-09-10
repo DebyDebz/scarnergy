@@ -9,8 +9,11 @@ import {
   buildNewVloerRow, buildVloerEditRow,
   buildNewInstallatieRow, buildInstallatieEditRow,
   buildNewTransparantDeelRow, buildTransparantDeelEditRow,
+  buildObjectenFacadePhotosEditRow, FACADE_DIRECTION_TO_OBJECTEN_COLUMN,
   formatAppsheetDuration, parseAppsheetDateTime, escapeForSelector,
 } from '@/lib/appsheet/mappers';
+
+const SIGNED_URL_EXPIRY_SECONDS = 60 * 60 * 24 * 365 * 5; // 5 years — "practically permanent" for an AppSheet-facing link into a private bucket, without making the bucket public.
 
 // Fires once, when an inspector closes a session on a building whose
 // AppSheet source is active (buildings.appsheet_object_id is set) — a batch
@@ -37,16 +40,21 @@ interface ElementInput {
   construction_type: string | null; insulation_type: string | null; description: string | null;
   installation_type: string | null; brand: string | null; notes: string | null;
   grid_x: number | null; grid_y: number | null;
+  photo_urls: string[] | null;
 }
 interface OpeningInput { id: string; appsheet_row_key: string | null; element_id: string; opening_type: string; width_mm: number | null; height_mm: number | null; area_m2: number | null; glazing_type: string | null; frame_type: string | null; notes: string | null; }
+interface FacadePhotoInput { direction: string; photo_url: string }
 
 // Which AppSheet table + parent-id field each syncable element_type uses —
 // keeps the elements loop below one shared shape instead of 3 near-copies.
-const ELEMENT_SYNC_SPEC: Record<string, { table: string; key: string; parentOpeningField?: 'Gevel ID' | 'Dak ID' | 'Vloer ID' }> = {
-  gevel: { table: 'Gevels', key: 'Gevel ID', parentOpeningField: 'Gevel ID' },
+// `photoField` is the builder param name that carries building_elements'
+// photo_urls[0] through (see mappers.ts) — Daken has no photo column in
+// AppSheet at all, so it's simply omitted for that type.
+const ELEMENT_SYNC_SPEC: Record<string, { table: string; key: string; parentOpeningField?: 'Gevel ID' | 'Dak ID' | 'Vloer ID'; photoField?: 'foto' | 'fotoKruipruimte' | 'fotoOverzicht' }> = {
+  gevel: { table: 'Gevels', key: 'Gevel ID', parentOpeningField: 'Gevel ID', photoField: 'foto' },
   dak: { table: 'Daken', key: 'Dak ID', parentOpeningField: 'Dak ID' },
-  vloer: { table: 'Vloeren', key: 'Vloer ID', parentOpeningField: 'Vloer ID' },
-  installatie: { table: 'Installaties', key: 'Installatie ID' },
+  vloer: { table: 'Vloeren', key: 'Vloer ID', parentOpeningField: 'Vloer ID', photoField: 'fotoKruipruimte' },
+  installatie: { table: 'Installaties', key: 'Installatie ID', photoField: 'fotoOverzicht' },
 };
 
 function mmToM(v: number | null): number | undefined {
@@ -105,6 +113,8 @@ export async function POST(req: NextRequest) {
   const zones: ZoneInput[] = Array.isArray(body?.zones) ? body.zones : [];
   const elements: ElementInput[] = Array.isArray(body?.elements) ? body.elements : [];
   const openings: OpeningInput[] = Array.isArray(body?.openings) ? body.openings : [];
+  const facadePhotos: FacadePhotoInput[] = Array.isArray(body?.facadePhotos) ? body.facadePhotos : [];
+  const sessionNotes: string | undefined = typeof body?.sessionNotes === 'string' ? body.sessionNotes : undefined;
   if (!buildingId) return NextResponse.json({ error: 'buildingId is required' }, { status: 400 });
 
   const buildingResult = await (supabase.from('buildings') as any)
@@ -118,6 +128,30 @@ export async function POST(req: NextRequest) {
   const orgId = buildingResult.data!.org_id;
 
   const results: { table: string; id: string; status: 'added' | 'edited' | 'skipped' | 'failed'; reason?: string; appsheetKey?: string }[] = [];
+
+  // building_elements.photo_urls and building_facade_photos.photo_url both
+  // store a private-bucket storage *path*, not a URL (see uploadImage.ts /
+  // facade-photos.tsx) — the in-app viewer signs a short 1-hour URL on
+  // demand, which isn't durable enough for AppSheet to keep rendering.
+  // Mint long-lived signed URLs up front, batched per bucket, so a failed
+  // signing attempt for one photo doesn't block the rest of the sync.
+  const elementPhotoPaths = Array.from(new Set(
+    elements.map(el => el.photo_urls?.[0]).filter((v): v is string => !!v)
+  ));
+  const facadePhotoPaths = facadePhotos.map(f => f.photo_url).filter((v): v is string => !!v);
+  const signedUrlByPath = new Map<string, string>();
+  const signBucket = async (bucket: string, paths: string[]) => {
+    if (!paths.length) return;
+    const { data, error } = await supabase.storage.from(bucket).createSignedUrls(paths, SIGNED_URL_EXPIRY_SECONDS);
+    if (error) return; // leave unresolved paths out of signedUrlByPath; callers treat a missing entry as "couldn't sign"
+    for (const entry of data ?? []) {
+      if (entry.signedUrl && !entry.error) signedUrlByPath.set(entry.path ?? '', entry.signedUrl);
+    }
+  };
+  await Promise.all([
+    signBucket('inspection-photos', elementPhotoPaths),
+    signBucket('facade-photos', facadePhotoPaths),
+  ]);
 
   try {
     const zoneById = new Map(zones.map((z) => [z.id, z]));
@@ -274,12 +308,21 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
+      // Signed-URL entry for this element's first photo, if it has one and
+      // this element_type has a place to put it in AppSheet (Daken doesn't —
+      // see ELEMENT_SYNC_SPEC). Missing from signedUrlByPath just means the
+      // signing call failed or there was no photo; either way, skip silently
+      // rather than fail the whole element sync over a photo.
+      const elPhotoUrl = spec.photoField ? signedUrlByPath.get(el.photo_urls?.[0] ?? '') : undefined;
+      const photoField = spec.photoField ? { [spec.photoField]: elPhotoUrl } : {};
+
       let newKey: string | undefined;
       if (el.appsheet_row_key) {
         const row = el.element_type === 'gevel'
           ? buildGevelEditRow(el.appsheet_row_key, {
               name: orUndef(el.name), widthM: mmToM(el.length_mm), heightM: mmToM(el.height_mm),
               areaM2: orUndef(el.area_m2), orientationDeg: orUndef(el.orientation_deg), positie: orUndef(el.construction_type), notes: orUndef(el.notes),
+              ...photoField,
             })
           : el.element_type === 'dak'
           ? buildDakEditRow(el.appsheet_row_key, {
@@ -291,9 +334,11 @@ export async function POST(req: NextRequest) {
           ? buildVloerEditRow(el.appsheet_row_key, {
               name: orUndef(el.name), lengthM: mmToM(el.length_mm), widthM: mmToM(el.width_mm),
               areaM2: orUndef(el.area_m2), vloerisolatie: orUndef(el.insulation_type), notes: orUndef(el.notes),
+              ...photoField,
             })
           : buildInstallatieEditRow(el.appsheet_row_key, {
               installationType: orUndef(el.installation_type), merkModel: orUndef(el.brand), notes: orUndef(el.notes),
+              ...photoField,
             });
         await appsheetAction(spec.table, 'Edit', [row]);
         newKey = el.appsheet_row_key;
@@ -304,6 +349,7 @@ export async function POST(req: NextRequest) {
               name: el.name, positie: el.construction_type || 'Voorgevel', rekenzoneId: gevelRekenzoneKey!,
               widthM: mmToM(el.length_mm) ?? null, heightM: mmToM(el.height_mm) ?? null,
               areaM2: el.area_m2, orientationDeg: el.orientation_deg, notes: el.notes,
+              ...photoField,
             })
           : el.element_type === 'dak'
           ? buildNewDakRow(parentKey, {
@@ -322,9 +368,11 @@ export async function POST(req: NextRequest) {
               naam: el.name, lengthM: mmToM(el.length_mm) ?? null, widthM: mmToM(el.width_mm) ?? null,
               areaM2: el.area_m2, vloerisolatie: el.insulation_type,
               grenztAanOmschrijving: el.description || 'Grond', notes: el.notes,
+              ...photoField,
             })
           : buildNewInstallatieRow(parentKey, {
               installationType: el.installation_type || 'Onbekend', merkModel: el.brand, notes: el.notes,
+              ...photoField,
             });
         const added = await appsheetAction(spec.table, 'Add', [row]);
         newKey = String(firstAddedRow(added)?.[spec.key] ?? '');
@@ -404,6 +452,39 @@ export async function POST(req: NextRequest) {
       results.push({ table: 'Transparante_Delen', id: opening.id, status: 'added', appsheetKey: newKey || undefined });
     }
 
+    // Push "Gevel Foto's" (building-level facade photos) onto the Objecten
+    // row's four direction columns — there's no separate AppSheet table for
+    // these, unlike zones/elements/openings (see buildObjectenFacadePhotosEditRow
+    // in mappers.ts). Wrapped separately, same reasoning as the Duur update
+    // below: a photo-sync failure shouldn't discard the results above.
+    if (facadePhotos.length) {
+      try {
+        const photosByDirection: Partial<Record<string, string>> = {};
+        for (const photo of facadePhotos) {
+          if (!(photo.direction in FACADE_DIRECTION_TO_OBJECTEN_COLUMN)) continue;
+          const signed = signedUrlByPath.get(photo.photo_url);
+          if (signed) photosByDirection[photo.direction] = signed;
+        }
+        const providedCount = Object.keys(photosByDirection).length;
+        if (providedCount) {
+          const row = buildObjectenFacadePhotosEditRow(objectId, photosByDirection as any);
+          await appsheetAction('Objecten', 'Edit', [row]);
+        }
+        for (const photo of facadePhotos) {
+          const wasPushed = photo.direction in photosByDirection;
+          results.push({
+            table: 'building_facade_photos', id: `${buildingId}:${photo.direction}`,
+            status: wasPushed ? 'edited' : 'skipped',
+            ...(wasPushed ? {} : { reason: 'could not sign a durable URL for this photo' }),
+          });
+        }
+      } catch (e: any) {
+        for (const photo of facadePhotos) {
+          results.push({ table: 'building_facade_photos', id: `${buildingId}:${photo.direction}`, status: 'failed', reason: e?.message ?? 'AppSheet Objecten Edit failed' });
+        }
+      }
+    }
+
     // Mark the visit complete on the Objecten row itself, so AppSheet-mode
     // admin views (dashboard "Active sessions", /sessions list) stop
     // counting this building's session as active. AppSheet's own "Status"
@@ -416,6 +497,13 @@ export async function POST(req: NextRequest) {
     // live too), so this pushes the real elapsed time since the visit
     // started instead. Wrapped separately so a failure here doesn't discard
     // the zone/element/opening results above.
+    //
+    // The inspector's session notes (inspection_sessions.notes) piggyback on
+    // this same Edit call, into Objecten's own "Notities Object" column —
+    // only included when non-empty, never sent as '' (would silently blank
+    // whatever an AppSheet user typed there directly, the same landmine
+    // orUndef() exists to avoid elsewhere in this file).
+    const trimmedNotes = sessionNotes?.trim();
     try {
       const idf = escapeForSelector(objectId);
       const objRows = await appsheetFind('Objecten', `FILTER(Objecten, [Object ID] = "${idf}")`);
@@ -439,7 +527,10 @@ export async function POST(req: NextRequest) {
           elapsedMs = SYNTHETIC_DEFAULT_MS + 2 * 60 * 1000;
         }
         await appsheetAction('Objecten', 'Edit', [
-          { 'Object ID': objectId, Duur: formatAppsheetDuration(elapsedMs) },
+          {
+            'Object ID': objectId, Duur: formatAppsheetDuration(elapsedMs),
+            ...(trimmedNotes ? { 'Notities Object': trimmedNotes } : {}),
+          },
         ]);
         results.push({ table: 'Objecten', id: buildingId, status: 'edited', appsheetKey: objectId });
       }

@@ -854,6 +854,9 @@ export function buildGevelEditRow(
   fields: {
     name?: string | null; widthM?: number | null; heightM?: number | null; areaM2?: number | null;
     orientationDeg?: number | null; grenztAanOmschrijving?: string | null; positie?: string | null; notes?: string | null;
+    // Gevels' single "Foto" column — confirmed to accept a plain external URL
+    // the same way Verdiepingen's "Plattegrond Schets" does (see there).
+    foto?: string | null;
   }
 ): Record<string, unknown> {
   const row: Record<string, unknown> = { 'Gevel ID': gevelId };
@@ -869,6 +872,7 @@ export function buildGevelEditRow(
   }
   if (fields.positie !== undefined) row['Positie'] = fields.positie ?? '';
   if (fields.notes !== undefined) row['Notities'] = fields.notes ?? '';
+  if (fields.foto !== undefined) row['Foto'] = fields.foto ?? '';
   return row;
 }
 
@@ -902,6 +906,9 @@ export function buildVloerEditRow(
     // app/api/appsheet/[table]/route.ts EDIT_TABLES.Vloeren comment).
     name?: string | null; lengthM?: number | null; widthM?: number | null; areaM2?: number | null; vloerisolatie?: string | null;
     grenztAanOmschrijving?: string | null; notes?: string | null;
+    // Vloeren's only photo column is scoped to the crawl space, not a
+    // general element photo — the closest fit AppSheet's schema offers.
+    fotoKruipruimte?: string | null;
   }
 ): Record<string, unknown> {
   const row: Record<string, unknown> = { 'Vloer ID': vloerId };
@@ -914,6 +921,7 @@ export function buildVloerEditRow(
     row['Grenzend aan code'] = fields.grenztAanOmschrijving ? (OMSCHRIJVING_TO_GRENST_AAN_CODE[fields.grenztAanOmschrijving] ?? '') : '';
   }
   if (fields.notes !== undefined) row['Notities'] = fields.notes ?? '';
+  if (fields.fotoKruipruimte !== undefined) row['Foto Kruipruimte'] = fields.fotoKruipruimte ?? '';
   return row;
 }
 
@@ -984,6 +992,7 @@ export function buildNewGevelRow(
   fields: {
     name?: string | null; positie: string; rekenzoneId: string; widthM?: number | null; heightM?: number | null;
     areaM2?: number | null; orientationDeg?: number | null; grenztAanOmschrijving?: string | null; notes?: string | null;
+    foto?: string | null;
   }
 ): Record<string, unknown> {
   return {
@@ -997,6 +1006,7 @@ export function buildNewGevelRow(
     ...(fields.orientationDeg != null ? { 'Orientatie Code': DEG_TO_ORIENTATIE_CODE[fields.orientationDeg] ?? '' } : {}),
     ...(fields.grenztAanOmschrijving ? { 'Grenzend aan code': OMSCHRIJVING_TO_GRENST_AAN_CODE[fields.grenztAanOmschrijving] ?? '' } : {}),
     ...(fields.notes ? { Notities: fields.notes } : {}),
+    ...(fields.foto ? { Foto: fields.foto } : {}),
   };
 }
 
@@ -1026,6 +1036,7 @@ export function buildNewVloerRow(
   fields: {
     naam?: string | null; lengthM?: number | null; widthM?: number | null; areaM2?: number | null;
     vloerisolatie?: string | null; grenztAanOmschrijving?: string | null; notes?: string | null;
+    fotoKruipruimte?: string | null;
   }
 ): Record<string, unknown> {
   return {
@@ -1037,12 +1048,20 @@ export function buildNewVloerRow(
     ...(fields.vloerisolatie ? { Vloerisolatie: fields.vloerisolatie } : {}),
     ...(fields.grenztAanOmschrijving ? { 'Grenzend aan code': OMSCHRIJVING_TO_GRENST_AAN_CODE[fields.grenztAanOmschrijving] ?? '' } : {}),
     ...(fields.notes ? { Notities: fields.notes } : {}),
+    ...(fields.fotoKruipruimte ? { 'Foto Kruipruimte': fields.fotoKruipruimte } : {}),
   };
 }
 
 export function buildNewInstallatieRow(
   rekenzoneId: string,
-  fields: { installationType: string; locatie?: string | null; merkModel?: string | null; notes?: string | null }
+  fields: {
+    installationType: string; locatie?: string | null; merkModel?: string | null; notes?: string | null;
+    // Installaties has three purpose-specific photo columns (overview,
+    // nameplate, thermostat); building_elements only carries one photo_urls
+    // array with no per-purpose tagging, so only the general "Foto
+    // Overzicht" (overview) slot is populated from it.
+    fotoOverzicht?: string | null;
+  }
 ): Record<string, unknown> {
   return {
     'Rekenzone ID': rekenzoneId,
@@ -1050,6 +1069,7 @@ export function buildNewInstallatieRow(
     ...(fields.locatie ? { 'Locatie in huis': fields.locatie } : {}),
     ...(fields.merkModel ? { 'Merk/Model': fields.merkModel } : {}),
     ...(fields.notes ? { 'Notities Installatie': fields.notes } : {}),
+    ...(fields.fotoOverzicht ? { 'Foto Overzicht': fields.fotoOverzicht } : {}),
   };
 }
 
@@ -1079,13 +1099,44 @@ export function buildNewTransparantDeelRow(
 
 export function buildInstallatieEditRow(
   installatieId: string,
-  fields: { installationType?: string | null; locatie?: string | null; merkModel?: string | null; notes?: string | null }
+  fields: {
+    installationType?: string | null; locatie?: string | null; merkModel?: string | null; notes?: string | null;
+    fotoOverzicht?: string | null;
+  }
 ): Record<string, unknown> {
   const row: Record<string, unknown> = { 'Installatie ID': installatieId };
   if (fields.installationType !== undefined) row['Type Installatie'] = fields.installationType ?? '';
   if (fields.locatie !== undefined) row['Locatie in huis'] = fields.locatie ?? '';
   if (fields.merkModel !== undefined) row['Merk/Model'] = fields.merkModel ?? '';
   if (fields.notes !== undefined) row['Notities Installatie'] = fields.notes ?? '';
+  if (fields.fotoOverzicht !== undefined) row['Foto Overzicht'] = fields.fotoOverzicht ?? '';
+  return row;
+}
+
+// building_facade_photos (mobile "Gevel Foto's" screen) has no table
+// counterpart in AppSheet — it's stored directly on the building's own
+// Objecten row instead, one column per direction. Confirmed present on
+// Objecten: "Voorgevel Foto", "Achtergevel foto", "Linkergevel foto",
+// "Rechtergevel foto" (front/back/left/right — matches
+// building_facade_photos.direction's 'voor'/'achter'/'links'/'rechts'
+// exactly). Edit-only: the Objecten row always already exists for a linked
+// building, there's never an Add case here.
+export const FACADE_DIRECTION_TO_OBJECTEN_COLUMN = {
+  voor: 'Voorgevel Foto',
+  achter: 'Achtergevel foto',
+  links: 'Linkergevel foto',
+  rechts: 'Rechtergevel foto',
+} as const;
+
+export function buildObjectenFacadePhotosEditRow(
+  objectId: string,
+  photosByDirection: Partial<Record<keyof typeof FACADE_DIRECTION_TO_OBJECTEN_COLUMN, string>>
+): Record<string, unknown> {
+  const row: Record<string, unknown> = { 'Object ID': objectId };
+  for (const [direction, url] of Object.entries(photosByDirection)) {
+    const column = FACADE_DIRECTION_TO_OBJECTEN_COLUMN[direction as keyof typeof FACADE_DIRECTION_TO_OBJECTEN_COLUMN];
+    if (column && url) row[column] = url;
+  }
   return row;
 }
 

@@ -9,6 +9,7 @@ try { ImagePicker = require("expo-image-picker"); } catch { ImagePicker = null; 
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { supabase, BuildingElement, Opening } from "../../../lib/supabase";
 import { uploadImageToStorage } from "../../../lib/uploadImage";
+import { syncToAppsheetIfLinked } from "../../../lib/appsheetSync";
 import { useBLE } from "../../../lib/BLEContext";
 import { useAuthStore } from "../../../store/authStore";
 import { GLMMeasurement } from "../../../hooks/useBLEDevice";
@@ -530,6 +531,11 @@ export default function InspectScreen() {
           .eq("id", element.id);
         // Update local element state so subsequent saves are correct
         setElement(prev => prev ? { ...prev, photo_urls: [...(prev.photo_urls ?? []), storagePath] } : prev);
+
+        // Best-effort push to AppSheet if this element's building is linked
+        // (no-op otherwise). Never blocks or reverts the save above on failure.
+        const { data: zoneRow } = await supabase.from("zones").select("building_id").eq("id", element.zone_id).maybeSingle();
+        if (zoneRow?.building_id) syncToAppsheetIfLinked(zoneRow.building_id);
       }
     } catch (e: any) {
       Alert.alert("Photo upload failed", e.message ?? "Unknown error");

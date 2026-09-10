@@ -8,6 +8,7 @@ import { supabase, Zone } from '../../../lib/supabase';
 import { useAuthStore } from '../../../store/authStore';
 import { FloorPlanDetection, elementsToDrafts } from '../../../lib/floorplanDetect';
 import { uploadImageToStorage } from '../../../lib/uploadImage';
+import { syncToAppsheetIfLinked } from '../../../lib/appsheetSync';
 import { FloorPlanImageUpload } from '../../../components/inspection/FloorPlanImageUpload';
 import { ZoneManager } from '../../../components/inspection/ZoneManager';
 import { GridCanvas } from '../../../components/inspection/GridCanvas';
@@ -275,6 +276,11 @@ export default function InspectionFlowScreen() {
       setZones((data ?? []) as Zone[]);
       setDrawingZoneId(null);
       setDrawingZoneName('');
+
+      // Best-effort push to AppSheet if this building is linked (no-op
+      // otherwise). Never blocks or reverts the zones/elements saved above.
+      syncToAppsheetIfLinked(buildingId);
+
       await advanceTo(3);
     } catch (e: any) {
       Alert.alert('Auto-detect failed', e?.message ?? 'Could not apply the detection.');

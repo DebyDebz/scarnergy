@@ -1,3 +1,4 @@
+import ARKit
 import ExpoModulesCore
 import RoomPlan
 import UIKit
@@ -9,6 +10,9 @@ class ExpoRoomScannerView: ExpoView {
   // Typed as Any so this class compiles for iOS < 16, where RoomCaptureView doesn't exist.
   private var roomCaptureView: Any?
   private var delegateProxy: AnyObject?
+  // ARCoachingOverlayView is stable ARKit API (iOS 13+), unlike RoomCaptureView — no
+  // #available guard needed on the type itself, only on attaching it to a RoomCaptureSession.
+  private var coachingOverlay: ARCoachingOverlayView?
   private var isCurrentlyScanning = false
 
   required init(appContext: AppContext? = nil) {
@@ -29,6 +33,22 @@ class ExpoRoomScannerView: ExpoView {
       delegateProxy = proxy
       roomCaptureView = captureView
       addSubview(captureView)
+
+      // Apple's own prescribed fix for ARKit world-tracking degradation
+      // (poor lighting, fast motion, textureless surfaces — the exact
+      // conditions behind "CaptureError(code 1): world tracking failure"):
+      // ARCoachingOverlayView watches the session's tracking quality itself
+      // and shows guidance ("Move slowly", "More light needed", etc.)
+      // *before* tracking degrades into a terminal capture error, with no
+      // manual polling required once wired up.
+      let overlay = ARCoachingOverlayView(frame: bounds)
+      overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+      overlay.session = captureView.captureSession.arSession
+      overlay.goal = .tracking
+      overlay.activatesAutomatically = true
+      overlay.delegate = proxy
+      coachingOverlay = overlay
+      addSubview(overlay)
     } else {
       showUnsupportedMessage("Room scanning requires iOS 16 or later.")
     }
@@ -64,6 +84,15 @@ class ExpoRoomScannerView: ExpoView {
     }
   }
 
+  // Restarts the capture session in place — used both by a fresh "Start Scan" (via
+  // setScanning) and by the coaching overlay's own "Reset" affordance, which fires
+  // when ARKit decides tracking is too far gone to recover in place (see
+  // RoomCaptureDelegateProxy.coachingOverlayViewDidRequestSessionReset below).
+  fileprivate func restartCaptureSession() {
+    guard #available(iOS 16.0, *), let captureView = roomCaptureView as? RoomCaptureView else { return }
+    captureView.captureSession.run(configuration: RoomCaptureSession.Configuration())
+  }
+
   // RoomCaptureView is created with a zero frame in init() (before RN has laid out this
   // wrapper), so its internal AR camera layer can end up stuck at that initial size and
   // never show the live passthrough even once autoresizing masks resolve the outer frame.
@@ -72,6 +101,9 @@ class ExpoRoomScannerView: ExpoView {
     super.layoutSubviews()
     if let captureView = roomCaptureView as? UIView, captureView.frame != bounds {
       captureView.frame = bounds
+    }
+    if let overlay = coachingOverlay, overlay.frame != bounds {
+      overlay.frame = bounds
     }
   }
 
@@ -84,16 +116,55 @@ class ExpoRoomScannerView: ExpoView {
 }
 
 @available(iOS 16.0, *)
-private class RoomCaptureDelegateProxy: NSObject, RoomCaptureSessionDelegate {
+private class RoomCaptureDelegateProxy: NSObject, RoomCaptureSessionDelegate, ARCoachingOverlayViewDelegate {
   weak var owner: ExpoRoomScannerView?
 
   init(owner: ExpoRoomScannerView) {
     self.owner = owner
   }
 
+  // ARKit's own answer to "tracking is too degraded to recover in place, start over" —
+  // restart the capture session the same way a manual retry from JS would.
+  func coachingOverlayViewDidRequestSessionReset(_ coachingOverlayView: ARCoachingOverlayView) {
+    owner?.restartCaptureSession()
+  }
+
+  // Matched on the bridged NSError's code/description rather than by casting to
+  // RoomCaptureSession.CaptureError's own enum cases — deliberately, so this stays
+  // correct even if exact case names differ across RoomPlan SDK versions (this file
+  // can't be compiled/verified against the real SDK from this environment). Any error
+  // that doesn't match a known case falls through to the existing generic detail dump
+  // unchanged, so nothing regresses for an error type this doesn't recognize.
+  private static func friendlyMessage(for nsError: NSError) -> String? {
+    let description = nsError.localizedDescription.lowercased()
+    if description.contains("world tracking") {
+      return "Tracking lost — try scanning in a well-lit room, moving the phone more slowly, " +
+        "and pointing it at furniture or walls with visible detail rather than blank surfaces."
+    }
+    if description.contains("scene size") || description.contains("exceed") {
+      return "This room is too large for a single scan — try scanning it in smaller sections."
+    }
+    return nil
+  }
+
   func captureSession(_ session: RoomCaptureSession, didEndWith data: CapturedRoomData, error: Error?) {
     if let error = error {
-      owner?.onCaptureError(["message": error.localizedDescription])
+      let nsError = error as NSError
+      if let friendly = RoomCaptureDelegateProxy.friendlyMessage(for: nsError) {
+        owner?.onCaptureError(["message": friendly])
+        return
+      }
+      var detail = "\(nsError.domain) (code \(nsError.code)): \(nsError.localizedDescription)"
+      if let reason = nsError.localizedFailureReason {
+        detail += " — reason: \(reason)"
+      }
+      if let suggestion = nsError.localizedRecoverySuggestion {
+        detail += " — suggestion: \(suggestion)"
+      }
+      if !nsError.userInfo.isEmpty {
+        detail += " — userInfo: \(nsError.userInfo)"
+      }
+      owner?.onCaptureError(["message": detail])
       return
     }
 

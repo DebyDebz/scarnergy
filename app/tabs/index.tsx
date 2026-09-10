@@ -195,7 +195,13 @@ export default function Dashboard() {
           ? <Text style={styles.emptyText}>No sessions yet. Start an inspection!</Text>
           : recentSessions.map(s => (
             <TouchableOpacity key={s.id} style={styles.sessionCard}
-              onPress={() => router.push(`/tabs/sessions/${s.id}`)}>
+              onPress={() => {
+                if (source === "appsheet") {
+                  router.push(`/tabs/sessions/appsheet-detail?objectId=${encodeURIComponent(s.id)}`);
+                  return;
+                }
+                router.push(`/tabs/sessions/${s.id}`);
+              }}>
               <View style={styles.sessionLeft}>
                 <Text style={styles.sessionCode}>{s.session_code}</Text>
                 <Text style={styles.sessionAddress}>{s.building_address}</Text>

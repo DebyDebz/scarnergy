@@ -5,6 +5,7 @@ import {
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { supabase, SessionSummary, Zone, Measurement } from "../../../lib/supabase";
+import { fetchAppsheetSessionDetail } from "../../../lib/appsheetProxy";
 
 // Best → worst; same ordering the energy_label_estimate edge function uses to
 // pick the building label (worst zone wins).
@@ -19,9 +20,11 @@ const LABEL_COLORS: Record<string, string> = {
 interface ElementLite {
   id: string; name: string; element_type: string; zone_id: string;
   rc_value: number | null; u_value: number | null; efficiency: number | null;
+  appsheet_row_key: string | null;
 }
 
 interface Coverage { filled: number; total: number; }
+interface AppsheetGap { materialized: number; total: number; }
 
 function worstLabel(labels: (string | null)[]): string | null {
   const known = labels.filter((l): l is string => !!l && LABEL_ORDER.includes(l));
@@ -38,6 +41,7 @@ export default function SessionResultsScreen() {
   const [elements,    setElements]    = useState<ElementLite[]>([]);
   const [coverage,    setCoverage]    = useState<Coverage>({ filled: 0, total: 0 });
   const [anomalies,   setAnomalies]   = useState<Measurement[]>([]);
+  const [appsheetGap, setAppsheetGap] = useState<AppsheetGap | null>(null);
   const [loading,     setLoading]     = useState(true);
   const [error,       setError]       = useState<string | null>(null);
   const [refreshing,  setRefreshing]  = useState(false);
@@ -66,7 +70,7 @@ export default function SessionResultsScreen() {
       const [elemRes, anomRes] = await Promise.all([
         zoneIds.length
           ? supabase.from("building_elements")
-              .select("id, name, element_type, zone_id, rc_value, u_value, efficiency")
+              .select("id, name, element_type, zone_id, rc_value, u_value, efficiency, appsheet_row_key")
               .in("zone_id", zoneIds).eq("is_active", true)
           : Promise.resolve({ data: [] as ElementLite[], error: null }),
         supabase.from("measurements")
@@ -78,22 +82,53 @@ export default function SessionResultsScreen() {
       setElements(elems);
       setAnomalies((anomRes.data ?? []) as Measurement[]);
 
+      // Best-effort: if this building is AppSheet-linked, compare how many
+      // gevel/dak/vloer/installatie elements AppSheet actually has for it
+      // against how many were materialized into Supabase (appsheet_row_key
+      // set) — materialization is on-demand, one "Retake Measurement" tap at
+      // a time (appsheet-detail.tsx), so a session can close with only a
+      // fraction of AppSheet's recorded elements ever pulled in. Never blocks
+      // or fails the main load — this is purely an informational check.
+      setAppsheetGap(null);
+      try {
+        const { data: buildingRow } = await (supabase.from("buildings") as any)
+          .select("appsheet_object_id").eq("id", sess.building_id).maybeSingle();
+        const objectId = buildingRow?.appsheet_object_id;
+        if (objectId) {
+          const detail = await fetchAppsheetSessionDetail(objectId);
+          const materialized = elems.filter(e => e.appsheet_row_key).length;
+          if (detail.elements.length > materialized) {
+            setAppsheetGap({ materialized, total: detail.elements.length });
+          }
+        }
+      } catch {
+        // AppSheet unreachable/unconfigured — silently skip the notice rather
+        // than surfacing an error for what's an informational, non-blocking check.
+      }
+
       // Data coverage: how much of the thermal envelope has real values behind
-      // the label. This is what compute_zone_energy_label averages over, so it
-      // is an honest proxy for how much to trust the (rule-based) label.
+      // the label. This must mirror exactly what compute_zone_energy_label
+      // (0071_views_functions.sql) averages over, so it is an honest proxy for
+      // how much to trust the (rule-based) label — installatie.efficiency is
+      // deliberately excluded: the SQL function computes it but never actually
+      // uses it in the v_label CASE, so counting it here would overstate (or
+      // understate) coverage for a value the label doesn't depend on. Openings
+      // are likewise scoped to gevel elements only, matching the function's own
+      // JOIN ... WHERE e.element_type = 'gevel' — an opening on a dak/vloer
+      // element isn't averaged into v_window_u either.
       const envelope  = elems.filter(e => ["gevel", "dak", "vloer"].includes(e.element_type));
-      const installs  = elems.filter(e => e.element_type === "installatie");
-      const elementIds = new Set(elems.map(e => e.id));
-      const { data: openRows } = await supabase
-        .from("openings").select("element_id, u_value_total").eq("is_active", true);
-      const openings = ((openRows ?? []) as { element_id: string; u_value_total: number | null }[])
-        .filter(o => elementIds.has(o.element_id));
+      const gevelIds  = elems.filter(e => e.element_type === "gevel").map(e => e.id);
+      const { data: openRows, error: openErr } = gevelIds.length
+        ? await supabase.from("openings").select("element_id, u_value_total")
+            .in("element_id", gevelIds).eq("is_active", true)
+        : { data: [] as { element_id: string; u_value_total: number | null }[], error: null };
+      if (openErr) throw openErr;
+      const openings = (openRows ?? []) as { element_id: string; u_value_total: number | null }[];
 
       const filled =
         envelope.filter(e => e.rc_value != null).length +
-        installs.filter(e => e.efficiency != null).length +
         openings.filter(o => o.u_value_total != null).length;
-      const total = envelope.length + installs.length + openings.length;
+      const total = envelope.length + openings.length;
       setCoverage({ filled, total });
 
       setError(null);
@@ -167,6 +202,16 @@ export default function SessionResultsScreen() {
         </Text>
       </View>
 
+      {/* AppSheet materialization gap notice */}
+      {appsheetGap && (
+        <View style={styles.appsheetGapBanner}>
+          <Text style={styles.appsheetGapText}>
+            ⚠ {appsheetGap.materialized} of {appsheetGap.total} AppSheet elements synced to this session —
+            the label and coverage below only reflect what's been measured here so far.
+          </Text>
+        </View>
+      )}
+
       {/* Stats */}
       <View style={styles.statsRow}>
         {[
@@ -198,7 +243,7 @@ export default function SessionResultsScreen() {
             }]} />
           </View>
           <Text style={styles.coverageHint}>
-            Rc, U and efficiency values behind the label — higher coverage means a more reliable estimate.
+            Rc and U values behind the label — higher coverage means a more reliable estimate.
           </Text>
         </View>
       </View>
@@ -283,6 +328,9 @@ const styles = StyleSheet.create({
                     elevation: 3, shadowColor: "#000", shadowOpacity: 0.15, shadowRadius: 8 },
   heroLabelText:  { color: "#FFF", fontSize: 36, fontWeight: "900" },
   heroCaption:    { fontSize: 12, color: "#888", marginTop: 10 },
+  appsheetGapBanner: { backgroundColor: "#FEF3C7", borderRadius: 10, marginHorizontal: 16,
+                    marginBottom: 16, padding: 12 },
+  appsheetGapText:   { fontSize: 12, color: "#92400E", lineHeight: 17 },
   statsRow:       { flexDirection: "row", paddingHorizontal: 16, gap: 8, marginBottom: 16 },
   statCard:       { flex: 1, backgroundColor: "#FFF", borderRadius: 12, padding: 14, borderTopWidth: 3,
                     elevation: 2, shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 4 },
