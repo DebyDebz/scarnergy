@@ -1,4 +1,3 @@
-import ARKit
 import ExpoModulesCore
 import RoomPlan
 import UIKit
@@ -10,9 +9,6 @@ class ExpoRoomScannerView: ExpoView {
   // Typed as Any so this class compiles for iOS < 16, where RoomCaptureView doesn't exist.
   private var roomCaptureView: Any?
   private var delegateProxy: AnyObject?
-  // ARCoachingOverlayView is stable ARKit API (iOS 13+), unlike RoomCaptureView — no
-  // #available guard needed on the type itself, only on attaching it to a RoomCaptureSession.
-  private var coachingOverlay: ARCoachingOverlayView?
   private var isCurrentlyScanning = false
 
   required init(appContext: AppContext? = nil) {
@@ -34,21 +30,15 @@ class ExpoRoomScannerView: ExpoView {
       roomCaptureView = captureView
       addSubview(captureView)
 
-      // Apple's own prescribed fix for ARKit world-tracking degradation
-      // (poor lighting, fast motion, textureless surfaces — the exact
-      // conditions behind "CaptureError(code 1): world tracking failure"):
-      // ARCoachingOverlayView watches the session's tracking quality itself
-      // and shows guidance ("Move slowly", "More light needed", etc.)
-      // *before* tracking degrades into a terminal capture error, with no
-      // manual polling required once wired up.
-      let overlay = ARCoachingOverlayView(frame: bounds)
-      overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-      overlay.session = captureView.captureSession.arSession
-      overlay.goal = .tracking
-      overlay.activatesAutomatically = true
-      overlay.delegate = proxy
-      coachingOverlay = overlay
-      addSubview(overlay)
+      // A previous attempt also attached an ARCoachingOverlayView directly to
+      // captureView.captureSession.arSession here, to proactively coach the
+      // user before tracking degrades. Reverted: RoomCaptureSession is meant
+      // to exclusively own and drive its ARSession, and confirmed live this
+      // caused scans to fail almost immediately on retry (works ~1s, then
+      // world-tracking-failure again) — consistent with the overlay's own
+      // session management conflicting with RoomCaptureSession's internal
+      // one, not environmental bad luck. Removed rather than risk another
+      // guess at the correct integration without a way to test it here.
     } else {
       showUnsupportedMessage("Room scanning requires iOS 16 or later.")
     }
@@ -84,15 +74,6 @@ class ExpoRoomScannerView: ExpoView {
     }
   }
 
-  // Restarts the capture session in place — used both by a fresh "Start Scan" (via
-  // setScanning) and by the coaching overlay's own "Reset" affordance, which fires
-  // when ARKit decides tracking is too far gone to recover in place (see
-  // RoomCaptureDelegateProxy.coachingOverlayViewDidRequestSessionReset below).
-  fileprivate func restartCaptureSession() {
-    guard #available(iOS 16.0, *), let captureView = roomCaptureView as? RoomCaptureView else { return }
-    captureView.captureSession.run(configuration: RoomCaptureSession.Configuration())
-  }
-
   // RoomCaptureView is created with a zero frame in init() (before RN has laid out this
   // wrapper), so its internal AR camera layer can end up stuck at that initial size and
   // never show the live passthrough even once autoresizing masks resolve the outer frame.
@@ -102,9 +83,6 @@ class ExpoRoomScannerView: ExpoView {
     if let captureView = roomCaptureView as? UIView, captureView.frame != bounds {
       captureView.frame = bounds
     }
-    if let overlay = coachingOverlay, overlay.frame != bounds {
-      overlay.frame = bounds
-    }
   }
 
   override func removeFromSuperview() {
@@ -113,20 +91,23 @@ class ExpoRoomScannerView: ExpoView {
     }
     super.removeFromSuperview()
   }
+
+  // The session has already ended itself (successfully or with an error) by the
+  // time RoomCaptureSessionDelegate.didEndWith fires — without this, isCurrentlyScanning
+  // stayed stale at `true`, so a later removeFromSuperview() (e.g. React unmounting
+  // this view after an error) called captureSession.stop() again on an
+  // already-terminated session for no reason.
+  fileprivate func markSessionEnded() {
+    isCurrentlyScanning = false
+  }
 }
 
 @available(iOS 16.0, *)
-private class RoomCaptureDelegateProxy: NSObject, RoomCaptureSessionDelegate, ARCoachingOverlayViewDelegate {
+private class RoomCaptureDelegateProxy: NSObject, RoomCaptureSessionDelegate {
   weak var owner: ExpoRoomScannerView?
 
   init(owner: ExpoRoomScannerView) {
     self.owner = owner
-  }
-
-  // ARKit's own answer to "tracking is too degraded to recover in place, start over" —
-  // restart the capture session the same way a manual retry from JS would.
-  func coachingOverlayViewDidRequestSessionReset(_ coachingOverlayView: ARCoachingOverlayView) {
-    owner?.restartCaptureSession()
   }
 
   // Matched on the bridged NSError's code/description rather than by casting to
@@ -148,6 +129,8 @@ private class RoomCaptureDelegateProxy: NSObject, RoomCaptureSessionDelegate, AR
   }
 
   func captureSession(_ session: RoomCaptureSession, didEndWith data: CapturedRoomData, error: Error?) {
+    owner?.markSessionEnded()
+
     if let error = error {
       let nsError = error as NSError
       if let friendly = RoomCaptureDelegateProxy.friendlyMessage(for: nsError) {
