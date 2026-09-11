@@ -3,15 +3,28 @@ import type { BuildingSummary } from '@/lib/types';
 import { fmtDate } from '@/lib/format';
 import { BagFetchButton } from './BagFetchButton';
 
+type BagPanelBuilding = Pick<
+  BuildingSummary,
+  'id' | 'bag_pand_id' | 'bag_vbo_id' | 'bag_bouwjaar' | 'bag_oppervlakte_m2' |
+  'bag_gebruiksdoel' | 'dbag_hoogte_m' | 'bag_fetched_at'
+>;
+
 interface Props {
-  building: BuildingSummary;
+  building: BagPanelBuilding;
+  // AppSheet-sourced buildings already carry real BAG data straight from
+  // the "BAG Data" sheet (see mapObjectenRow) — there's no on-demand
+  // fetch/cache to refresh, so no BagFetchButton for that mode.
+  showActions?: boolean;
 }
 
 // Server component: renders only the cached buildings columns (migration
 // 026), so the panel is unaffected by BAG/3DBAG availability. Fetch/refresh
 // goes through the BagFetchButton → POST /api/buildings/[id]/bag.
-export function BagPanel({ building: b }: Props) {
-  const hasData = b.bag_fetched_at != null;
+export function BagPanel({ building: b, showActions = true }: Props) {
+  // bag_fetched_at is a Scanergy-only cache-staleness marker — AppSheet rows
+  // never set it even when bag_pand_id (and the rest) is genuinely present,
+  // so presence of the pand id is the real "has data" signal in both modes.
+  const hasData = b.bag_pand_id != null;
 
   const rows: Array<{ label: string; labelEn: string; value: string | null }> = [
     { label: 'BAG Bouwjaar', labelEn: 'Year built', value: b.bag_bouwjaar != null ? String(b.bag_bouwjaar) : null },
@@ -27,7 +40,7 @@ export function BagPanel({ building: b }: Props) {
           BAG en 3DBAG gegevens
           <span className="ml-2 font-normal text-gray-400 text-sm">Public building registry</span>
         </h2>
-        <BagFetchButton buildingId={b.id} hasData={hasData} />
+        {showActions && <BagFetchButton buildingId={b.id} hasData={hasData} />}
       </div>
 
       <div className="px-5 py-4">
@@ -66,9 +79,11 @@ export function BagPanel({ building: b }: Props) {
                   </a>
                 </>
               )}
-              <span className="ml-auto">
-                Opgehaald <span className="italic">(Fetched)</span>: {fmtDate(b.bag_fetched_at)}
-              </span>
+              {b.bag_fetched_at != null && (
+                <span className="ml-auto">
+                  Opgehaald <span className="italic">(Fetched)</span>: {fmtDate(b.bag_fetched_at)}
+                </span>
+              )}
             </div>
           </>
         ) : (

@@ -3,7 +3,16 @@
 #
 # Supabase stack (DB, Auth, REST, Realtime, Studio, Storage,
 # Kong, Inbucket) is managed by the Supabase CLI.
-# This file adds: MQTT, Grafana, AI server, Web app, Metabase.
+# This file adds: MQTT, Grafana, AI server, Metabase.
+#
+# The admin web app (Next.js) does NOT run here — its containerized
+# definition was removed (had a stale port mapping: published 3003 but
+# `npm run dev` binds package.json's hardcoded `-p 3005`, so it was
+# actually unreachable). It runs directly on the host under PM2 instead
+# (`pm2 start npm --name scanergy-web` in web/, port 3005) — see PM2's
+# `pm2 list` / `pm2 logs scanergy-web`. scanergy.krontiva.africa's
+# Cloudflare Tunnel ingress (dashboard-managed, not in this repo) forwards
+# straight to that host port.
 #
 # Usage:
 #   docker compose -f docker-compose.extras.yml up -d
@@ -69,29 +78,6 @@ services:
     networks:
       - supabase_network
 
-  # ─── Admin Web App (Next.js) ─────────────────────────────────
-  web:
-    build:
-      context: ../web
-      dockerfile: Dockerfile.dev
-    container_name: scanergy_web
-    restart: unless-stopped
-    ports:
-      - "3003:3003"
-    environment:
-      NEXT_PUBLIC_SUPABASE_URL: http://supabase_kong_ScanergyV2:8000
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjIwNTEyMTg4MDB9.r0GAZmnw3PcxO23v52N13u52lmWHIUYQ4LcaqcYd4b8}
-      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MjA1MTIxODgwMH0.awrZCFEvvrU75SNxtv2Lb3AK4PO7_AQu7oWoz23Z9eM}
-      AI_SERVER_URL: http://scanergy_ai:8001
-      GRAFANA_URL: http://localhost:3001
-    volumes:
-      - ../web:/app
-      - /app/node_modules
-      - /app/.next
-    command: npm run dev
-    networks:
-      - supabase_network
-
   # ─── Metabase (BI dashboards) ────────────────────────────────
   metabase:
     image: metabase/metabase:v0.48.8
@@ -103,7 +89,7 @@ services:
       MB_DB_TYPE: postgres
       MB_DB_HOST: supabase_db_ScanergyV2
       MB_DB_PORT: 5432
-      MB_DB_DBNAME: postgres
+      MB_DB_DBNAME: metabase
       MB_DB_USER: postgres
       MB_DB_PASS: ${POSTGRES_PASSWORD:-postgres}
       MB_SITE_NAME: Scarnergy Analytics

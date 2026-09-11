@@ -2,14 +2,18 @@ import type { BuildingSummary } from '@/lib/types';
 import { GeocodeButton } from './GeocodeButton';
 
 interface Props {
-  building: BuildingSummary;
+  building: Pick<BuildingSummary, 'id' | 'latitude' | 'longitude'>;
+  // AppSheet-sourced buildings have nowhere to cache resolved coordinates —
+  // the caller geocodes live on every render instead, so there's no
+  // "fetch/refresh" action to offer here.
+  showActions?: boolean;
 }
 
 // GAP W3 map: keyless OpenStreetMap embed driven by the cached
 // buildings.latitude/longitude columns. No API key, and the page renders
 // fine when OSM is unreachable (the browser just shows an empty iframe).
 // Coordinates come from mobile GPS capture or the keyless PDOK geocode route.
-export function MapPanel({ building: b }: Props) {
+export function MapPanel({ building: b, showActions = true }: Props) {
   const hasCoords = b.latitude != null && b.longitude != null;
 
   const d = 0.0015; // ~150 m viewport around the marker
@@ -24,7 +28,7 @@ export function MapPanel({ building: b }: Props) {
           Locatie
           <span className="ml-2 font-normal text-gray-400 text-sm">Map</span>
         </h2>
-        <GeocodeButton buildingId={b.id} hasCoords={hasCoords} />
+        {showActions && <GeocodeButton buildingId={b.id} hasCoords={hasCoords} />}
       </div>
 
       {hasCoords ? (
@@ -48,9 +52,19 @@ export function MapPanel({ building: b }: Props) {
         </div>
       ) : (
         <p className="px-5 py-6 text-sm text-gray-400">
-          Nog geen coördinaten voor dit adres — haal de locatie op om de kaart te tonen.
-          <br />
-          <span className="italic">No coordinates for this address yet — fetch the location to show the map.</span>
+          {showActions ? (
+            <>
+              Nog geen coördinaten voor dit adres — haal de locatie op om de kaart te tonen.
+              <br />
+              <span className="italic">No coordinates for this address yet — fetch the location to show the map.</span>
+            </>
+          ) : (
+            <>
+              Adres niet gevonden bij PDOK.
+              <br />
+              <span className="italic">Address not found at PDOK.</span>
+            </>
+          )}
         </p>
       )}
     </div>

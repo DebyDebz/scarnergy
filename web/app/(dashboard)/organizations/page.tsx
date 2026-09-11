@@ -1,6 +1,10 @@
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase-server';
+import { getServerDataSource } from '@/lib/dataSource/serverSource';
+import { appsheetFind } from '@/lib/appsheet/client';
+import { mapBedrijvenRow } from '@/lib/appsheet/mappers';
 import { AddOrgForm } from '@/components/admin/AddOrgForm';
+import { AppsheetAddOrgForm } from '@/components/admin/AppsheetAddOrgForm';
 import { Building, MapPin, ChevronRight } from 'lucide-react';
 import type { Organisation, UserProfile, BuildingSummary, Role } from '@/lib/types';
 
@@ -12,6 +16,52 @@ type OrgWithCounts = Organisation & {
 };
 
 export default async function OrganizationsPage() {
+  const source = await getServerDataSource();
+
+  if (source === 'appsheet') {
+    const result = await appsheetFind('Bedrijven');
+    const orgs = (Array.isArray(result) ? result : []).map(mapBedrijvenRow);
+
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Organizations</h1>
+            <p className="text-sm text-gray-500 mt-0.5">{orgs.length} organizations</p>
+          </div>
+        </div>
+
+        <AppsheetAddOrgForm existingIds={orgs.map(o => o.id)} />
+
+        <div className="space-y-4">
+          {orgs.map(org => (
+            <Link
+              key={org.id}
+              href={`/organizations/${org.id}`}
+              className="block bg-white rounded-xl border border-gray-200 p-5 hover:border-indigo-300 hover:shadow-sm transition-all group"
+            >
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="bg-indigo-100 rounded-lg p-2 shrink-0">
+                    <Building className="w-5 h-5 text-indigo-600" />
+                  </div>
+                  <div>
+                    <h2 className="font-semibold text-gray-900 group-hover:text-indigo-600 transition-colors">{org.name}</h2>
+                    <p className="text-xs text-gray-400 mt-0.5">Bedrijf ID {org.id}</p>
+                  </div>
+                </div>
+                <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-indigo-500 transition-colors shrink-0" />
+              </div>
+            </Link>
+          ))}
+          {!orgs.length && (
+            <p className="text-sm text-gray-400 text-center py-8">No organizations</p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   const supabase = await createClient();
 
   const [orgsResult, usersResult, buildingsResult] = await Promise.all([

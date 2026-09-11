@@ -1,6 +1,13 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { createClient } from '@/lib/supabase-server';
+import { getServerDataSource } from '@/lib/dataSource/serverSource';
+import { appsheetFind } from '@/lib/appsheet/client';
+import {
+  mapObjectenRow, mapVerdiepingRow, mapRekenzoneRow, mapGevelRow, mapDakRow,
+  mapVloerRow, mapInstallatieRow, mapTransparantDeelRow, firstZoneIdForRekenzone,
+  mapObjectenToSessionSummary, escapeForSelector,
+} from '@/lib/appsheet/mappers';
 import { EnergyLabelBadge } from '@/components/buildings/EnergyLabelBadge';
 import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
 import { FloorPlanButton } from '@/components/buildings/FloorPlanButton';
@@ -8,7 +15,12 @@ import { BuildingFloorPlanUpload } from '@/components/buildings/BuildingFloorPla
 import { FloorPlanViewer } from '@/components/buildings/FloorPlanViewer';
 import { BuildingExportButtons } from '@/components/buildings/BuildingExportButtons';
 import { BagPanel } from '@/components/buildings/BagPanel';
+import { BuildingContactCard } from '@/components/buildings/BuildingContactCard';
 import { MapPanel } from '@/components/buildings/MapPanel';
+import { AppsheetZoneEditButton } from '@/components/buildings/AppsheetZoneEditButton';
+import { AppsheetElementEditPanel } from '@/components/elements/AppsheetElementEditPanel';
+import { AppsheetOpeningEditPanel } from '@/components/elements/AppsheetOpeningEditPanel';
+import { geocodeAddress } from '@/lib/geocode';
 import { ZoneEditButton } from '@/components/buildings/ZoneEditButton';
 import { ElementTypeSections, type ElementWithRelations } from '@/components/elements/ElementTypeSections';
 import { EnergyLabelTrendChart } from '@/components/charts/EnergyLabelTrendChart';
@@ -22,6 +34,16 @@ import { areaByFloor, totalZoneArea, fmtArea } from '@/lib/calc';
 
 interface Props { params: { id: string } }
 
+// Same fix as buildings/page.tsx, dashboard/page.tsx, sessions/page.tsx: this
+// page reads the data-source cookie (getServerDataSource()) and OpenNext's
+// Cloudflare incremental cache keys on URL only, not on cookies — without
+// revalidate=0 a rendered response gets cached for whichever source/data
+// happened to render it, and every subsequent visitor to this same building
+// sees that stale snapshot until the cache window expires. Missing here
+// meant a just-synced AppSheet building (or a stale pre-sync one) could keep
+// showing outdated zones/elements/session-status after the source data changed.
+export const revalidate = 0;
+
 // label = original Dutch term (kept for continuity); en = English translation
 // shown underneath. The `key` is a stored data value and must not change.
 const DIRECTIONS: { key: BuildingFacadePhoto['direction']; label: string; en: string }[] = [
@@ -32,6 +54,11 @@ const DIRECTIONS: { key: BuildingFacadePhoto['direction']; label: string; en: st
 ];
 
 export default async function BuildingDetailPage({ params }: Props) {
+  const source = await getServerDataSource();
+  if (source === 'appsheet') {
+    return <AppsheetBuildingDetail objectId={params.id} />;
+  }
+
   const supabase = await createClient();
 
   const [buildingResult, zonesResult, sessionsResult, facadeResult, rekenzonesResult, labelSnapshotsResult] = await Promise.all([
@@ -213,6 +240,9 @@ export default async function BuildingDetailPage({ params }: Props) {
           </div>
         ))}
       </div>
+
+      {/* ── Contactpersoon (data-source toggle build) ───────────────────── */}
+      <BuildingContactCard buildingId={params.id} />
 
       {/* ── BAG / 3DBAG registry data (GAP W3) ──────────────────────────── */}
       <BagPanel building={building} />
@@ -471,6 +501,318 @@ export default async function BuildingDetailPage({ params }: Props) {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+// AppSheet-sourced building detail. Organisations/buildings/contacts and now
+// zones/elements/rekenzones have an AppSheet-side read path (see
+// docs/APPSHEET_SCANERGYV2_TOGGLE_ANALYSIS.md §6 for build history). AppSheet
+// has no repeatable-session concept, so a single "Visit" card built from
+// this Objecten row's own Opname Datum/Tijd/Status stands in for the native
+// "Inspection sessions" table (mapObjectenToSessionSummary — same helper the
+// AppSheet Sessions list page already uses). Facade photos, floor plans
+// (AppSheet hosts sketches in its own file storage, not signable from here),
+// and energy label history have no AppSheet-side equivalent at all, so those
+// stay an explicit notice instead of silently showing "no data".
+async function AppsheetBuildingDetail({ objectId }: { objectId: string }) {
+  const idFilter = escapeForSelector(objectId);
+  const [
+    objectenResult, bagResult, verdiepingenResult, rekenzonesResult,
+    gevelsResult, dakenResult, vloerenResult, installatiesResult, openingenResult,
+    inspecteursResult,
+  ] = await Promise.all([
+    appsheetFind('Objecten', `FILTER(Objecten, [Object ID] = "${idFilter}")`),
+    appsheetFind('BAG Data', `FILTER("BAG Data", [Object ID] = "${idFilter}")`),
+    appsheetFind('Verdiepingen', `FILTER(Verdiepingen, [Object ID] = "${idFilter}")`),
+    appsheetFind('Rekenzones', `FILTER(Rekenzones, [Object ID] = "${idFilter}")`),
+    appsheetFind('Gevels', `FILTER(Gevels, [Object ID virtual] = "${idFilter}")`),
+    appsheetFind('Daken', `FILTER(Daken, [Object ID virtual] = "${idFilter}")`),
+    appsheetFind('Vloeren', `FILTER(Vloeren, [Object ID virtual] = "${idFilter}")`),
+    appsheetFind('Installaties', `FILTER(Installaties, [Object ID virtual] = "${idFilter}")`),
+    appsheetFind('Transparante_Delen', `FILTER(Transparante_Delen, [Object ID virtual] = "${idFilter}")`),
+    appsheetFind('Inspecteurs'),
+  ]);
+  const row = Array.isArray(objectenResult) ? objectenResult[0] : undefined;
+  if (!row) notFound();
+
+  const bagRow = Array.isArray(bagResult) ? bagResult[0] : undefined;
+  const building = mapObjectenRow(row, bagRow);
+  const fullAddress = building.address_unresolved
+    ? `Address not yet resolved (postcode ${building.postal_code || '?'}, house number ${building.house_number || '?'})`
+    : `${building.street} ${building.house_number}, ${building.postal_code} ${building.city}`.trim();
+
+  const inspecteurNameById = new Map(
+    (Array.isArray(inspecteursResult) ? inspecteursResult : [])
+      .map((r: Record<string, unknown>) => [String(r['Inspecteur ID']), String(r['Inspecteur Naam'] ?? '')])
+  );
+  const visit = mapObjectenToSessionSummary(row, inspecteurNameById);
+
+  // No AppSheet column caches resolved coordinates, so geocode live on every
+  // render instead of the Scanergy button+persist flow (see lib/geocode.ts).
+  let coords: { lat: number; lon: number } | null = null;
+  try {
+    coords = await geocodeAddress(building.street, building.house_number, null, building.postal_code, building.city);
+  } catch {
+    coords = null;
+  }
+
+  const rekenzoneRows: Record<string, unknown>[] = Array.isArray(rekenzonesResult) ? rekenzonesResult : [];
+  const rekenzones: Rekenzone[] = rekenzoneRows.map(mapRekenzoneRow);
+  // Daken/Vloeren/Installaties carry a Rekenzone ID but no Verdieping ID of
+  // their own (unlike Gevels) — resolve a best-effort zone via the
+  // rekenzone's first related floor (see firstZoneIdForRekenzone).
+  const zoneIdByRekenzone = new Map<string, string>(
+    rekenzoneRows.map(r => [String(r['Rekenzone ID'] ?? ''), firstZoneIdForRekenzone(r)])
+  );
+
+  const zones: Zone[] = (Array.isArray(verdiepingenResult) ? verdiepingenResult : []).map(mapVerdiepingRow);
+
+  const gevels = (Array.isArray(gevelsResult) ? gevelsResult : []).map(mapGevelRow);
+  const daken = (Array.isArray(dakenResult) ? dakenResult : []).map((r: Record<string, unknown>) =>
+    mapDakRow(r, zoneIdByRekenzone.get(String(r['Rekenzone ID'] ?? '')) ?? ''));
+  const vloeren = (Array.isArray(vloerenResult) ? vloerenResult : []).map((r: Record<string, unknown>) =>
+    mapVloerRow(r, zoneIdByRekenzone.get(String(r['Rekenzone ID'] ?? '')) ?? ''));
+  const installaties = (Array.isArray(installatiesResult) ? installatiesResult : []).map((r: Record<string, unknown>) =>
+    mapInstallatieRow(r, zoneIdByRekenzone.get(String(r['Rekenzone ID'] ?? '')) ?? ''));
+  const elements: BuildingElement[] = [...gevels, ...daken, ...vloeren, ...installaties];
+
+  const openings: Opening[] = (Array.isArray(openingenResult) ? openingenResult : []).map(mapTransparantDeelRow);
+  const openingsByElement = openings.reduce<Record<string, Opening[]>>((acc, o) => {
+    (acc[o.element_id] ??= []).push(o);
+    return acc;
+  }, {});
+
+  type ZoneWithElements = Zone & { elements: ElementWithRelations[] };
+  const zonesWithElements: ZoneWithElements[] = zones.map(z => ({
+    ...z,
+    elements: elements
+      .filter(e => e.zone_id === z.id)
+      .map(e => ({ ...e, openings: openingsByElement[e.id] ?? [], dakkapellen: [] })),
+  }));
+
+  const floorAreas = areaByFloor(zones);
+  const totalArea = totalZoneArea(zones);
+
+  const rzZoneIds = new Map<string, Set<string>>(
+    rekenzones.map(rz => [rz.id, new Set(zones.filter(z => z.rekenzone_id === rz.id).map(z => z.id))])
+  );
+  const rzCountRows = rekenzones.map(rz => {
+    const zIds = rzZoneIds.get(rz.id)!;
+    const counts = { gevel: 0, dak: 0, vloer: 0, installatie: 0 } as Record<string, number>;
+    for (const e of elements) {
+      if (zIds.has(e.zone_id) && counts[e.element_type] !== undefined) counts[e.element_type]++;
+    }
+    return { rz, counts };
+  });
+
+  return (
+    <div className="space-y-6 max-w-5xl">
+      <div>
+        <Link href="/buildings" className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 mb-3">
+          <ArrowLeft className="w-4 h-4" /> Buildings
+        </Link>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">{fullAddress}</h1>
+            <p className="text-sm text-gray-500 font-mono mt-0.5">{building.reference_code}</p>
+          </div>
+          <div className="shrink-0">
+            <BuildingExportButtons buildingId={objectId} buildingCode={building.reference_code} />
+          </div>
+        </div>
+        {building.address_unresolved && (
+          <p className="text-sm text-amber-700 bg-amber-50 rounded-lg px-3 py-2 mt-3">
+            AppSheet couldn&apos;t resolve this building&apos;s postcode/house number to a real address.
+            Fix the address in AppSheet, then reload this page.
+          </p>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        {[
+          { label: 'Type', value: building.building_type || '—' },
+          { label: 'Built', value: building.construction_year || '—' },
+          { label: 'Floor area', value: building.gross_floor_area_m2 ? `${building.gross_floor_area_m2} m²` : '—' },
+          { label: 'Zones', value: zones.length },
+        ].map(({ label, value }) => (
+          <div key={label} className="bg-white border border-gray-200 rounded-xl p-4">
+            <p className="text-xs text-gray-500 mb-1">{label}</p>
+            <p className="font-semibold text-gray-900">{value}</p>
+          </div>
+        ))}
+      </div>
+
+      <BuildingContactCard buildingId={objectId} />
+
+      <BagPanel building={building} showActions={false} />
+
+      <MapPanel
+        building={{ id: objectId, latitude: coords?.lat ?? null, longitude: coords?.lon ?? null }}
+        showActions={false}
+      />
+
+      {zones.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200">
+          <div className="px-5 py-4 border-b border-gray-100">
+            <h2 className="font-semibold text-gray-900">Floor area</h2>
+          </div>
+          <table className="w-full text-sm">
+            <tbody className="divide-y divide-gray-50">
+              {floorAreas.map(f => (
+                <tr key={f.level}>
+                  <td className="px-5 py-2.5 text-gray-700">{f.name}</td>
+                  <td className="px-5 py-2.5 text-right text-gray-700">{fmtArea(f.area)}</td>
+                </tr>
+              ))}
+              <tr className="border-t border-gray-200 bg-gray-50">
+                <td className="px-5 py-2.5 font-semibold text-gray-900">Total</td>
+                <td className="px-5 py-2.5 text-right font-semibold text-gray-900">{fmtArea(totalArea)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* ── Floor Plans (synced from Verdiepingen's "Plattegrond Schets") ── */}
+      {zones.some(z => z.floor_plan_image_url) && (
+        <div className="bg-white rounded-xl border border-gray-200">
+          <div className="px-5 py-4 border-b border-gray-100">
+            <h2 className="font-semibold text-gray-900">Overzicht Plattegronden</h2>
+          </div>
+          <div className="p-5 flex flex-wrap gap-5">
+            {zones.filter(z => z.floor_plan_image_url).map(z => (
+              <div key={z.id} className="flex flex-col gap-2">
+                <p className="text-xs font-semibold text-gray-700">{z.name}</p>
+                <FloorPlanViewer zone={z} imageUrl={z.floor_plan_image_url ?? ''} width={320} />
+                {z.gross_area_m2 != null && (
+                  <p className="text-xs text-gray-400 text-center">{z.gross_area_m2} m²</p>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {rekenzones.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200">
+          <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
+            <h2 className="font-semibold text-gray-900">
+              Rekenzones
+              <span className="ml-2 font-normal text-gray-400 text-sm">Calculation zones</span>
+            </h2>
+            <span className="bg-gray-200 text-gray-700 rounded-full px-2 py-0.5 text-[11px] font-semibold">
+              {rekenzones.length}
+            </span>
+          </div>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-xs text-gray-500 bg-gray-50 border-b border-gray-100 text-left">
+                <th className="px-5 py-3 font-medium">Naam</th>
+                <th className="px-5 py-3 font-medium">Gevels</th>
+                <th className="px-5 py-3 font-medium">Daken</th>
+                <th className="px-5 py-3 font-medium">Vloeren</th>
+                <th className="px-5 py-3 font-medium">Installaties</th>
+                <th className="px-5 py-3 font-medium">Notities</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {rzCountRows.map(({ rz, counts }) => (
+                <tr key={rz.id} className="hover:bg-gray-50">
+                  <td className="px-5 py-3 font-medium text-gray-800">{rz.name}</td>
+                  <td className="px-5 py-3 text-gray-700">Gevels ({counts.gevel})</td>
+                  <td className="px-5 py-3 text-gray-700">Daken ({counts.dak})</td>
+                  <td className="px-5 py-3 text-gray-700">Vloeren ({counts.vloer})</td>
+                  <td className="px-5 py-3 text-gray-700">Installaties ({counts.installatie})</td>
+                  <td className="px-5 py-3 text-gray-500">{rz.notes ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="bg-white rounded-xl border border-gray-200">
+        <div className="px-5 py-4 border-b border-gray-100">
+          <h2 className="font-semibold text-gray-900">Zones &amp; elements</h2>
+        </div>
+        <div className="divide-y divide-gray-100">
+          {zonesWithElements.map(zone => (
+            <details key={zone.id} className="group">
+              <summary className="flex items-center gap-3 px-5 py-3.5 cursor-pointer hover:bg-gray-50 list-none">
+                <ChevronDown className="w-4 h-4 text-gray-400 group-open:rotate-180 transition-transform" />
+                <span className="font-medium text-gray-800">{zone.name}</span>
+                <span className="ml-auto text-xs text-gray-500">{zone.elements.length} elements</span>
+                <span className="ml-2">
+                  <AppsheetZoneEditButton
+                    zoneId={zone.id}
+                    zoneName={zone.name}
+                    ceilingHeightM={zone.ceiling_height_m}
+                    grossAreaM2={zone.gross_area_m2}
+                    description={zone.description}
+                    elementCount={zone.elements.length}
+                  />
+                </span>
+              </summary>
+              <div className="px-5 pb-4 pt-2 space-y-3">
+                <p className="text-xs text-gray-500">
+                  Area: <span className="font-medium text-gray-700">{fmtArea(zone.gross_area_m2)}</span>
+                </p>
+                {zone.floor_plan_image_url && (
+                  <FloorPlanViewer zone={zone} imageUrl={zone.floor_plan_image_url} width={320} />
+                )}
+                <ElementTypeSections
+                  elements={zone.elements} photoUrls={{}}
+                  EditPanel={AppsheetElementEditPanel} OpeningEditPanel={AppsheetOpeningEditPanel}
+                />
+              </div>
+            </details>
+          ))}
+          {!zones.length && (
+            <p className="px-5 py-6 text-sm text-gray-400 text-center">No zones defined</p>
+          )}
+        </div>
+      </div>
+
+      {/* ── Visit ── AppSheet has no repeatable-session concept — this
+          Objecten row IS the one visit, unlike native mode's multi-row
+          "Inspection sessions" table above. */}
+      <div className="bg-white rounded-xl border border-gray-200">
+        <div className="px-5 py-4 border-b border-gray-100">
+          <h2 className="font-semibold text-gray-900">Visit</h2>
+        </div>
+        <div className="px-5 py-4 grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
+          <div>
+            <p className="text-xs text-gray-400">Inspector</p>
+            <p className="text-gray-800 font-medium mt-0.5">{visit.inspector_name}</p>
+          </div>
+          <div>
+            <p className="text-xs text-gray-400">Started</p>
+            <p className="text-gray-800 font-medium mt-0.5">{visit.started_at ? fmtDate(visit.started_at) : '—'}</p>
+          </div>
+          <div>
+            <p className="text-xs text-gray-400">Completed</p>
+            <p className="text-gray-800 font-medium mt-0.5">{visit.completed_at ? fmtDate(visit.completed_at) : '—'}</p>
+          </div>
+          <div>
+            <p className="text-xs text-gray-400">Status</p>
+            <div className="mt-0.5"><SessionStatusBadge status={visit.status} /></div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Not available in AppSheet mode ── genuine data gaps (confirmed:
+          no such column exists anywhere in the live schema), not just
+          unbuilt — kept explicit rather than silently showing "no data".
+          Floor-plan IMAGES do sync (Verdiepingen's "Plattegrond Schets",
+          confirmed live-writable via a full external URL — see
+          session-close/route.ts) — only the traced outline/scale
+          calibration stays Scanergy-only, since AppSheet has no columns
+          for that grid geometry at all. */}
+      <p className="text-xs text-gray-400 text-center px-5">
+        Facade photos and energy label history have no AppSheet-side equivalent and aren&apos;t shown here.
+      </p>
+
     </div>
   );
 }

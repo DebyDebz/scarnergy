@@ -269,12 +269,14 @@ export function ElementPlacer({ zones, sessionId, onSaved }: Props) {
   // otherwise. Both the boundary polygon and placed elements use this frame, so
   // dragging, the grid clip and the photo all stay aligned.
   const activeDims = dimsByZone[activeZone.id];
-  // A hand-drawn sketch is treated like "no image" here too — same reasoning
-  // as GridCanvas: it's a rough doodle, not worth tracing over, and elements
-  // were placed against GridCanvas's bbox-fit frame for sketch zones, so this
-  // must stay bbox-fit too or placed elements would drift off the sketch photo.
+  // A hand-drawn sketch still shows its own drawing as the background image, same
+  // as GridCanvas — the outline/clip is skipped for it below (its stored "outline"
+  // is just a placeholder rectangle, not a real trace), but the picture itself
+  // is the only visual reference the inspector has for where to place elements.
+  // The sketch capture is always square (PaintCanvas CAPTURE_SIZE x CAPTURE_SIZE),
+  // so its contain-fit offsets are {0,0} — placed elements don't drift.
   const isSketchZone = !!(activeZone.metadata as any)?.is_sketch;
-  const hasImage   = !!activeZone.floor_plan_image_url && !!activeDims && !isSketchZone;
+  const hasImage   = !!activeZone.floor_plan_image_url && !!activeDims;
   const activeOff: Offsets = hasImage ? imageOffsets(activeDims!, CANVAS) : { offX: 0, offY: 0 };
 
   // Pixel-space polygon for the active zone (outline render + boundary checks).
@@ -529,16 +531,13 @@ export function ElementPlacer({ zones, sessionId, onSaved }: Props) {
         onStartShouldSetResponder={() => true}
         onResponderGrant={() => setSelectedId(null)}
       >
-        {/* Floor plan photo (image-upload zones) — placed elements and the grid
-            project into this image's contain-fit frame so they sit on the plan. */}
-        {hasImage && (
-          <Image
-            key={activeZone.id}
-            source={{ uri: activeZone.floor_plan_image_url! }}
-            style={styles.bgImg}
-            resizeMode="contain"
-          />
-        )}
+        {/* The original photo/sketch is intentionally NOT drawn here — by this stage
+            (Place Elements, right after Grid Analysis) the scale is already
+            calibrated, so only the grid + zone outline + elements are shown from
+            here on. `activeDims` (resolved via Image.getSize above, independent of
+            rendering) still drives the image's contain-fit frame so the grid clip
+            and placed elements land exactly where they did against the photo —
+            the image itself just stays stored, not displayed. */}
 
         {/* Grid clipped to the footprint (full grid when no plan). Outline kept
             separate below to preserve the existing subtle look. */}
@@ -704,7 +703,6 @@ const styles = StyleSheet.create({
   canvas:         { width: CANVAS, height: CANVAS,
                     backgroundColor: '#fafafa', borderRadius: 8, overflow: 'hidden',
                     borderWidth: 1, borderColor: '#E5E7EB' },
-  bgImg:          { position: 'absolute', top: 0, left: 0, width: CANVAS, height: CANVAS },
   // bottomControls: sticks to the bottom, never clipped
   bottomControls: { paddingBottom: 16, paddingTop: 4 },
   undoBar:        { flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 4 },

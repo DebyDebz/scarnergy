@@ -21,6 +21,12 @@ if (src.includes("cloudflared quick tunnel")) {
 
 const DEAD_CONNECT = /let processUrl = null;\s*let ngrokClient = null;\s*async function connect\(opts\) \{[\s\S]*?return connectRetry\(opts\);\s*\}/;
 
+// Absolute path baked in at patch time (this script's own __dirname) — the
+// generated code below runs from inside node_modules/@expo/ngrok, whose own
+// __dirname would point to the wrong place, so this can't be resolved at
+// runtime relative to the target file.
+const EMPTY_CLOUDFLARED_CONFIG = path.join(__dirname, "cloudflared-empty-config.yml");
+
 const LIVE_CONNECT = `let processUrl = null;
 let ngrokClient = null;
 let _cfProcess = null;
@@ -37,7 +43,12 @@ async function connect(opts) {
   }
 
   return new Promise((resolve, reject) => {
-    const args = ["tunnel", "--url", \`http://localhost:\${port}\`, "--no-autoupdate"];
+    // --config points at a blank file so this anonymous quick tunnel never
+    // inherits ~/.cloudflared/config.yml (a different, already-in-use named
+    // tunnel with a catch-all "service: http_status:404" ingress rule) —
+    // without this override every dev-tunnel request silently 404s before
+    // ever reaching Metro, regardless of what --url says.
+    const args = ["tunnel", "--config", ${JSON.stringify(EMPTY_CLOUDFLARED_CONFIG)}, "--url", \`http://localhost:\${port}\`, "--no-autoupdate"];
     const proc = spawn(BINARY, args, { stdio: ["ignore", "pipe", "pipe"] });
     _cfProcess = proc;
 

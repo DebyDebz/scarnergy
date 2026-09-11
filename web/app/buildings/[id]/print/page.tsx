@@ -1,6 +1,8 @@
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import { createClient } from '@/lib/supabase-server';
+import { getServerDataSource } from '@/lib/dataSource/serverSource';
+import { fetchAppsheetBuildingBundle } from '@/lib/appsheet/buildingBundle';
 import type {
   Building, BuildingElement, BuildingFacadePhoto,
   Opening, Organisation, Zone,
@@ -15,6 +17,13 @@ interface Props { params: { id: string } }
 // would otherwise nest a second <html><head> inside the root <body> and break
 // hydration (server/browser disagree on where <style> ends up).
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  if (await getServerDataSource() === 'appsheet') {
+    const bundle = await fetchAppsheetBuildingBundle(params.id);
+    if (!bundle) return { title: 'Opname Rapport' };
+    const b = bundle.building;
+    return { title: `Opname Rapport — ${b.street} ${b.house_number}, ${b.postal_code} ${b.city}` };
+  }
+
   const supabase = await createClient();
   const { data: building } = await (supabase.from('buildings') as any)
     .select('street, house_number, postal_code, city')
@@ -68,49 +77,78 @@ export default async function BuildingPrintPage({ params }: Props) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return notFound();
 
-  const [buildingRes, orgRes, sessionRes, facadeRes] = await Promise.all([
-    (supabase.from('buildings') as any).select('*').eq('id', params.id).single(),
-    (supabase.from('organisations') as any).select('*').single(),
-    (supabase.from('session_summary') as any)
-      .select('inspector_name, started_at')
-      .eq('building_id', params.id)
-      .eq('status', 'completed')
-      .order('completed_at', { ascending: false })
-      .limit(1)
-      .single(),
-    (supabase.from('building_facade_photos') as any)
-      .select('*').eq('building_id', params.id).order('direction'),
-  ]);
+  let building: Building;
+  let org: { name: string | null } | Organisation | null;
+  let session: { inspector_name: string; started_at: string | null } | null;
+  let facadePhotosRaw: BuildingFacadePhoto[];
+  let zones: Zone[];
+  let elements: BuildingElement[];
+  let openings: Opening[];
+  const facadeByDir: Record<string, string | null> = {};
 
-  const building: Building | null = buildingRes.data;
-  if (!building) notFound();
-  const org: Organisation | null = orgRes.data ?? null;
-  const session = sessionRes.data ?? null;
-  const facadePhotosRaw: BuildingFacadePhoto[] = facadeRes.data ?? [];
+  if (await getServerDataSource() === 'appsheet') {
+    // No AppSheet equivalent for facade photos or floor plans (see
+    // AppsheetBuildingDetail) — facadePhotosRaw stays empty and the
+    // sections below render their existing "not captured" placeholders.
+    const bundle = await fetchAppsheetBuildingBundle(params.id);
+    if (!bundle) return notFound();
+    building = bundle.building;
+    org = bundle.org;
+    session = bundle.session;
+    facadePhotosRaw = [];
+    zones = bundle.zones;
+    elements = bundle.elements;
+    openings = bundle.openings;
+  } else {
+    const [buildingRes, orgRes, sessionRes, facadeRes] = await Promise.all([
+      (supabase.from('buildings') as any).select('*').eq('id', params.id).single(),
+      (supabase.from('organisations') as any).select('*').single(),
+      (supabase.from('session_summary') as any)
+        .select('inspector_name, started_at')
+        .eq('building_id', params.id)
+        .eq('status', 'completed')
+        .order('completed_at', { ascending: false })
+        .limit(1)
+        .single(),
+      (supabase.from('building_facade_photos') as any)
+        .select('*').eq('building_id', params.id).order('direction'),
+    ]);
+
+    if (!buildingRes.data) return notFound();
+    building = buildingRes.data;
+    org = orgRes.data ?? null;
+    session = sessionRes.data ?? null;
+    facadePhotosRaw = facadeRes.data ?? [];
+
+    const zonesRes = await (supabase.from('zones') as any)
+      .select('*').eq('building_id', params.id).eq('is_active', true).order('floor_level');
+    zones = zonesRes.data ?? [];
+    const zoneIds = zones.map((z: Zone) => z.id);
+
+    elements = [];
+    openings = [];
+    if (zoneIds.length) {
+      const [elRes, opRes] = await Promise.all([
+        (supabase.from('building_elements') as any).select('*').in('zone_id', zoneIds).eq('is_active', true).order('element_type').order('sort_order'),
+        (supabase.from('openings') as any).select('*').eq('is_active', true),
+      ]);
+      elements = elRes.data ?? [];
+      const elIds = new Set(elements.map((e: BuildingElement) => e.id));
+      openings = (opRes.data ?? []).filter((o: any) => elIds.has(o.element_id));
+    }
+
+    // Sign facade photo URLs
+    await Promise.all(facadePhotosRaw.map(async p => {
+      if (p.photo_url.startsWith('http')) { facadeByDir[p.direction] = p.photo_url; return; }
+      const { data } = await supabase.storage.from('facade-photos').createSignedUrl(p.photo_url, 3600);
+      facadeByDir[p.direction] = data?.signedUrl ?? null;
+    }));
+  }
 
   const surveyDate = session?.started_at
     ? new Date(session.started_at).toLocaleDateString('nl-NL', { day:'2-digit', month:'2-digit', year:'numeric' })
     : '—';
   const address = `${building.street} ${building.house_number}, ${building.postal_code} ${building.city}`;
-
-  // Zones
-  const zonesRes = await (supabase.from('zones') as any)
-    .select('*').eq('building_id', params.id).eq('is_active', true).order('floor_level');
-  const zones: Zone[] = zonesRes.data ?? [];
-  const zoneIds = zones.map((z:Zone) => z.id);
-
-  let elements: BuildingElement[] = [];
-  let openings: Opening[]         = [];
-
-  if (zoneIds.length) {
-    const [elRes, opRes] = await Promise.all([
-      (supabase.from('building_elements') as any).select('*').in('zone_id', zoneIds).eq('is_active', true).order('element_type').order('sort_order'),
-      (supabase.from('openings') as any).select('*').eq('is_active', true),
-    ]);
-    elements = elRes.data ?? [];
-    const elIds = new Set(elements.map((e:BuildingElement) => e.id));
-    openings = (opRes.data ?? []).filter((o:any) => elIds.has(o.element_id));
-  }
 
   const openingsByEl: Record<string, Opening[]> = {};
   for (const o of openings) {
@@ -123,14 +161,6 @@ export default async function BuildingPrintPage({ params }: Props) {
   const daken        = elements.filter(e => e.element_type === 'dak');
   const installaties = elements.filter(e => e.element_type === 'installatie');
   const totalArea    = zones.reduce((s:number, z:Zone) => s+(z.gross_area_m2??0), 0);
-
-  // Sign facade photo URLs
-  const facadeByDir: Record<string, string | null> = {};
-  await Promise.all(facadePhotosRaw.map(async p => {
-    if (p.photo_url.startsWith('http')) { facadeByDir[p.direction] = p.photo_url; return; }
-    const { data } = await supabase.storage.from('facade-photos').createSignedUrl(p.photo_url, 3600);
-    facadeByDir[p.direction] = data?.signedUrl ?? null;
-  }));
 
   const CANVAS_W = 280, CANVAS_H = 210;
 

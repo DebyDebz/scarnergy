@@ -7,6 +7,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase, BuildingFacadePhoto } from '../../../lib/supabase';
 import { useAuthStore } from '../../../store/authStore';
 import { uploadImageToStorage } from '../../../lib/uploadImage';
+import { syncToAppsheetIfLinked } from '../../../lib/appsheetSync';
 
 let ImagePicker: typeof import('expo-image-picker') | null = null;
 try { ImagePicker = require('expo-image-picker'); } catch { ImagePicker = null; }
@@ -126,6 +127,10 @@ export default function FacadePhotosScreen() {
 
       if (dbErr) throw dbErr;
       setPhotos(prev => ({ ...prev, [direction]: row as BuildingFacadePhoto }));
+
+      // Best-effort push to AppSheet if this building is linked (no-op
+      // otherwise). Never blocks or reverts the save above on failure.
+      syncToAppsheetIfLinked(buildingId);
     } catch (e: any) {
       Alert.alert('Upload failed', e.message ?? 'Unknown error');
       // Keep the local URI preview on failure

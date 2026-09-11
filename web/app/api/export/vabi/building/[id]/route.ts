@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase-server';
+import { getServerDataSource } from '@/lib/dataSource/serverSource';
+import { fetchAppsheetBuildingBundle } from '@/lib/appsheet/buildingBundle';
 import { buildVabiXml } from '@/lib/vabiXml';
 import type { BuildingElement, Opening, Zone } from '@/lib/types';
 
@@ -13,6 +15,21 @@ export async function GET(
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const buildingId = params.id;
+
+  if (await getServerDataSource() === 'appsheet') {
+    const bundle = await fetchAppsheetBuildingBundle(buildingId);
+    if (!bundle) return NextResponse.json({ error: 'Building not found' }, { status: 404 });
+
+    const xml = buildVabiXml(bundle.session, bundle.org, bundle.building, bundle.zones, bundle.elements, bundle.openings, bundle.rekenzones);
+    const ref = bundle.building.reference_code ?? buildingId.slice(0, 8);
+    const filename = `${ref}_VABI.xml`.replace(/[^a-zA-Z0-9_.-]/g, '_');
+    return new NextResponse(xml, {
+      headers: {
+        'Content-Type': 'application/xml; charset=utf-8',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+      },
+    });
+  }
 
   // Fetch building, org, and most-recent completed session (for surveyor metadata)
   const [buildingRes, orgRes, sessionRes] = await Promise.all([

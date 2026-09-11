@@ -1,12 +1,19 @@
 import Link from 'next/link';
 import { Suspense } from 'react';
 import { createClient } from '@/lib/supabase-server';
+import { getServerDataSource } from '@/lib/dataSource/serverSource';
 import { MeasurementFilters } from '@/components/measurements/MeasurementFilters';
 import { MeasurementsLiveTable } from '@/components/measurements/MeasurementsLiveTable';
+import { AppsheetNotAvailable } from '@/components/shared/AppsheetNotAvailable';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { RecentMeasurement } from '@/lib/types';
 
-export const revalidate = 30;
+// 0, not a positive window: OpenNext's Cloudflare incremental cache keys on
+// URL only, not the `scanergy:data-source` cookie, so a positive revalidate
+// here could serve a response rendered under the *other* data source for up
+// to that window after a toggle switch — same bug class dashboard/buildings/
+// sessions/organizations pages were already set to revalidate=0 to avoid.
+export const revalidate = 0;
 
 const PAGE_SIZE = 50;
 
@@ -20,7 +27,29 @@ interface Props {
   };
 }
 
+// Measurement.value_mm is raw Bosch GLM50C rangefinder/BLE-device capture —
+// mobile-app-only, one timestamped reading per device. Checked live: the
+// closest thing in AppSheet (Transparante_Delen's Hoogte/Breedte) is a
+// static per-element dimension, not a timestamped reading — no device
+// link, no anomaly concept, nothing to map. Confirmed with the user twice
+// (once from the entity list, once after checking Transparante_Delen
+// directly) — always "not available" rather than fabricating rows.
 export default async function MeasurementsPage({ searchParams }: Props) {
+  const source = await getServerDataSource();
+  if (source === 'appsheet') {
+    return (
+      <div className="space-y-5">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Measurement History</h1>
+          <p className="text-sm text-gray-500 mt-0.5">AppSheet source active</p>
+        </div>
+        <AppsheetNotAvailable items={[
+          'Measurements — raw rangefinder/BLE-device capture is mobile-app-only; no AppSheet sheet holds this data',
+        ]} />
+      </div>
+    );
+  }
+
   const supabase = await createClient();
 
   const q = searchParams.q ?? '';

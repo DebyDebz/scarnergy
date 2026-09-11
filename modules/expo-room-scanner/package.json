@@ -1,0 +1,15 @@
+{
+  "name": "expo-room-scanner",
+  "version": "0.1.0",
+  "description": "RoomPlan-based LiDAR door/window scanner",
+  "main": "index.ts",
+  "types": "index.ts",
+  "license": "UNLICENSED",
+  "author": "Krontiva Africa",
+  "homepage": "https://github.com/krontiva-africa/scarnergy-app",
+  "peerDependencies": {
+    "expo": "*",
+    "react": "*",
+    "react-native": "*"
+  }
+}

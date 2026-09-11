@@ -1,23 +1,49 @@
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { View, Text, ScrollView, StyleSheet, RefreshControl, TouchableOpacity } from "react-native";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
 import { useAuthStore } from "../../store/authStore";
+import { useDataSourceStore } from "../../store/dataSourceStore";
+import { fetchAppsheetDashboardStats, AppsheetProxyError } from "../../lib/appsheetProxy";
 import { useSyncQueue } from "../../hooks/useSyncQueue";
 import { useBLE } from "../../lib/BLEContext";
 
 export default function Dashboard() {
   const { profile } = useAuthStore();
+  const { source }  = useDataSourceStore();
   const { pendingCount, drain } = useSyncQueue();
   const { isConnected, state: bleState, deviceName, batteryLevel } = useBLE();
   const router         = useRouter();
   const [stats, setStats] = useState({ activeSessions: 0, buildings: 0, measurements: 0 });
   const [recentSessions, setRecentSessions] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const load = async () => {
+  // useFocusEffect (not a plain mount-only effect) so this refetches every
+  // time the Dashboard tab regains focus — including right after switching
+  // the AppSheet/ScanergyV2 toggle on the Profile tab and tabbing back here.
+  const load = useCallback(async () => {
     if (!profile) return;
+
+    if (source === "appsheet") {
+      try {
+        const data = await fetchAppsheetDashboardStats();
+        setStats({ activeSessions: data.activeSessions, buildings: data.totalBuildings, measurements: data.measurementsToday });
+        setRecentSessions(data.recentSessions);
+        setError(null);
+      } catch (e) {
+        // Unlike buildings.tsx/sessions/index.tsx (which replace their whole
+        // screen with an error state), this only logs — silently leaving
+        // stale numbers on screen with no visible sign the fetch failed.
+        // Surface it the same way those two screens do instead.
+        setError(e instanceof AppsheetProxyError ? e.message : "Could not load AppSheet dashboard.");
+        console.warn("[Dashboard]", e instanceof AppsheetProxyError ? e.message : e);
+      }
+      return;
+    }
+    setError(null);
+
     const [sessRes, buildRes, measRes, recentRes] = await Promise.all([
       supabase.from("inspection_sessions").select("id", { count: "exact" }).eq("org_id", profile.org_id).eq("status", "active"),
       supabase.from("buildings").select("id", { count: "exact" }).eq("org_id", profile.org_id),
@@ -30,9 +56,9 @@ export default function Dashboard() {
       measurements:   measRes.count ?? 0,
     });
     setRecentSessions(recentRes.data ?? []);
-  };
+  }, [profile, source]);
 
-  useEffect(() => { load(); }, [profile]);
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 
@@ -48,6 +74,12 @@ export default function Dashboard() {
           )}
         </View>
       </View>
+
+      {error && (
+        <View style={styles.errorBanner}>
+          <Text style={styles.errorBannerText}>{error}</Text>
+        </View>
+      )}
 
       {/* Stats row */}
       <View style={styles.statsRow}>
@@ -163,7 +195,13 @@ export default function Dashboard() {
           ? <Text style={styles.emptyText}>No sessions yet. Start an inspection!</Text>
           : recentSessions.map(s => (
             <TouchableOpacity key={s.id} style={styles.sessionCard}
-              onPress={() => router.push(`/tabs/sessions/${s.id}`)}>
+              onPress={() => {
+                if (source === "appsheet") {
+                  router.push(`/tabs/sessions/appsheet-detail?objectId=${encodeURIComponent(s.id)}`);
+                  return;
+                }
+                router.push(`/tabs/sessions/${s.id}`);
+              }}>
               <View style={styles.sessionLeft}>
                 <Text style={styles.sessionCode}>{s.session_code}</Text>
                 <Text style={styles.sessionAddress}>{s.building_address}</Text>
@@ -190,6 +228,8 @@ const styles = StyleSheet.create({
   greeting:       { fontSize: 20, fontWeight: "700", color: "#1E3A5F", flexShrink: 1 },
   syncBadge:      { backgroundColor: "#FEF9E7", borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: "#F39C12" },
   syncText:       { fontSize: 12, color: "#D68910", fontWeight: "600" },
+  errorBanner:      { backgroundColor: "#FDEDEC", borderRadius: 10, marginHorizontal: 16, marginBottom: 12, padding: 12 },
+  errorBannerText:  { color: "#E74C3C", fontSize: 13, lineHeight: 18 },
   statsRow:       { flexDirection: "row", paddingHorizontal: 16, gap: 8, marginBottom: 16 },
   statCard:       { flex: 1, backgroundColor: "#FFF", borderRadius: 12, padding: 16, borderTopWidth: 3, elevation: 2, shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 4 },
   statValue:      { fontSize: 28, fontWeight: "800" },

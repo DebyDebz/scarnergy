@@ -10,12 +10,14 @@ export interface Organisation {
   longitude: number | null;
   settings: Record<string, unknown>;
 }
+export type UserStatus = 'pending' | 'approved' | 'rejected';
 export interface UserProfile {
   id: string;
   org_id: string;
   role: Role;
   full_name: string;
   is_active: boolean;
+  status: UserStatus;
 }
 export interface BleDevice {
   id: string;
@@ -48,6 +50,12 @@ export interface Building {
   bag_gebruiksdoel: string | null;
   dbag_hoogte_m: number | null;
   bag_fetched_at: string | null;
+  // AppSheet-only: set when the source Objecten row's Adres column is that
+  // workbook's own live automation's error string ("...niet gevonden, pas
+  // regel aan...") rather than a real address — see
+  // lib/appsheet/mappers.ts isUnresolvedAdres(). Native/Supabase buildings
+  // never set this (always undefined there).
+  address_unresolved?: boolean;
 }
 export interface Rekenzone {
   id: string;
@@ -58,6 +66,10 @@ export interface Rekenzone {
   notes: string | null;
   sort_order: number;
   is_active: boolean;
+  // AppSheet-only: this rekenzone's correlated Rekenzone ID once a
+  // dak/vloer/installatie under it has synced to/from AppSheet (migration
+  // 031) — mirrors zones/building_elements/openings' appsheet_row_key (030).
+  appsheet_row_key?: string | null;
 }
 export interface ElementDefault {
   id: string;
@@ -200,6 +212,21 @@ export interface BuildingFacadePhoto {
   created_at: string;
 }
 
+export type ContactRole = 'eigenaar' | 'huurder' | 'beheerder' | 'opdrachtgever';
+export interface Contact {
+  id: string;
+  org_id: string;
+  building_id: string | null;
+  legacy_id: string | null;
+  full_name: string;
+  phone: string | null;
+  email: string | null;
+  role: ContactRole | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface EnergyLabelSnapshot {
   id: string;
   org_id: string;
@@ -256,6 +283,7 @@ export type Database = {
       openings:            TableDef<Opening>;
       inspection_sessions: TableDef<InspectionSession>;
       measurements:        TableDef<Measurement>;
+      contacts:            TableDef<Contact>;
     };
     Views: {
       building_summary:    ViewDef<BuildingSummary>;
