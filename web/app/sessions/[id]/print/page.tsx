@@ -1,6 +1,8 @@
 import { notFound } from 'next/navigation';
+import type { Metadata } from 'next';
 import { createClient } from '@/lib/supabase-server';
 import type { Building, BuildingElement, BuildingFacadePhoto, Opening, Organisation, Zone } from '@/lib/types';
+import { PrintButton } from '@/components/print/PrintButton';
 
 const DIRECTIONS: { key: BuildingFacadePhoto['direction']; label: string }[] = [
   { key: 'voor',   label: 'Voorgevel'    },
@@ -21,6 +23,21 @@ function fitPointsSvg(raw: Array<{x:number;y:number}>, w: number, h: number): st
 }
 
 interface Props { params: { id: string } }
+
+// This route renders standalone print output but still lives under the app's
+// single root layout (app/layout.tsx already emits <html><body>) — so the
+// title goes through generateMetadata instead of a literal <title> tag, which
+// would otherwise nest a second <html><head> inside the root <body> and break
+// hydration (server/browser disagree on where <style> ends up).
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const supabase = await createClient();
+  const { data: session } = await (supabase.from('session_summary') as any)
+    .select('building_address, building_city')
+    .eq('id', params.id)
+    .single();
+  if (!session) return { title: 'Opname Rapport' };
+  return { title: `Opname Rapport — ${session.building_address}, ${session.building_city}` };
+}
 
 // ── Cardinal direction ────────────────────────────────────────────────────
 function toCardinal(deg: number | null): string {
@@ -127,24 +144,21 @@ export default async function PrintReportPage({ params }: Props) {
 
   // ── Render ─────────────────────────────────────────────────────────
   return (
-    <html lang="nl">
-      <head>
-        <meta charSet="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>Opname Rapport — {address}</title>
+    <>
         <style>{`
           * { box-sizing: border-box; margin: 0; padding: 0; }
           body { font-family: Arial, Helvetica, sans-serif; font-size: 9pt; color: #111; background: white; }
-          h1 { font-size: 16pt; margin-bottom: 4pt; }
-          h2 { font-size: 11pt; margin: 14pt 0 6pt; border-bottom: 1.5pt solid #1e3a5f; padding-bottom: 2pt; color: #1e3a5f; }
-          h3 { font-size: 9.5pt; margin: 10pt 0 4pt; color: #1e3a5f; }
+          h1 { font-size: 18pt; margin-bottom: 4pt; color: #3f8fa8; font-weight: 400; }
+          h2 { font-size: 14pt; margin: 16pt 0 8pt; color: #111; font-weight: 400; }
+          h3 { font-size: 9.5pt; margin: 10pt 0 4pt; color: #333; }
           h4 { font-size: 9pt; margin: 8pt 0 3pt; color: #333; }
           table { width: 100%; border-collapse: collapse; font-size: 8.5pt; margin-bottom: 8pt; }
-          th { background: #1e3a5f; color: white; padding: 3pt 5pt; text-align: left; font-weight: 600; }
+          th { background: #5b9db3; color: #111; padding: 3pt 5pt; text-align: left; font-weight: 700; }
           td { padding: 2.5pt 5pt; border-bottom: 0.5pt solid #ddd; vertical-align: top; }
           tr:nth-child(even) td { background: #f7f8fb; }
           .koptekst-table td { border: 0.5pt solid #ccc; }
-          .koptekst-table td:first-child { font-weight: 600; width: 160pt; background: #f0f4f8; }
+          .koptekst-table td:first-child { font-weight: 700; width: 160pt; background: #5b9db3; color: #111; }
+          .instal-table th { background: #fbe4c9; color: #111; }
           .page-break { page-break-before: always; }
           .section { margin-bottom: 18pt; }
           .badge { display: inline-block; padding: 1pt 5pt; border-radius: 3pt; font-size: 7.5pt; font-weight: 700; }
@@ -162,7 +176,7 @@ export default async function PrintReportPage({ params }: Props) {
           .photos-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 8pt; margin-bottom: 8pt; }
           .photo-cell { text-align: center; }
           .photo-cell img { width: 100%; aspect-ratio: 4/3; object-fit: cover; border-radius: 3pt; border: .5pt solid #ccc; }
-          .photo-cell .dir { font-size: 7.5pt; font-weight: 600; color: #1e3a5f; margin-top: 3pt; }
+          .photo-cell .dir { font-size: 7.5pt; font-weight: 600; color: #3f8fa8; margin-top: 3pt; }
           .photo-placeholder { width: 100%; aspect-ratio: 4/3; background: #f3f4f6; border: .5pt dashed #ccc; border-radius: 3pt; display: flex; align-items: center; justify-content: center; color: #ccc; font-size: 8pt; }
           .fp-wrap { position: relative; display: inline-block; border: .5pt solid #ccc; border-radius: 3pt; overflow: hidden; }
           .fp-wrap img { display: block; }
@@ -174,15 +188,9 @@ export default async function PrintReportPage({ params }: Props) {
             a { color: inherit; text-decoration: none; }
           }
         `}</style>
-      </head>
-      <body>
+
         {/* Print button — hidden when printing */}
-        <div className="no-print" style={{ padding: '12px', background: '#f0f4f8', borderBottom: '1px solid #ddd', display: 'flex', gap: '8px', alignItems: 'center' }}>
-          <button onClick={() => (window as any).print()} style={{ padding: '6px 16px', background: '#1e3a5f', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px' }}>
-            Print / Save as PDF
-          </button>
-          <span style={{ fontSize: '12px', color: '#666' }}>Use your browser&apos;s Print → Save as PDF</span>
-        </div>
+        <PrintButton hint="Use your browser's Print → Save as PDF" padding="12px" />
 
         {/* ── Section 1 — Header ────────────────────────────────────── */}
         <div className="section">
@@ -490,7 +498,7 @@ export default async function PrintReportPage({ params }: Props) {
         {installaties.length > 0 && (
           <div className="section">
             <h2>6. Bijbehorende Installaties (Building Services)</h2>
-            <table>
+            <table className="instal-table">
               <thead>
                 <tr>
                   <th style={{ width: '80pt' }}>ID</th>
@@ -563,7 +571,6 @@ export default async function PrintReportPage({ params }: Props) {
         </div>
 
         <script dangerouslySetInnerHTML={{ __html: '' }} />
-      </body>
-    </html>
+    </>
   );
 }

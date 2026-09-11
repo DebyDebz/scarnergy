@@ -18,4 +18,5 @@ export type {
   VabiSessionInfo as VabiSession,
   VabiBuildingInfo as VabiBuilding,
   VabiOrgInfo as VabiOrg,
+  VabiRekenzone,
 } from '@scarnergy/opname-calc';

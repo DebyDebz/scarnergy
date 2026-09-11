@@ -96,3 +96,47 @@ export async function closeSession(sessionId: string): Promise<{ error?: string 
   if (uErr) return { error: uErr.message };
   return {};
 }
+
+/**
+ * Recompute the building's energy label after a session closes and record
+ * a snapshot for the history trend chart.
+ *
+ * Mirrors the mobile app's existing path exactly (see
+ * app/tabs/sessions/results.tsx): the `energy_label_estimate` edge function
+ * → `compute_zone_energy_label` RPC per zone → worst-zone building label.
+ * Best-effort — the session is already closed by the time this runs, so a
+ * failure here must not be treated as a close failure by the caller.
+ */
+export async function predictEnergyLabel(
+  sessionId: string,
+  buildingId: string,
+): Promise<{ label?: string | null; error?: string }> {
+  const supabase = await createServiceClient();
+
+  const { data, error } = await supabase.functions.invoke('energy_label_estimate', {
+    body: { building_id: buildingId },
+  });
+  if (error) return { error: error.message };
+
+  const buildingLabel: string | null = data?.building_label ?? null;
+  if (!buildingLabel) return { label: null };
+
+  const { data: building } = await (supabase.from('buildings') as any)
+    .select('org_id')
+    .eq('id', buildingId)
+    .single();
+  if (!building) return { label: buildingLabel };
+
+  await (supabase.from('energy_label_snapshots') as any)
+    .upsert(
+      {
+        org_id: building.org_id,
+        building_id: buildingId,
+        session_id: sessionId,
+        energy_label: buildingLabel,
+      },
+      { onConflict: 'session_id' },
+    );
+
+  return { label: buildingLabel };
+}

@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<VabiProject xmlns="http://www.vabi.nl/schema"
+             versie="3.0"
+             aanmaakdatum="2026-05-20">
+
+  <Gebouw>
+    <Omschrijving>Jordaanstraat 14, 1016 ZZ Amsterdam</Omschrijving>
+    <Bouwjaar>1974</Bouwjaar>
+    <Gebouwtype>Vrijstaande woning</Gebouwtype>
+    <Opnamedatum>2026-05-20</Opnamedatum>
+    <Opnemer>Jan de Vries</Opnemer>
+    <Bedrijf>Krontiva</Bedrijf>
+  </Gebouw>
+
+  <Rekenzones>
+    <Rekenzone id="A">
+      <Naam>Woning</Naam>
+      <Gebruiksoppervlakte>74.11</Gebruiksoppervlakte>
+
+      <Verdiepingen>
+        <Verdieping id="Bg">
+          <Naam>Begane grond</Naam>
+          <Gebruiksoppervlakte>74.11</Gebruiksoppervlakte>
+        </Verdieping>
+      </Verdiepingen>
+
+      <Gevels>
+        <Gevel id="g1">
+          <Naam>Voorgevel (Noord)</Naam>
+          <Positie>Voorgevel</Positie>
+          <Orientatie>Noord-West</Orientatie>
+          <Hoogte>2.52</Hoogte>
+          <Breedte>8.32</Breedte>
+          <OrigineleHoogte>2.52</OrigineleHoogte>
+          <OrigineleBreedte>8.32</OrigineleBreedte>
+          <Oppervlakte>20.97</Oppervlakte>
+          <GrenztAan>Buitenlucht</GrenztAan>
+          <TransparanteDelen>
+          <TransparantDeel id="o1">
+            <Type>Raam</Type>
+            <Hoogte>2.39</Hoogte>
+            <Breedte>2.43</Breedte>
+            <Oppervlakte>5.81</Oppervlakte>
+            <RaamkozijnMateriaal>Metaal</RaamkozijnMateriaal>
+            <ThermischOnderbroken>false</ThermischOnderbroken>
+            <Beglazing>Dubbel</Beglazing>
+            <Zonwering>
+              <Type>Knikarmscherm</Type>
+            </Zonwering>
+            <Overstek>0.00</Overstek>
+            <Belemmering/>
+          </TransparantDeel>
+        </TransparanteDelen>
+        </Gevel>
+      </Gevels>
+
+      <Vloeren>
+        <Vloer id="v1">
+          <Naam>Bg vloer</Naam>
+          <GrenztAan>Kruipruimte</GrenztAan>
+          <Oppervlakte>76.41</Oppervlakte>
+          <Vloerisolatie>false</Vloerisolatie>
+          <Bodemisolatie>false</Bodemisolatie>
+          <Rc>0.15</Rc>
+        </Vloer>
+      </Vloeren>
+
+      <Daken/>
+
+    </Rekenzone>
+    <Rekenzone id="B">
+      <Naam>Aanbouw</Naam>
+      <Gebruiksoppervlakte>67.38</Gebruiksoppervlakte>
+
+      <Verdiepingen>
+        <Verdieping id="V1">
+          <Naam>Eerste verdieping</Naam>
+          <Gebruiksoppervlakte>67.38</Gebruiksoppervlakte>
+        </Verdieping>
+      </Verdiepingen>
+
+      <Gevels/>
+
+      <Vloeren/>
+
+      <Daken>
+        <Dak id="d1">
+          <Naam>Hellend dak</Naam>
+          <Orientatie>Noord-Oost</Orientatie>
+          <Type>HellendDak</Type>
+          <Lengte>7.57</Lengte>
+          <Breedte>10.4</Breedte>
+          <Hoek>55</Hoek>
+          <BrutoOppervlakte>78.73</BrutoOppervlakte>
+          <NettoOppervlak>69.36</NettoOppervlak>
+          <Rc>0.86</Rc>
+          <Dakkapellen>
+            <Dakkapel id="dk1">
+              <Naam>Rechts</Naam>
+              <Breedte>3.21</Breedte>
+              <Diepte>1.62</Diepte>
+              <Hoogte>2.43</Hoogte>
+            </Dakkapel>
+          </Dakkapellen>
+        </Dak>
+      </Daken>
+
+    </Rekenzone>
+  </Rekenzones>
+
+  <Installaties>
+    <Installatie id="i1">
+      <Type>Verwarming</Type>
+      <Merk>Atag</Merk>
+      <Model>E325EC CW5</Model>
+      <Brandstof>gas</Brandstof>
+      <Rendement>0.925</Rendement>
+      <Vermogen>25</Vermogen>
+    </Installatie>
+  </Installaties>
+
+</VabiProject>

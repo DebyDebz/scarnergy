@@ -1,14 +1,16 @@
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase-server';
+import { getServerDataSource } from '@/lib/dataSource/serverSource';
 import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
 import { LiveFeed } from '@/components/sessions/LiveFeed';
 import { MeasurementChart } from '@/components/charts/MeasurementChart';
 import { CloseSessionButton } from '@/components/sessions/CloseSessionButton';
 import { ExportButtons } from '@/components/sessions/ExportButtons';
 import { ElementsWithEdit } from '@/components/elements/ElementsWithEdit';
+import { EnergyLabelBadge } from '@/components/buildings/EnergyLabelBadge';
 import { ArrowLeft, TriangleAlert } from 'lucide-react';
-import type { SessionSummary, Measurement, UserProfile, Zone, BuildingElement, Opening } from '@/lib/types';
+import type { SessionSummary, Measurement, UserProfile, Zone, BuildingElement, Opening, EnergyLabelSnapshot } from '@/lib/types';
 import { fmtDate, fmtTime, fmtDuration } from '@/lib/format';
 import { gevelpositie, toCardinal } from '@scarnergy/opname-calc';
 
@@ -17,13 +19,31 @@ interface Props {
   searchParams: { anomalies?: string };
 }
 
+// Same fix as organizations/[id]/page.tsx, buildings/page.tsx, dashboard/
+// page.tsx, sessions/page.tsx, buildings/[id]/page.tsx: this page branches on
+// the data-source cookie (getServerDataSource()) before rendering, and
+// OpenNext's Cloudflare incremental cache keys on URL only, not on cookies —
+// without revalidate=0 the source-dependent redirect/render decision below
+// could get cached and served to a visitor whose toggle state disagrees with it.
+export const revalidate = 0;
+
 export default async function SessionDetailPage({ params, searchParams }: Props) {
+  // AppSheet has no repeatable-session concept — /sessions already treats
+  // each Objecten row as a pseudo-session and links straight to
+  // /buildings/[id] (see sessions/page.tsx), so params.id here is an Object
+  // ID, not a session_summary UUID. Redirect rather than 404 in case of a
+  // stale bookmark/link from before that list-page fix, or a direct visit.
+  const source = await getServerDataSource();
+  if (source === 'appsheet') {
+    redirect(`/buildings/${params.id}`);
+  }
+
   const supabase = await createClient();
   const anomaliesOnly = searchParams.anomalies === '1';
 
   const { data: { user } } = await supabase.auth.getUser();
 
-  const [sessionResult, measurementsResult, profileResult] = await Promise.all([
+  const [sessionResult, measurementsResult, profileResult, labelSnapshotResult] = await Promise.all([
     supabase.from('session_summary').select('*').eq('id', params.id).maybeSingle(),
     anomaliesOnly
       ? supabase.from('measurements').select('*').eq('session_id', params.id).eq('is_anomaly', true).order('measured_at', { ascending: false }).limit(200)
@@ -31,11 +51,14 @@ export default async function SessionDetailPage({ params, searchParams }: Props)
     user
       ? supabase.from('user_profiles').select('role').eq('id', user.id).maybeSingle()
       : Promise.resolve({ data: null }),
+    (supabase.from('energy_label_snapshots') as any)
+      .select('*').eq('session_id', params.id).maybeSingle(),
   ]);
 
   const session = (sessionResult as unknown as { data: SessionSummary | null }).data;
   const measurements = (measurementsResult as unknown as { data: Measurement[] | null }).data ?? [];
   const profile = (profileResult as unknown as { data: Pick<UserProfile, 'role'> | null }).data;
+  const labelSnapshot = (labelSnapshotResult as unknown as { data: EnergyLabelSnapshot | null }).data;
 
   if (!session) notFound();
 
@@ -106,7 +129,7 @@ export default async function SessionDetailPage({ params, searchParams }: Props)
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <ExportButtons sessionId={params.id} sessionCode={session.session_code} />
-            {canClose && <CloseSessionButton sessionId={params.id} />}
+            {canClose && <CloseSessionButton sessionId={params.id} buildingId={session.building_id} />}
           </div>
         </div>
       </div>
@@ -135,6 +158,7 @@ export default async function SessionDetailPage({ params, searchParams }: Props)
           { label: 'Voorgevel Orientatie', en: 'Front facade', value: voorgevelOrientatie },
           { label: 'Measurements', value: session.total_measurements },
           { label: 'Anomalies', value: session.anomaly_count },
+          { label: 'Predicted label', value: <EnergyLabelBadge label={labelSnapshot?.energy_label ?? null} /> },
         ].map(({ label, en, value }: { label: string; en?: string; value: React.ReactNode }) => (
           <div key={label} className="bg-white border border-gray-200 rounded-xl p-4">
             <p className="text-xs text-gray-500 mb-1">

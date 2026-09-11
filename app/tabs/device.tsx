@@ -1,4 +1,5 @@
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from "react-native";
+import { useRouter } from "expo-router";
 import { useBLE } from "../../lib/BLEContext";
 
 const STATE_COLOR: Record<string, string> = {
@@ -7,6 +8,7 @@ const STATE_COLOR: Record<string, string> = {
 };
 
 export default function DeviceScreen() {
+  const router = useRouter();
   const {
     state, lastMeasurement, lastTriggerMeasurement,
     deviceName, deviceId, batteryLevel, errorMessage,
@@ -147,6 +149,9 @@ export default function DeviceScreen() {
         </Text>
       </View>
 
+      <TouchableOpacity style={styles.provisionLink} onPress={() => router.push("/tabs/esp32-provisioning")}>
+        <Text style={styles.provisionLinkText}>🔧  Provision an ESP32 gateway</Text>
+      </TouchableOpacity>
 
     </ScrollView>
   );
@@ -197,5 +202,7 @@ const styles = StyleSheet.create({
   debugRow:           { backgroundColor: "#FFF", borderRadius: 12, padding: 14, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   debugLabel:         { fontSize: 13, color: "#888" },
   debugValue:         { fontSize: 16, fontWeight: "700", color: "#1E3A5F" },
+  provisionLink:      { alignItems: "center", padding: 12 },
+  provisionLinkText:  { color: "#2E86C1", fontSize: 14, fontWeight: "600" },
 
 });

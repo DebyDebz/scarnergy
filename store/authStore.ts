@@ -42,6 +42,21 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // Pass the session we just received so loadProfile skips a second getSession()
     // round-trip (which contends on auth-js's internal lock right after sign-in).
     await get().loadProfile(data.session);
+
+    // A pending/rejected/deactivated profile can still authenticate — the
+    // block happens at the data layer (custom_access_token_hook nulls
+    // org_id in the JWT whenever is_active is false, so every RLS policy
+    // locks the account out). Without this check the user would land in
+    // the app with a session but no visible org data and no explanation.
+    const profile = get().profile;
+    if (profile && !profile.is_active) {
+      await get().signOut();
+      throw new Error(
+        profile.status === 'pending'
+          ? 'Your account is awaiting admin approval.'
+          : 'Your account has been deactivated. Contact your admin.'
+      );
+    }
   },
 
   signOut: async () => {

@@ -1,9 +1,14 @@
-import { ChevronDown, TriangleAlert } from 'lucide-react';
+'use client';
+import { useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { ChevronDown, Pencil, TriangleAlert } from 'lucide-react';
+import { ElementEditPanel } from './ElementEditPanel';
 import type { BuildingElement, Opening } from '@/lib/types';
 import {
   toCardinal, gevelpositie, grenztAan, dakType,
   openingArea, roofAreaBreakdown,
   mmToM, r2, fmtArea, fmtMeters, fmtEfficiencyPct,
+  rekenhoogte, rcSourceLabel,
 } from '@scarnergy/opname-calc';
 
 /**
@@ -21,10 +26,36 @@ export interface ElementWithRelations extends BuildingElement {
   dakkapellen: BuildingElement[];
 }
 
+type EditPanelProps = {
+  element: ElementWithRelations | null;
+  opening: Opening | null;
+  onClose: () => void;
+  onSaved: () => void;
+};
+
+type OpeningEditPanelProps = {
+  element: ElementWithRelations;
+  opening: Opening | null;
+  onClose: () => void;
+  onSaved: () => void;
+};
+
 interface Props {
   elements: ElementWithRelations[];
   /** element id → signed photo URLs (inspection-photos bucket) */
   photoUrls: Record<string, string[]>;
+  /** hides the edit pencil + panel — used by the read-only rekenzone drill-down (GAP W5) */
+  readOnly?: boolean;
+  /** swap the edit UI — AppsheetBuildingDetail passes AppsheetElementEditPanel */
+  EditPanel?: React.ComponentType<EditPanelProps>;
+  /**
+   * Per-opening add/edit UI (AppsheetBuildingDetail passes
+   * AppsheetOpeningEditPanel) — omitted entirely for native mode, which has
+   * no opening-level write path of its own here, so TransparanteDelen keeps
+   * rendering exactly as before (no pencil, no "+ add" button) when this
+   * is undefined.
+   */
+  OpeningEditPanel?: React.ComponentType<OpeningEditPanelProps>;
 }
 
 const SECTIONS: { type: string; nl: string; en: string }[] = [
@@ -36,6 +67,27 @@ const SECTIONS: { type: string; nl: string; en: string }[] = [
 const SECTION_TYPES = new Set(SECTIONS.map(s => s.type));
 
 const jaNee = (v: boolean | null | undefined) => (v ? 'Ja' : 'Nee');
+
+// §6 Rc provenance badge (GAP W2): documented / observed / buildyear_forfait.
+const RC_SOURCE_STYLE: Record<string, string> = {
+  documented: 'bg-emerald-50 text-emerald-700',
+  observed: 'bg-sky-50 text-sky-700',
+  buildyear_forfait: 'bg-amber-50 text-amber-700',
+};
+
+function RcValue({ el }: { el: BuildingElement }) {
+  const label = rcSourceLabel(el.rc_source);
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      {el.rc_value ?? '—'}
+      {label && (
+        <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${RC_SOURCE_STYLE[el.rc_source!] ?? 'bg-gray-100 text-gray-600'}`}>
+          {label}
+        </span>
+      )}
+    </span>
+  );
+}
 
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -76,8 +128,24 @@ function NotesPhotos({ el, urls }: { el: BuildingElement; urls: string[] }) {
   );
 }
 
-function TransparanteDelen({ openings }: { openings: Opening[] }) {
-  if (openings.length === 0) return null;
+function TransparanteDelen({ openings, onEdit, onAdd }: {
+  openings: Opening[]; onEdit?: (opening: Opening) => void; onAdd?: () => void;
+}) {
+  if (openings.length === 0 && !onAdd) return null;
+
+  // onAdd set (AppSheet mode) but nothing to disclose yet — a <details> with
+  // no content reads oddly, so this is a plain action bar instead.
+  if (openings.length === 0) {
+    return (
+      <button
+        onClick={onAdd}
+        className="mt-2 flex items-center gap-2 text-xs font-medium text-indigo-700 bg-indigo-50/60 rounded-lg px-3 py-2 hover:bg-indigo-100/60 w-full text-left"
+      >
+        + Voeg Transparant Deel toe <span className="font-normal text-gray-400">Add window/door</span>
+      </button>
+    );
+  }
+
   return (
     <details className="group/td mt-2">
       <summary className="flex items-center gap-2 cursor-pointer list-none text-xs font-medium text-indigo-700 bg-indigo-50/60 rounded-lg px-3 py-2">
@@ -85,6 +153,14 @@ function TransparanteDelen({ openings }: { openings: Opening[] }) {
         Transparante Delen
         <span className="bg-indigo-100 text-indigo-700 rounded-full px-1.5 py-0.5 text-[11px] font-semibold">{openings.length}</span>
         <span className="font-normal text-gray-400">Windows / doors</span>
+        {onAdd && (
+          <button
+            onClick={e => { e.preventDefault(); onAdd(); }}
+            className="ml-auto text-indigo-600 hover:underline font-medium"
+          >
+            + Voeg toe
+          </button>
+        )}
       </summary>
       <div className="mt-2 space-y-2">
         {openings.map(o => {
@@ -92,8 +168,17 @@ function TransparanteDelen({ openings }: { openings: Opening[] }) {
           const w = mmToM(o.width_mm);
           const bruto = h != null && w != null ? r2(h * w) : null;
           return (
-            <div key={o.id} className="rounded-lg border border-indigo-100 bg-indigo-50/30 px-3 py-2.5">
-              <p className="text-xs font-semibold text-gray-800 capitalize mb-2">
+            <div key={o.id} className="relative rounded-lg border border-indigo-100 bg-indigo-50/30 px-3 py-2.5">
+              {onEdit && (
+                <button
+                  onClick={() => onEdit(o)}
+                  className="absolute right-2 top-2 p-1 rounded hover:bg-white text-gray-400 hover:text-gray-700"
+                  title="Deel bewerken"
+                >
+                  <Pencil className="w-3 h-3" />
+                </button>
+              )}
+              <p className="text-xs font-semibold text-gray-800 capitalize mb-2 pr-6">
                 {o.opening_type}{o.name ? <span className="text-gray-400 font-normal"> · {o.name}</span> : null}
               </p>
               <dl className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2">
@@ -112,6 +197,10 @@ function TransparanteDelen({ openings }: { openings: Opening[] }) {
                 <Field label="U kozijn / glas / totaal"
                   value={[o.u_value_frame, o.u_value_glass, o.u_value_total].map(v => v ?? '—').join(' / ')} />
                 <Field label="g-waarde"    value={o.g_value ?? '—'} />
+                {/* Migration 024 forfait calc fields (§4.2/4.3) — distinct from the measured u_value/g_value above */}
+                <Field label="U glas (forfait)" value={o.u_glas ?? '—'} />
+                <Field label="g-waarde (forfait)" value={o.g_waarde ?? '—'} />
+                <Field label="F_sh" value={o.f_sh ?? '—'} />
               </dl>
               {o.notes && <p className="mt-2 text-[11px] text-gray-500 italic">{o.notes}</p>}
             </div>
@@ -122,12 +211,20 @@ function TransparanteDelen({ openings }: { openings: Opening[] }) {
   );
 }
 
-function GevelRow({ el, urls }: { el: ElementWithRelations; urls: string[] }) {
+type RowProps = {
+  el: ElementWithRelations; urls: string[];
+  onEditOpening?: (opening: Opening) => void; onAddOpening?: () => void;
+};
+
+function GevelRow({ el, urls, onEditOpening, onAddOpening }: RowProps) {
   const positie    = gevelpositie(el);
   const orientatie = toCardinal(el.orientation_deg);
   const hoogte     = mmToM(el.height_mm);
   const breedte    = mmToM(el.length_mm);
   const bruto      = el.area_m2 ?? (hoogte != null && breedte != null ? r2(hoogte * breedte) : null);
+  // §2.1: rekenhoogte = override ?? hoogte + dikte_vloerconstructie (300 mm forfait);
+  // rekenbreedte has no correction column — it is the stored breedte.
+  const rekenH = rekenhoogte(hoogte, el.dikte_vloerconstructie_mm, el.rekenhoogte_m_override);
   return (
     <div className="px-4 py-3">
       <div className="flex items-center gap-2 mb-2">
@@ -139,16 +236,25 @@ function GevelRow({ el, urls }: { el: ElementWithRelations; urls: string[] }) {
         <Field label="Orientatie"  value={orientatie || '—'} />
         <Field label="Hoogte"      value={fmtMeters(hoogte)} />
         <Field label="Breedte"     value={fmtMeters(breedte)} />
+        <Field label="Rekenhoogte" value={
+          <span className="inline-flex items-center gap-1.5">
+            {fmtMeters(rekenH)}
+            {el.rekenhoogte_m_override != null && (
+              <span className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold bg-violet-50 text-violet-700">override</span>
+            )}
+          </span>
+        } />
+        <Field label="Rekenbreedte" value={fmtMeters(breedte)} />
         <Field label="Bruto Oppervlakte" value={fmtArea(bruto)} />
-        <Field label="Rc"          value={el.rc_value ?? '—'} />
+        <Field label="Rc"          value={<RcValue el={el} />} />
       </dl>
-      <TransparanteDelen openings={el.openings} />
+      <TransparanteDelen openings={el.openings} onEdit={onEditOpening} onAdd={onAddOpening} />
       <NotesPhotos el={el} urls={urls} />
     </div>
   );
 }
 
-function DakRow({ el, urls }: { el: ElementWithRelations; urls: string[] }) {
+function DakRow({ el, urls, onEditOpening, onAddOpening }: RowProps) {
   const breakdown = roofAreaBreakdown(el, el.openings, el.dakkapellen);
   return (
     <div className="px-4 py-3">
@@ -163,8 +269,9 @@ function DakRow({ el, urls }: { el: ElementWithRelations; urls: string[] }) {
           value={`${fmtMeters(mmToM(el.length_mm))} × ${fmtMeters(mmToM(el.width_mm))}`} />
         <Field label="Hoek"       value={el.tilt_deg != null ? `${el.tilt_deg}°` : '—'} />
         <Field label="Nokhoogte"  value={el.nokhoogte_m != null ? `${el.nokhoogte_m} m` : '—'} />
+        <Field label="Grenzend aan" value={grenztAan(el)} />
         <Field label="Bruto Oppervlakte" value={fmtArea(breakdown.bruto)} />
-        <Field label="Rc"         value={el.rc_value ?? '—'} />
+        <Field label="Rc"         value={<RcValue el={el} />} />
         <Field label="Totaal Oppervlakte Gaten" value={fmtArea(breakdown.gaten)} />
         <Field label="Opp. Dakkapellen" value={fmtArea(breakdown.dakkapellen)} />
         <Field label="Netto Dakoppervlak" value={<span className="text-indigo-700">{fmtArea(breakdown.netto)}</span>} />
@@ -187,7 +294,7 @@ function DakRow({ el, urls }: { el: ElementWithRelations; urls: string[] }) {
           </div>
         </div>
       )}
-      <TransparanteDelen openings={el.openings} />
+      <TransparanteDelen openings={el.openings} onEdit={onEditOpening} onAdd={onAddOpening} />
       <NotesPhotos el={el} urls={urls} />
     </div>
   );
@@ -206,7 +313,7 @@ function VloerRow({ el, urls }: { el: ElementWithRelations; urls: string[] }) {
         <Field label="Perimeter"     value={el.perimeter_m != null ? `${el.perimeter_m} m` : '—'} />
         <Field label="Vloerisolatie" value={jaNee(!!el.insulation_type)} />
         <Field label="Bodemisolatie" value={jaNee(el.bodemisolatie)} />
-        <Field label="Rc"            value={el.rc_value ?? '—'} />
+        <Field label="Rc"            value={<RcValue el={el} />} />
       </dl>
       <NotesPhotos el={el} urls={urls} />
     </div>
@@ -235,7 +342,7 @@ function InstallatieRow({ el, urls }: { el: ElementWithRelations; urls: string[]
   );
 }
 
-function GenericRow({ el, urls }: { el: ElementWithRelations; urls: string[] }) {
+function GenericRow({ el, urls, onEditOpening, onAddOpening }: RowProps) {
   const dims = [el.length_mm, el.width_mm, el.height_mm]
     .map(v => (v != null ? `${v}mm` : null)).filter(Boolean).join(' × ');
   return (
@@ -251,35 +358,104 @@ function GenericRow({ el, urls }: { el: ElementWithRelations; urls: string[] }) 
         <Field label="Rc" value={el.rc_value ?? '—'} />
         <Field label="U" value={el.u_value ?? '—'} />
       </dl>
-      <TransparanteDelen openings={el.openings} />
+      <TransparanteDelen openings={el.openings} onEdit={onEditOpening} onAdd={onAddOpening} />
       <NotesPhotos el={el} urls={urls} />
     </div>
   );
 }
 
-const ROW_BY_TYPE: Record<string, (p: { el: ElementWithRelations; urls: string[] }) => React.ReactNode> = {
+const ROW_BY_TYPE: Record<string, (p: RowProps) => React.ReactNode> = {
   gevel:       GevelRow,
   dak:         DakRow,
   vloer:       VloerRow,
   installatie: InstallatieRow,
 };
 
-export function ElementTypeSections({ elements, photoUrls }: Props) {
+// Filter chip row (GAP W4): filter by grenzend-aan / orientation instead of
+// cloning the AppSheet reverse-lookup screens. No selection → identical render.
+function ChipRow({ label, options, active, onToggle }: {
+  label: string; options: string[]; active: string | null; onToggle: (v: string) => void;
+}) {
+  if (options.length < 2) return null;
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap">
+      <span className="text-[11px] text-gray-400">{label}</span>
+      {options.map(o => (
+        <button
+          key={o}
+          onClick={() => onToggle(o)}
+          className={`rounded-full px-2 py-0.5 text-[11px] font-medium border ${
+            active === o
+              ? 'bg-indigo-600 border-indigo-600 text-white'
+              : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+          }`}
+        >
+          {o}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export function ElementTypeSections({
+  elements, photoUrls, readOnly = false, EditPanel = ElementEditPanel, OpeningEditPanel,
+}: Props) {
+  const router = useRouter();
+  const [editing, setEditing] = useState<ElementWithRelations | null>(null);
+  const [editingOpening, setEditingOpening] = useState<{ element: ElementWithRelations; opening: Opening | null } | null>(null);
+  const [grenstFilter, setGrenstFilter] = useState<string | null>(null);
+  const [orientFilter, setOrientFilter] = useState<string | null>(null);
+
   // Dakkapellen render nested under their parent dak, never as a top-level row.
   const topLevel = elements.filter(e => e.element_type !== 'dakkapel');
-  const leftover = topLevel.filter(e => !SECTION_TYPES.has(e.element_type));
+
+  const grenstOptions = useMemo(
+    () => Array.from(new Set(topLevel.filter(e => ['gevel', 'vloer', 'dak'].includes(e.element_type)).map(e => grenztAan(e)))).sort(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [elements],
+  );
+  const orientOptions = useMemo(
+    () => Array.from(new Set(topLevel
+      .filter(e => ['gevel', 'dak'].includes(e.element_type))
+      .map(e => toCardinal(e.orientation_deg))
+      .filter(Boolean))).sort(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [elements],
+  );
+
+  // Filters only constrain the types they describe; other types stay visible.
+  const passes = (e: ElementWithRelations) => {
+    if (grenstFilter && ['gevel', 'vloer', 'dak'].includes(e.element_type) && grenztAan(e) !== grenstFilter) return false;
+    if (orientFilter && ['gevel', 'dak'].includes(e.element_type) && toCardinal(e.orientation_deg) !== orientFilter) return false;
+    return true;
+  };
+  const visible = topLevel.filter(passes);
+  const leftover = visible.filter(e => !SECTION_TYPES.has(e.element_type));
 
   const sections = [
-    ...SECTIONS.map(s => ({ ...s, items: topLevel.filter(e => e.element_type === s.type) })),
+    ...SECTIONS.map(s => ({ ...s, items: visible.filter(e => e.element_type === s.type) })),
     { type: '_other', nl: 'Overige elementen', en: 'Other', items: leftover },
   ].filter(s => s.items.length > 0);
 
-  if (sections.length === 0) {
+  if (topLevel.length === 0) {
     return <p className="text-xs text-gray-400 italic">No elements defined for this zone</p>;
   }
 
   return (
     <div className="space-y-3">
+      {(grenstOptions.length > 1 || orientOptions.length > 1) && (
+        <div className="space-y-1.5">
+          <ChipRow label="Grenzend aan" options={grenstOptions} active={grenstFilter}
+                   onToggle={v => setGrenstFilter(cur => (cur === v ? null : v))} />
+          <ChipRow label="Orientatie" options={orientOptions} active={orientFilter}
+                   onToggle={v => setOrientFilter(cur => (cur === v ? null : v))} />
+        </div>
+      )}
+
+      {sections.length === 0 && (
+        <p className="text-xs text-gray-400 italic">No elements match the active filters</p>
+      )}
+
       {sections.map(section => (
         <div key={section.type} className="rounded-lg border border-gray-100 overflow-hidden">
           <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100 flex items-center gap-2">
@@ -292,11 +468,46 @@ export function ElementTypeSections({ elements, photoUrls }: Props) {
           <div className="divide-y divide-gray-50">
             {section.items.map(el => {
               const Row = ROW_BY_TYPE[el.element_type] ?? GenericRow;
-              return <Row key={el.id} el={el} urls={photoUrls[el.id] ?? []} />;
+              return (
+                <div key={el.id} className="relative group/row">
+                  {!readOnly && (
+                    <button
+                      onClick={() => setEditing(el)}
+                      className="absolute right-3 top-3 p-1 rounded hover:bg-gray-100 text-gray-300 hover:text-gray-600"
+                      title="Element bewerken"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  <Row
+                    el={el} urls={photoUrls[el.id] ?? []}
+                    onEditOpening={!readOnly && OpeningEditPanel ? (o) => setEditingOpening({ element: el, opening: o }) : undefined}
+                    onAddOpening={!readOnly && OpeningEditPanel ? () => setEditingOpening({ element: el, opening: null }) : undefined}
+                  />
+                </div>
+              );
             })}
           </div>
         </div>
       ))}
+
+      {!readOnly && editing && (
+        <EditPanel
+          element={editing}
+          opening={editing.element_type === 'transparant_deel' ? (editing.openings[0] ?? null) : null}
+          onClose={() => setEditing(null)}
+          onSaved={() => router.refresh()}
+        />
+      )}
+
+      {!readOnly && OpeningEditPanel && editingOpening && (
+        <OpeningEditPanel
+          element={editingOpening.element}
+          opening={editingOpening.opening}
+          onClose={() => setEditingOpening(null)}
+          onSaved={() => { setEditingOpening(null); router.refresh(); }}
+        />
+      )}
     </div>
   );
 }

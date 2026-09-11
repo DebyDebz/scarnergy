@@ -24,6 +24,9 @@ export default function TabLayout() {
       <Tabs.Screen name="buildings" options={{ title: "Buildings",  tabBarIcon: ({ color, size }) => <Ionicons name="business-outline"  size={size} color={color} /> }} />
       <Tabs.Screen name="sessions"  options={{ title: "Sessions",   tabBarIcon: ({ color, size }) => <Ionicons name="albums-outline"    size={size} color={color} /> }} />
       <Tabs.Screen name="device"    options={{ href: showDevice ? undefined : null, title: "GLM Device", tabBarIcon: ({ color, size }) => <Ionicons name="bluetooth-outline" size={size} color={color} /> }} />
+      {/* Reached only via a link on the GLM Device screen — kept out of the
+          tab bar (href: null) same as any hidden-but-navigable route here. */}
+      <Tabs.Screen name="esp32-provisioning" options={{ href: null, title: "ESP32 Setup" }} />
       <Tabs.Screen name="profile"   options={{ title: "Profile",    tabBarIcon: ({ color, size }) => <Ionicons name="person-outline"    size={size} color={color} /> }} />
     </Tabs>
   );

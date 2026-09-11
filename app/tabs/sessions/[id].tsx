@@ -4,27 +4,33 @@ import {
   ActivityIndicator, ScrollView, Alert, Share,
 } from "react-native";
 import { useLocalSearchParams, useRouter, useNavigation } from "expo-router";
-import { supabase, SessionSummary, Zone, BuildingElement, Opening } from "../../../lib/supabase";
+import { supabase, SessionSummary, Rekenzone, Zone, BuildingElement, Opening } from "../../../lib/supabase";
 import { useBLE } from "../../../lib/BLEContext";
 import { buildVabiXml } from "@scarnergy/opname-calc";
 import { elementTypeLabel } from "../../../lib/elementTypes";
 import { FloorPlanReview } from "../../../components/inspection/FloorPlanReview";
+import { syncToAppsheetIfLinked } from "../../../lib/appsheetSync";
+import { useRoomScanner } from "../../../hooks/useRoomScanner";
 
 export default function SessionDetailScreen() {
   const { id: sessionId } = useLocalSearchParams<{ id: string }>();
   const router     = useRouter();
   const navigation = useNavigation();
   const { state: bleState, deviceName, isConnected, scan, disconnect } = useBLE();
+  const { isSupported: roomScanSupported } = useRoomScanner();
 
   const [session,         setSession]         = useState<SessionSummary | null>(null);
   const [sessionLoading,  setSessionLoading]  = useState(true);
   const [sessionError,    setSessionError]    = useState<string | null>(null);
   const [zones,           setZones]           = useState<Zone[]>([]);
+  const [rekenzones,      setRekenzones]      = useState<Rekenzone[]>([]);
   const [selectedZoneId,  setSelectedZoneId]  = useState<string | null>(null);
   const [elements,        setElements]        = useState<BuildingElement[]>([]);
   const [elementsLoading, setElementsLoading] = useState(false);
   const [closing,         setClosing]         = useState(false);
   const [pausing,         setPausing]         = useState(false);
+  const [appsheetLinked,  setAppsheetLinked]  = useState(false);
+  const [retryingSync,    setRetryingSync]    = useState(false);
 
 // ── Data loading ───────────────────────────────────────────────────────────
 
@@ -46,17 +52,51 @@ export default function SessionDetailScreen() {
 
   useEffect(() => {
     if (!session?.building_id) return;
-    supabase
-      .from("zones")
-      .select("*")
-      .eq("building_id", session.building_id)
-      .eq("is_active", true)
-      .order("floor_level", { ascending: true })
-      .then(({ data }) => {
-        const list = data ?? [];
-        setZones(list);
-        if (list.length > 0) setSelectedZoneId(list[0].id);
-      });
+    Promise.all([
+      supabase
+        .from("zones")
+        .select("*")
+        .eq("building_id", session.building_id)
+        .eq("is_active", true)
+        .order("floor_level", { ascending: true }),
+      supabase
+        .from("rekenzones")
+        .select("*")
+        .eq("building_id", session.building_id)
+        .eq("is_active", true)
+        .order("sort_order", { ascending: true }),
+    ]).then(([zonesRes, rzRes]) => {
+      const rzList = (rzRes.data as Rekenzone[]) ?? [];
+      const list = zonesRes.data ?? [];
+      // Group chips by rekenzone (ungrouped last; floor_level order kept
+      // inside a group) only when at least one zone is actually assigned —
+      // the same gate the VABI exporter uses, so UI and export agree.
+      const hasAssigned =
+        rzList.length > 0 && list.some(z => z.rekenzone_id && rzList.some(rz => rz.id === z.rekenzone_id));
+      const grouped = hasAssigned
+        ? [
+            ...rzList.flatMap(rz => list.filter(z => z.rekenzone_id === rz.id)),
+            ...list.filter(z => !z.rekenzone_id || !rzList.some(rz => rz.id === z.rekenzone_id)),
+          ]
+        : list;
+      setRekenzones(hasAssigned ? rzList : []);
+      setZones(grouped);
+      if (grouped.length > 0) setSelectedZoneId(grouped[0].id);
+    });
+  }, [session?.building_id]);
+
+  // Whether this building has an AppSheet source to sync to — drives the
+  // "Retry AppSheet Sync" button below (only meaningful for AppSheet-linked
+  // buildings, same check syncToAppsheetIfLinked already makes on its own).
+  useEffect(() => {
+    if (!session?.building_id) { setAppsheetLinked(false); return; }
+    let cancelled = false;
+    (supabase.from("buildings") as any)
+      .select("appsheet_object_id")
+      .eq("id", session.building_id)
+      .maybeSingle()
+      .then(({ data }: any) => { if (!cancelled) setAppsheetLinked(!!data?.appsheet_object_id); });
+    return () => { cancelled = true; };
   }, [session?.building_id]);
 
   const loadElements = useCallback(() => {
@@ -88,6 +128,27 @@ export default function SessionDetailScreen() {
 
   // ── Session lifecycle actions ──────────────────────────────────────────────
 
+  // Best-effort export of this session's finished zone/gevel/opening
+  // dimensions to AppSheet — see lib/appsheetSync.ts. Supabase is always the
+  // write of record; this never blocks or reverts session close on failure.
+
+  // Manual re-run of the same export, for a session whose auto-sync-on-close
+  // already failed (or partially failed) — the failure alert above has always
+  // said "you can retry later" but there was previously no control to do so.
+  const retrySync = useCallback(async () => {
+    if (!session?.building_id || retryingSync) return;
+    setRetryingSync(true);
+    const summary = await syncToAppsheetIfLinked(session.building_id, session.notes);
+    setRetryingSync(false);
+    if (!summary || 'error' in summary) return; // failure alert already shown above
+    if (!summary.linked) return; // building isn't AppSheet-linked; button shouldn't be visible anyway
+    const { added, edited, skipped, failed } = summary;
+    Alert.alert(
+      failed > 0 ? "Sync finished with errors" : "AppSheet sync complete",
+      `${added} added, ${edited} updated, ${skipped} skipped${failed > 0 ? `, ${failed} failed` : ""}.`
+    );
+  }, [session?.building_id, retryingSync, syncToAppsheetIfLinked]);
+
   const closeSession = useCallback(() => {
     if (!sessionId || !session || session.status !== "active") return;
     Alert.alert(
@@ -107,6 +168,7 @@ export default function SessionDetailScreen() {
                 body: { session_id: sessionId },
               });
               if (fnErr) throw fnErr;
+              if (session.building_id) await syncToAppsheetIfLinked(session.building_id, session.notes);
               loadSession();
               router.push({ pathname: "/tabs/sessions/results", params: { id: sessionId } });
             } catch (fnEx: any) {
@@ -118,6 +180,7 @@ export default function SessionDetailScreen() {
               });
               if (rpcErr) Alert.alert("Error", rpcErr.message);
               else {
+                if (session.building_id) await syncToAppsheetIfLinked(session.building_id, session.notes);
                 loadSession();
                 router.push({ pathname: "/tabs/sessions/results", params: { id: sessionId } });
               }
@@ -128,7 +191,7 @@ export default function SessionDetailScreen() {
         },
       ]
     );
-  }, [sessionId, session, loadSession]);
+  }, [sessionId, session, loadSession, syncToAppsheetIfLinked]);
 
   const pauseSession = useCallback(() => {
     if (!sessionId || !session || session.status !== "active") return;
@@ -171,10 +234,11 @@ export default function SessionDetailScreen() {
   const exportXML = useCallback(async () => {
     if (!session || !sessionId) return;
     try {
-      const [zonesRes, buildingRes, orgRes] = await Promise.all([
-        supabase.from("zones").select("*").eq("building_id", session.building_id).order("floor_level"),
+      const [zonesRes, buildingRes, orgRes, rekenzonesRes] = await Promise.all([
+        supabase.from("zones").select("*").eq("building_id", session.building_id).eq("is_active", true).order("floor_level"),
         (supabase.from("buildings") as any).select("construction_year, building_type").eq("id", session.building_id).single(),
         (supabase.from("organisations") as any).select("name").single(),
+        supabase.from("rekenzones").select("*").eq("building_id", session.building_id).eq("is_active", true).order("sort_order"),
       ]);
 
       const allZones: Zone[] = zonesRes.data ?? [];
@@ -200,6 +264,7 @@ export default function SessionDetailScreen() {
         allZones,
         allElements,
         allOpenings,
+        rekenzonesRes.data ?? [],
       );
 
       const filename = `${session.session_code}_VABI.xml`;
@@ -210,6 +275,20 @@ export default function SessionDetailScreen() {
   }, [session, sessionId]);
 
   // ── Render ────────────────────────────────────────────────────────────────
+
+  // Zone chips: label chip-groups by rekenzone (first zone of each group
+  // carries the label). Empty map when no rekenzones exist → chips unchanged.
+  const zoneGroupLabels = new Map<string, string>();
+  if (rekenzones.length) {
+    let prevRz: string | null | undefined;
+    for (const z of zones) {
+      const rzId = z.rekenzone_id && rekenzones.some(r => r.id === z.rekenzone_id) ? z.rekenzone_id : null;
+      if (rzId !== prevRz) {
+        zoneGroupLabels.set(z.id, rzId ? rekenzones.find(r => r.id === rzId)!.name : "Other");
+        prevRz = rzId;
+      }
+    }
+  }
 
   if (sessionLoading) return <ActivityIndicator style={styles.loader} color="#1E3A5F" />;
   if (sessionError)   return <Text style={styles.error}>{sessionError}</Text>;
@@ -271,6 +350,9 @@ export default function SessionDetailScreen() {
           >
             {zones.map(z => (
               <View key={z.id} style={styles.zoneChipGroup}>
+                {zoneGroupLabels.has(z.id) && (
+                  <Text style={styles.zoneGroupLabel}>{zoneGroupLabels.get(z.id)!.toUpperCase()}</Text>
+                )}
                 <TouchableOpacity
                   style={[styles.zoneChip, selectedZoneId === z.id && styles.zoneChipActive]}
                   onPress={() => setSelectedZoneId(z.id)}
@@ -292,6 +374,24 @@ export default function SessionDetailScreen() {
                   })}
                 >
                   <Text style={styles.floorPlanBtnText}>⊞</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.scanBtn, !roomScanSupported && styles.scanBtnDisabled]}
+                  onPress={() => {
+                    if (!roomScanSupported) {
+                      Alert.alert(
+                        "Room Scan Unavailable",
+                        "This device doesn't support LiDAR room scanning. Room scan requires an iPhone or iPad Pro with a LiDAR sensor."
+                      );
+                      return;
+                    }
+                    router.push({
+                      pathname: "/tabs/sessions/roomscan",
+                      params: { zoneId: z.id, sessionId: sessionId ?? "" },
+                    });
+                  }}
+                >
+                  <Text style={styles.scanBtnText}>📡</Text>
                 </TouchableOpacity>
               </View>
             ))}
@@ -385,6 +485,17 @@ export default function SessionDetailScreen() {
                     >
                       <Text style={styles.resultsBtnText}>⚡  Energy Results</Text>
                     </TouchableOpacity>
+                    {appsheetLinked && (
+                      <TouchableOpacity
+                        style={[styles.resumeBtn, retryingSync && styles.btnDisabled]}
+                        onPress={retrySync}
+                        disabled={retryingSync}
+                      >
+                        <Text style={styles.resumeBtnText}>
+                          {retryingSync ? "Syncing…" : "↻  Retry AppSheet Sync"}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
                   </>
                 )}
 
@@ -485,6 +596,8 @@ const styles = StyleSheet.create({
   zonePicker:          { backgroundColor: "#fff", borderBottomWidth: 1, borderBottomColor: "#EEE" },
   zoneScroll:          { paddingHorizontal: 12, paddingVertical: 10, gap: 8 },
   zoneChipGroup:       { flexDirection: "row", alignItems: "center", gap: 4 },
+  zoneGroupLabel:      { fontSize: 10, fontWeight: "700", color: "#9CA3AF",
+                         letterSpacing: 0.5, marginLeft: 4, marginRight: 2 },
   zoneChip:            { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20,
                          backgroundColor: "#F0F4F8", borderWidth: 1, borderColor: "#DDE" },
   zoneChipActive:      { backgroundColor: "#1E3A5F", borderColor: "#1E3A5F" },
@@ -493,6 +606,10 @@ const styles = StyleSheet.create({
   floorPlanBtn:        { width: 32, height: 32, borderRadius: 8, backgroundColor: "#2E86C1",
                          alignItems: "center", justifyContent: "center" },
   floorPlanBtnText:    { fontSize: 16, color: "#fff", fontWeight: "700", lineHeight: 20 },
+  scanBtn:             { width: 32, height: 32, borderRadius: 8, backgroundColor: "#1E3A5F",
+                         alignItems: "center", justifyContent: "center", marginLeft: 6 },
+  scanBtnDisabled:     { backgroundColor: "#B0B8C1" },
+  scanBtnText:         { fontSize: 14 },
 
   list:                { padding: 16, gap: 12 },
   emptyWrap:           { padding: 40, alignItems: 'center', gap: 16 },

@@ -1,4 +1,5 @@
 import { Suspense } from 'react';
+import Link from 'next/link';
 import { LoginForm } from './LoginForm';
 import { Zap } from 'lucide-react';
 
@@ -18,6 +19,10 @@ export default function LoginPage() {
         <Suspense fallback={<div className="h-40 animate-pulse bg-gray-100 rounded-lg" />}>
           <LoginForm />
         </Suspense>
+        <p className="text-sm text-gray-500 mt-6 text-center">
+          New organisation?{' '}
+          <Link href="/auth/sign-up" className="text-indigo-600 hover:underline font-medium">Sign up</Link>
+        </p>
       </div>
     </div>
   );

@@ -2,12 +2,12 @@
   "expo": {
     "name": "scarnergy-app",
     "slug": "scarnergy-app",
-    "version": "2.0.0",
+    "version": "2.0.3",
     "jsEngine": "hermes",
     "newArchEnabled": false,
     "ios": {
       "bundleIdentifier": "com.krontivaafrica.scarnergyapp",
-      "buildNumber": "17",
+      "buildNumber": "33",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSBluetoothAlwaysUsageDescription": "This app uses Bluetooth to connect to and communicate with your GLM device.",

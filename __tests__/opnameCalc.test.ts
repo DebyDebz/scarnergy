@@ -5,6 +5,7 @@
 import {
   mmToM, r2, fmtMeters, fmtArea, fmtEfficiencyPct,
   toCardinal, floorId, floorName, openingArea, totalZoneArea, areaByFloor,
+  rekenhoogte, warmtecapKJm2K, rcSourceLabel, DIKTE_VLOERCONSTRUCTIE_FORFAIT_MM,
 } from '../packages/opname-calc/src';
 
 describe('units', () => {
@@ -90,5 +91,58 @@ describe('roofAreaBreakdown', () => {
     const b = roofAreaBreakdown(tiny, [{ height_mm: 2000, width_mm: 2000 }]);
     expect(b.netto).toBe(0);
     expect(dakkapelFootprint({})).toBeNull();
+  });
+});
+
+describe('nta — §2.1 rekenhoogte', () => {
+  it('applies the 300 mm forfait when no floor-construction thickness is recorded', () => {
+    expect(DIKTE_VLOERCONSTRUCTIE_FORFAIT_MM).toBe(300);
+    expect(rekenhoogte(2.52, null)).toBe(2.82);
+    expect(rekenhoogte(2.52, undefined)).toBe(2.82);
+  });
+
+  it('uses the measured thickness when present', () => {
+    expect(rekenhoogte(2.52, 250)).toBe(2.77);
+    expect(rekenhoogte(2.5, 0)).toBe(2.5); // measured 0 is a value, not "missing"
+  });
+
+  it('manual override wins over any computation', () => {
+    expect(rekenhoogte(2.52, 250, 3.1)).toBe(3.1);
+    expect(rekenhoogte(null, null, 3.1)).toBe(3.1);
+  });
+
+  it('returns null without a height or override', () => {
+    expect(rekenhoogte(null, 300)).toBeNull();
+    expect(rekenhoogte(undefined, null, null)).toBeNull();
+  });
+});
+
+describe('nta — §1.3 warmtecapaciteit', () => {
+  it('is null while any class input is missing', () => {
+    expect(warmtecapKJm2K(null, 'zwaar', 'gesloten')).toBeNull();
+    expect(warmtecapKJm2K('licht', null, 'gesloten')).toBeNull();
+    expect(warmtecapKJm2K('licht', 'zwaar', null)).toBeNull();
+  });
+
+  it('is null for every combination until the licensed forfait table is transcribed (Phase 2 gate)', () => {
+    // When the NTA 8800 / ISSO 82.1 values land, replace these with the real numbers.
+    for (const v of ['licht', 'zwaar']) {
+      for (const g of ['licht', 'zwaar']) {
+        for (const p of ['gesloten', 'open', 'overig']) {
+          expect(warmtecapKJm2K(v, g, p)).toBeNull();
+        }
+      }
+    }
+    expect(warmtecapKJm2K('onbekend', 'zwaar', 'gesloten')).toBeNull();
+  });
+});
+
+describe('nta — §6 rc_source labels', () => {
+  it('maps the three provenance values and rejects unknowns', () => {
+    expect(rcSourceLabel('documented')).toBe('documented');
+    expect(rcSourceLabel('observed')).toBe('observed');
+    expect(rcSourceLabel('buildyear_forfait')).toBe('forfait');
+    expect(rcSourceLabel('anything_else')).toBeNull();
+    expect(rcSourceLabel(null)).toBeNull();
   });
 });

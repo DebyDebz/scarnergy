@@ -1,6 +1,7 @@
 import { useEffect, useState, Component, ReactNode } from "react";
 import { Slot, useRouter, useSegments } from "expo-router";
 import { Platform, Text, View, LogBox } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 LogBox.ignoreLogs([
   '"shadow*" style props are deprecated',
@@ -114,12 +115,14 @@ function RootLayout() {
   }
 
   return (
-    <ErrorBoundary>
-      <BLEProvider>
-        <Slot />
-      </BLEProvider>
-      <ErrorOverlay />
-    </ErrorBoundary>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <ErrorBoundary>
+        <BLEProvider>
+          <Slot />
+        </BLEProvider>
+        <ErrorOverlay />
+      </ErrorBoundary>
+    </GestureHandlerRootView>
   );
 }
 
