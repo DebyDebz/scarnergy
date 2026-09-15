@@ -9,8 +9,11 @@ import { supabase, BuildingSummary } from "../../lib/supabase";
 import { useAuthStore } from "../../store/authStore";
 import { useDataSourceStore } from "../../store/dataSourceStore";
 import { fetchAppsheetBuildings, materializeAppsheetBuilding, AppsheetProxyError } from "../../lib/appsheetProxy";
+import { useIsTablet } from "../../hooks/useResponsive";
 
 export default function BuildingsScreen() {
+  const isTablet = useIsTablet();
+  const numColumns = isTablet ? 2 : 1;
   const { profile } = useAuthStore();
   const { source }  = useDataSourceStore();
   const router      = useRouter();
@@ -108,6 +111,9 @@ export default function BuildingsScreen() {
   return (
     <View style={styles.container}>
       <FlatList
+        key={numColumns}
+        numColumns={numColumns}
+        columnWrapperStyle={isTablet ? styles.columnWrapper : undefined}
         data={buildings}
         keyExtractor={b => b.id}
         contentContainerStyle={styles.list}
@@ -130,7 +136,7 @@ export default function BuildingsScreen() {
           ].filter(Boolean).join(" · ");
 
           return (
-            <View style={styles.card}>
+            <View style={[styles.card, isTablet && styles.cardTablet]}>
 
               {/* Top: address + energy label */}
               <TouchableOpacity
@@ -244,6 +250,8 @@ const styles = StyleSheet.create({
 
   card:            { backgroundColor: "#FFF", borderRadius: 14,
                      borderWidth: 1, borderColor: "#EBEBEB" },
+  cardTablet:      { width: "48%" },
+  columnWrapper:   { justifyContent: "space-between" },
 
   cardTop:         { padding: 16, paddingBottom: 12 },
   addressRow:      { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 4 },

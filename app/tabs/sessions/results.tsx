@@ -6,6 +6,7 @@ import {
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { supabase, SessionSummary, Zone, Measurement } from "../../../lib/supabase";
 import { fetchAppsheetSessionDetail } from "../../../lib/appsheetProxy";
+import { ResponsiveContainer } from "../../../components/ResponsiveContainer";
 
 // Best → worst; same ordering the energy_label_estimate edge function uses to
 // pick the building label (worst zone wins).
@@ -190,6 +191,7 @@ export default function SessionResultsScreen() {
       contentContainerStyle={{ paddingBottom: 32 }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
+      <ResponsiveContainer>
       {/* Building label hero */}
       <View style={styles.hero}>
         <Text style={styles.heroAddress}>{session.building_address}</Text>
@@ -311,6 +313,7 @@ export default function SessionResultsScreen() {
           Rc/U-heuristiek; een officiële NTA 8800-opname kan afwijken.
         </Text>
       </View>
+      </ResponsiveContainer>
     </ScrollView>
   );
 }

@@ -6,6 +6,8 @@ import {
   AppsheetSessionDetail, AppsheetProxyError,
 } from "../../../lib/appsheetProxy";
 import { elementTypeLabel } from "../../../lib/elementTypes";
+import { useIsTablet } from "../../../hooks/useResponsive";
+import { CONTENT_MAX_WIDTH } from "../../../constants/layout";
 
 // Mostly-read-only counterpart to /tabs/sessions/[id].tsx for AppSheet-sourced
 // pseudo-sessions: there is no Supabase inspection_sessions row to open here,
@@ -27,6 +29,7 @@ import { elementTypeLabel } from "../../../lib/elementTypes";
 // /tabs/sessions/flow — same drawing flow "Start Inspection" already uses
 // for a brand new native building.
 export default function AppsheetSessionDetailScreen() {
+  const isTablet = useIsTablet();
   const { objectId } = useLocalSearchParams<{ objectId: string }>();
   const router = useRouter();
 
@@ -191,7 +194,7 @@ export default function AppsheetSessionDetailScreen() {
       <FlatList
         data={zoneElements}
         keyExtractor={e => e.id}
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[styles.list, isTablet && { maxWidth: CONTENT_MAX_WIDTH, alignSelf: "center", width: "100%" }]}
         onRefresh={load}
         refreshing={loading}
         ListHeaderComponent={

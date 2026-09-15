@@ -3,6 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, KeyboardAvo
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuthStore } from "../../store/authStore";
+import { ResponsiveContainer } from "../../components/ResponsiveContainer";
 
 export default function SignIn() {
   const { signIn } = useAuthStore();
@@ -26,6 +27,7 @@ export default function SignIn() {
 
   return (
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      <ResponsiveContainer maxWidth={420}>
       <View style={styles.card}>
         <Text style={styles.logo}>SCARNERGY</Text>
         <Text style={styles.subtitle}>Building Inspection Platform</Text>
@@ -60,6 +62,7 @@ export default function SignIn() {
           </TouchableOpacity>
         </View>
       </View>
+      </ResponsiveContainer>
     </KeyboardAvoidingView>
   );
 }

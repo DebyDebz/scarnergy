@@ -1,6 +1,7 @@
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from "react-native";
 import { useRouter } from "expo-router";
 import { useBLE } from "../../lib/BLEContext";
+import { ResponsiveContainer } from "../../components/ResponsiveContainer";
 
 const STATE_COLOR: Record<string, string> = {
   idle: "#888", scanning: "#F39C12", connecting: "#F39C12",
@@ -23,6 +24,7 @@ export default function DeviceScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <ResponsiveContainer>
       {/* Status card */}
       <View style={styles.statusCard}>
         <View style={[styles.statusDot, { backgroundColor: STATE_COLOR[state] ?? "#888" }]} />
@@ -153,6 +155,7 @@ export default function DeviceScreen() {
         <Text style={styles.provisionLinkText}>🔧  Provision an ESP32 gateway</Text>
       </TouchableOpacity>
 
+      </ResponsiveContainer>
     </ScrollView>
   );
 }

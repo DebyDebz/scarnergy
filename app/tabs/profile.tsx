@@ -7,6 +7,7 @@ import Constants from "expo-constants";
 import { supabase } from "../../lib/supabase";
 import { useAuthStore } from "../../store/authStore";
 import { useDataSourceStore } from "../../store/dataSourceStore";
+import { ResponsiveContainer } from "../../components/ResponsiveContainer";
 
 const ROLE_LABELS: Record<string, string> = {
   inspector:    "Inspector",
@@ -73,6 +74,7 @@ export default function Profile() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 32 }}>
+      <ResponsiveContainer>
       {/* Identity header */}
       <View style={styles.identity}>
         <View style={styles.avatar}><Text style={styles.avatarText}>{initials}</Text></View>
@@ -169,6 +171,7 @@ export default function Profile() {
           <Text style={styles.signOutText}>Sign Out</Text>
         </TouchableOpacity>
       </View>
+      </ResponsiveContainer>
     </ScrollView>
   );
 }

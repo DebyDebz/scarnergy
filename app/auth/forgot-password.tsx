@@ -5,6 +5,7 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import { supabase } from "../../lib/supabase";
+import { ResponsiveContainer } from "../../components/ResponsiveContainer";
 
 // Two-step recovery, fully in-app (no deep link needed):
 //   1. resetPasswordForEmail() — GoTrue emails a recovery code. The email
@@ -63,6 +64,7 @@ export default function ForgotPassword() {
 
   return (
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      <ResponsiveContainer maxWidth={420}>
       <View style={styles.card}>
         <Text style={styles.logo}>SCARNERGY</Text>
         <Text style={styles.subtitle}>
@@ -100,6 +102,7 @@ export default function ForgotPassword() {
           <Text style={styles.linkText}>Back to sign in</Text>
         </TouchableOpacity>
       </View>
+      </ResponsiveContainer>
     </KeyboardAvoidingView>
   );
 }

@@ -6,12 +6,11 @@ import {
 import { Zone } from '../../lib/supabase';
 import { projectPointsOnImage, fitPointsToInner } from '../../lib/floorplanGeometry';
 import { ClippedGrid } from './ClippedGrid';
+import { useCanvasSize } from '../../hooks/useResponsive';
 
 const PRIMARY = '#1E3A5F';
-const CANVAS  = 300;
 const CELL_PX = 20;
 const PADDING = 12;
-const INNER   = CANVAS - PADDING * 2;
 
 interface Props {
   zones: Zone[];
@@ -19,6 +18,8 @@ interface Props {
 }
 
 export function FloorPlanViewer({ zones, onContinue }: Props) {
+  const CANVAS = useCanvasSize();
+  const INNER = CANVAS - PADDING * 2;
   const zonesWithImage = zones.filter(z => z.floor_plan_image_url && z.floor_plan_scale_m);
   const [activeIdx, setActiveIdx] = useState(0);
   const [imgLoaded, setImgLoaded] = useState(false);
@@ -56,18 +57,18 @@ export function FloorPlanViewer({ zones, onContinue }: Props) {
       )}
 
       {/* Canvas */}
-      <View style={styles.canvas}>
+      <View style={[styles.canvas, { width: CANVAS, height: CANVAS }]}>
         {/* Floor plan image */}
         {activeZone.floor_plan_image_url && (
           <>
             {!imgLoaded && (
-              <View style={styles.imgLoading}>
+              <View style={[styles.imgLoading, { width: CANVAS, height: CANVAS }]}>
                 <ActivityIndicator color={PRIMARY} />
               </View>
             )}
             <Image
               source={{ uri: activeZone.floor_plan_image_url }}
-              style={[styles.img, imgLoaded ? styles.imgVisible : styles.imgHidden]}
+              style={[styles.img, { width: CANVAS, height: CANVAS }, imgLoaded ? styles.imgVisible : styles.imgHidden]}
               resizeMode="contain"
               onLoad={(e) => {
                 const src = e.nativeEvent?.source;
@@ -111,13 +112,13 @@ const styles = StyleSheet.create({
   tabActive:   { backgroundColor: PRIMARY },
   tabTxt:      { fontSize: 13, color: '#374151' },
   tabTxtActive:{ color: '#fff', fontWeight: '600' },
-  canvas:      { width: CANVAS, height: CANVAS, alignSelf: 'center',
+  canvas:      { alignSelf: 'center',
                  backgroundColor: '#fafafa', borderRadius: 8, overflow: 'hidden',
                  borderWidth: 1, borderColor: '#E5E7EB' },
-  img:         { position: 'absolute', top: 0, left: 0, width: CANVAS, height: CANVAS },
+  img:         { position: 'absolute', top: 0, left: 0 },
   imgVisible:  { opacity: 1 },
   imgHidden:   { opacity: 0 },
-  imgLoading:  { position: 'absolute', top: 0, left: 0, width: CANVAS, height: CANVAS,
+  imgLoading:  { position: 'absolute', top: 0, left: 0,
                  alignItems: 'center', justifyContent: 'center' },
   scaleLabel:  { position: 'absolute', fontSize: 7, color: '#9CA3AF' },
   infoRow:     { flexDirection: 'row', justifyContent: 'center', gap: 24, marginTop: 12 },

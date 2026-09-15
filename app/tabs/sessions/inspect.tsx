@@ -22,6 +22,7 @@ import { gridLengthMeters } from "../../../lib/floorplanGeometry";
 import { parseTapwaterSegments, formatTapwaterSegments } from "../../../lib/tapwater";
 import { FieldSelect } from "../../../components/ui/FieldSelect";
 import { FieldToggle } from "../../../components/ui/FieldToggle";
+import { ResponsiveContainer } from "../../../components/ResponsiveContainer";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -834,6 +835,7 @@ export default function InspectScreen() {
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <ResponsiveContainer>
 
         {/* ── Progress ── */}
         <View style={styles.progressRow}>
@@ -1092,6 +1094,7 @@ export default function InspectScreen() {
           </Text>
         )}
 
+        </ResponsiveContainer>
       </ScrollView>
     </KeyboardAvoidingView>
   );

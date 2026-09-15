@@ -8,8 +8,11 @@ import { useDataSourceStore } from "../../store/dataSourceStore";
 import { fetchAppsheetDashboardStats, AppsheetProxyError } from "../../lib/appsheetProxy";
 import { useSyncQueue } from "../../hooks/useSyncQueue";
 import { useBLE } from "../../lib/BLEContext";
+import { useIsTablet } from "../../hooks/useResponsive";
+import { ResponsiveContainer } from "../../components/ResponsiveContainer";
 
 export default function Dashboard() {
+  const isTablet = useIsTablet();
   const { profile } = useAuthStore();
   const { source }  = useDataSourceStore();
   const { pendingCount, drain } = useSyncQueue();
@@ -64,6 +67,7 @@ export default function Dashboard() {
 
   return (
     <ScrollView style={styles.container} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
+      <ResponsiveContainer maxWidth={900}>
       <View style={styles.header}>
         <Text style={styles.greeting}>Good day, {profile?.full_name?.split(" ")[0]} 👋</Text>
         <View style={styles.headerRight}>
@@ -101,7 +105,7 @@ export default function Dashboard() {
         <View style={styles.actionGrid}>
           {/* New Inspection */}
           <TouchableOpacity
-            style={[styles.actionCard, { backgroundColor: "#EBF5FB", borderTopColor: "#2E86C1" }]}
+            style={[styles.actionCard, isTablet && styles.actionCardTablet, { backgroundColor: "#EBF5FB", borderTopColor: "#2E86C1" }]}
             onPress={() => router.push("/tabs/buildings")}
             activeOpacity={0.75}
           >
@@ -123,7 +127,7 @@ export default function Dashboard() {
 
           {/* Connect GLM */}
           <TouchableOpacity
-            style={[styles.actionCard, { backgroundColor: isConnected ? "#EAFAF1" : "#FDFEFE", borderTopColor: isConnected ? "#27AE60" : "#CCC" }]}
+            style={[styles.actionCard, isTablet && styles.actionCardTablet, { backgroundColor: isConnected ? "#EAFAF1" : "#FDFEFE", borderTopColor: isConnected ? "#27AE60" : "#CCC" }]}
             onPress={() => router.push("/tabs/device")}
             activeOpacity={0.75}
           >
@@ -147,7 +151,7 @@ export default function Dashboard() {
 
           {/* Sessions */}
           <TouchableOpacity
-            style={[styles.actionCard, { backgroundColor: "#F5EEF8", borderTopColor: "#6C3483" }]}
+            style={[styles.actionCard, isTablet && styles.actionCardTablet, { backgroundColor: "#F5EEF8", borderTopColor: "#6C3483" }]}
             onPress={() => router.push("/tabs/sessions")}
             activeOpacity={0.75}
           >
@@ -162,7 +166,7 @@ export default function Dashboard() {
 
           {/* Sync */}
           <TouchableOpacity
-            style={[styles.actionCard, { backgroundColor: pendingCount > 0 ? "#FEF9E7" : "#F2F3F4", borderTopColor: pendingCount > 0 ? "#E67E22" : "#888" }]}
+            style={[styles.actionCard, isTablet && styles.actionCardTablet, { backgroundColor: pendingCount > 0 ? "#FEF9E7" : "#F2F3F4", borderTopColor: pendingCount > 0 ? "#E67E22" : "#888" }]}
             onPress={drain}
             activeOpacity={0.75}
           >
@@ -217,6 +221,7 @@ export default function Dashboard() {
             </TouchableOpacity>
           ))}
       </View>
+      </ResponsiveContainer>
     </ScrollView>
   );
 }
@@ -238,6 +243,7 @@ const styles = StyleSheet.create({
   sectionTitle:   { fontSize: 16, fontWeight: "700", color: "#1E3A5F", marginBottom: 12 },
   actionGrid:       { flexDirection: "row", flexWrap: "wrap", gap: 12 },
   actionCard:       { width: "47%", borderRadius: 16, padding: 16, borderTopWidth: 3, elevation: 2, shadowColor: "#000", shadowOpacity: 0.06, shadowRadius: 6 },
+  actionCardTablet: { width: "31%" },
   actionCardTop:    { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
   actionBadge:      { borderRadius: 10, minWidth: 20, height: 20, paddingHorizontal: 6, alignItems: "center", justifyContent: "center" },
   actionBadgeText:  { fontSize: 11, fontWeight: "700", color: "#FFF" },

@@ -11,8 +11,11 @@ import { elementTypeLabel } from "../../../lib/elementTypes";
 import { FloorPlanReview } from "../../../components/inspection/FloorPlanReview";
 import { syncToAppsheetIfLinked } from "../../../lib/appsheetSync";
 import { useRoomScanner } from "../../../hooks/useRoomScanner";
+import { useIsTablet } from "../../../hooks/useResponsive";
+import { CONTENT_MAX_WIDTH } from "../../../constants/layout";
 
 export default function SessionDetailScreen() {
+  const isTablet = useIsTablet();
   const { id: sessionId } = useLocalSearchParams<{ id: string }>();
   const router     = useRouter();
   const navigation = useNavigation();
@@ -406,7 +409,7 @@ export default function SessionDetailScreen() {
           <FlatList
             data={elements}
             keyExtractor={e => e.id}
-            contentContainerStyle={styles.list}
+            contentContainerStyle={[styles.list, isTablet && { maxWidth: CONTENT_MAX_WIDTH, alignSelf: "center", width: "100%" }]}
             ListHeaderComponent={
               zoneHasPlan && selectedZone && elements.length > 0 ? (
                 <FloorPlanReview

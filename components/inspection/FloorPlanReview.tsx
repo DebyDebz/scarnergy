@@ -5,6 +5,7 @@ import {
 import { Zone, BuildingElement } from '../../lib/supabase';
 import { projectPointsOnImage, fitPointsToInner, imageOffsets, gridLengthMeters } from '../../lib/floorplanGeometry';
 import { ClippedGrid } from './ClippedGrid';
+import { useCanvasSize } from '../../hooks/useResponsive';
 
 /**
  * Stage 6 support — read-only gridded plan that renders placed elements at their
@@ -15,7 +16,6 @@ import { ClippedGrid } from './ClippedGrid';
  */
 
 const PRIMARY = '#1E3A5F';
-const CANVAS   = 300;
 const PADDING  = 12;
 const CELL_PX  = 20;
 
@@ -41,6 +41,7 @@ interface Props {
 }
 
 export function FloorPlanReview({ zone, elements, onMeasure }: Props) {
+  const CANVAS = useCanvasSize();
   // The original photo/sketch is intentionally not displayed here — by review
   // time the scale is already calibrated (Grid Analysis) and elements are
   // already placed, so only the grid + zone outline + elements are shown. The
@@ -86,7 +87,7 @@ export function FloorPlanReview({ zone, elements, onMeasure }: Props) {
       <Text style={styles.title}>Floor Plan — {zone.name}</Text>
       <Text style={styles.sub}>Tap an element on the plan to measure it. Captured values are shown in place.</Text>
 
-      <View style={styles.canvas}>
+      <View style={[styles.canvas, { width: CANVAS, height: CANVAS }]}>
         {/* Grid clipped to the footprint outline (full grid when not yet traced) */}
         <ClippedGrid size={CANVAS} cellPx={CELL_PX} points={outlinePts} />
 
@@ -148,7 +149,7 @@ const styles = StyleSheet.create({
                 elevation: 1, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 4 },
   title:      { fontSize: 15, fontWeight: '700', color: PRIMARY },
   sub:        { fontSize: 12, color: '#6B7280', marginTop: 2, marginBottom: 12 },
-  canvas:     { width: CANVAS, height: CANVAS, alignSelf: 'center',
+  canvas:     { alignSelf: 'center',
                 backgroundColor: '#fafafa', borderRadius: 8, overflow: 'hidden',
                 borderWidth: 1, borderColor: '#E5E7EB' },
   chipWrap:   { position: 'absolute', width: 80, alignItems: 'center' },

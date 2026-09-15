@@ -14,6 +14,7 @@ import { ZoneManager } from '../../../components/inspection/ZoneManager';
 import { GridCanvas } from '../../../components/inspection/GridCanvas';
 import { ElementPlacer } from '../../../components/inspection/ElementPlacer';
 import { FloorPlanViewer } from '../../../components/inspection/FloorPlanViewer';
+import { ResponsiveContainer } from '../../../components/ResponsiveContainer';
 
 const PRIMARY = '#1E3A5F';
 
@@ -434,7 +435,9 @@ export default function InspectionFlowScreen() {
 
       {/* Main content */}
       <View style={styles.content}>
-        {renderStage()}
+        <ResponsiveContainer style={{ flex: 1 }}>
+          {renderStage()}
+        </ResponsiveContainer>
       </View>
     </SafeAreaView>
   );

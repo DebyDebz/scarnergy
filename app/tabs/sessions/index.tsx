@@ -12,6 +12,8 @@ import { useDataSourceStore } from "../../../store/dataSourceStore";
 import {
   fetchAppsheetSessions, fetchAppsheetBuildings, materializeAppsheetBuilding, AppsheetProxyError,
 } from "../../../lib/appsheetProxy";
+import { useIsTablet } from "../../../hooks/useResponsive";
+import { ResponsiveContainer } from "../../../components/ResponsiveContainer";
 
 // Building picker in the "+" modal below only ever needs these fields —
 // normalized here so it can render a native buildings.* row and an
@@ -36,6 +38,8 @@ const STATUS_COLOR: Record<string, string> = {
 };
 
 export default function SessionsScreen() {
+  const isTablet = useIsTablet();
+  const numColumns = isTablet ? 2 : 1;
   const { profile }    = useAuthStore();
   const { source }     = useDataSourceStore();
   const router         = useRouter();
@@ -185,6 +189,9 @@ export default function SessionsScreen() {
         ? <ActivityIndicator style={styles.loader} color="#1E3A5F" />
         : (
           <FlatList
+            key={numColumns}
+            numColumns={numColumns}
+            columnWrapperStyle={isTablet ? styles.columnWrapper : undefined}
             data={sessions}
             keyExtractor={s => s.id}
             contentContainerStyle={styles.list}
@@ -207,7 +214,7 @@ export default function SessionsScreen() {
               const measurementsLabel = source === "appsheet" ? "—" : item.total_measurements;
               return (
                 <TouchableOpacity
-                  style={styles.card}
+                  style={[styles.card, isTablet && styles.cardTablet]}
                   onPress={() => {
                     if (source === "appsheet") {
                       router.push(`/tabs/sessions/appsheet-detail?objectId=${encodeURIComponent(item.id)}`);
@@ -266,6 +273,7 @@ export default function SessionsScreen() {
             </View>
 
             <ScrollView style={styles.modalScroll} keyboardShouldPersistTaps="handled">
+            <ResponsiveContainer>
 
               {/* Building picker */}
               <Text style={styles.sectionLabel}>SELECT BUILDING</Text>
@@ -325,6 +333,7 @@ export default function SessionsScreen() {
               />
 
               <View style={{ height: 40 }} />
+            </ResponsiveContainer>
             </ScrollView>
           </KeyboardAvoidingView>
         </SafeAreaView>
@@ -345,6 +354,8 @@ const styles = StyleSheet.create({
 
   card:        { backgroundColor: "#FFF", borderRadius: 12, padding: 16,
                  elevation: 2, shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 4 },
+  cardTablet:  { width: "48%" },
+  columnWrapper: { justifyContent: "space-between" },
   top:         { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   code:        { fontSize: 13, fontWeight: "700", color: "#1E3A5F" },
   badge:       { borderRadius: 8, paddingHorizontal: 10, paddingVertical: 3 },

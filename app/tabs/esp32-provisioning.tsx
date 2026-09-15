@@ -4,6 +4,7 @@ import { useRouter } from "expo-router";
 import { useAuthStore } from "../../store/authStore";
 import { supabase } from "../../lib/supabase";
 import { useESP32Provisioning } from "../../hooks/useESP32Provisioning";
+import { ResponsiveContainer } from "../../components/ResponsiveContainer";
 
 const STATE_COLOR: Record<string, string> = {
   idle: "#888", scanning: "#F39C12", connecting: "#F39C12", connected: "#2E86C1",
@@ -80,6 +81,7 @@ export default function ESP32ProvisioningScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <ResponsiveContainer>
       <View style={styles.statusCard}>
         <View style={[styles.statusDot, { backgroundColor: STATE_COLOR[state] ?? "#888" }]} />
         <View style={styles.statusInfo}>
@@ -134,6 +136,7 @@ export default function ESP32ProvisioningScreen() {
           A device that's already been provisioned won't show up in the scan — this screen is only for first-time setup or re-provisioning after a reset.
         </Text>
       </View>
+      </ResponsiveContainer>
     </ScrollView>
   );
 }

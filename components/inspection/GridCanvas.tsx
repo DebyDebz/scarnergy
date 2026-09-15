@@ -7,11 +7,10 @@ import {
 import { supabase, Zone } from '../../lib/supabase';
 import { projectPointsOnImage, fitPointsToInner } from '../../lib/floorplanGeometry';
 import { ClippedGrid } from './ClippedGrid';
+import { useCanvasSize } from '../../hooks/useResponsive';
 
 const PRIMARY  = '#1E3A5F';
-const CANVAS   = 300;
 const PADDING  = 12;
-const INNER    = CANVAS - PADDING * 2;
 const CELL_PX  = 20;
 
 interface Props {
@@ -20,6 +19,8 @@ interface Props {
 }
 
 export function GridCanvas({ zones, onConfirmed }: Props) {
+  const CANVAS = useCanvasSize();
+  const INNER = CANVAS - PADDING * 2;
   const zonesWithPlan = zones.filter(z => z.floor_plan_points && z.floor_plan_points.length >= 3);
   const [activeIdx, setActiveIdx] = useState(0);
   const [scaleInputs, setScaleInputs] = useState<Record<string, string>>(
@@ -155,7 +156,7 @@ export function GridCanvas({ zones, onConfirmed }: Props) {
 
         {/* Canvas — tappable for two-point scale calibration */}
         <View
-          style={styles.canvas}
+          style={[styles.canvas, { width: CANVAS, height: CANVAS }]}
           onStartShouldSetResponder={() => true}
           onResponderGrant={onCanvasTap}
         >
@@ -163,13 +164,13 @@ export function GridCanvas({ zones, onConfirmed }: Props) {
           {hasImage && (
             <>
               {!imgLoaded && (
-                <View style={styles.imgLoading}>
+                <View style={[styles.imgLoading, { width: CANVAS, height: CANVAS }]}>
                   <ActivityIndicator color={PRIMARY} />
                 </View>
               )}
               <Image
                 source={{ uri: activeZone.floor_plan_image_url! }}
-                style={[styles.img, imgLoaded ? styles.imgVisible : styles.imgHidden]}
+                style={[styles.img, { width: CANVAS, height: CANVAS }, imgLoaded ? styles.imgVisible : styles.imgHidden]}
                 resizeMode="contain"
                 onLoad={(e) => {
                   const src = e.nativeEvent?.source;
@@ -297,13 +298,13 @@ const styles = StyleSheet.create({
   tabActive:   { backgroundColor: PRIMARY },
   tabTxt:      { fontSize: 13, color: '#374151' },
   tabTxtActive:{ color: '#fff', fontWeight: '600' },
-  canvas:      { width: CANVAS, height: CANVAS, alignSelf: 'center',
+  canvas:      { alignSelf: 'center',
                  backgroundColor: '#fafafa', borderRadius: 8, overflow: 'hidden',
                  borderWidth: 1, borderColor: '#E5E7EB' },
-  img:         { position: 'absolute', top: 0, left: 0, width: CANVAS, height: CANVAS },
+  img:         { position: 'absolute', top: 0, left: 0 },
   imgVisible:  { opacity: 1 },
   imgHidden:   { opacity: 0 },
-  imgLoading:  { position: 'absolute', top: 0, left: 0, width: CANVAS, height: CANVAS,
+  imgLoading:  { position: 'absolute', top: 0, left: 0,
                  alignItems: 'center', justifyContent: 'center' },
   gridLabel:   { position: 'absolute', fontSize: 7, color: '#9CA3AF' },
   scaleRow:    { flexDirection: 'row', alignItems: 'center', gap: 10,

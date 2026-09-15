@@ -8,6 +8,7 @@ import { supabase, BuildingFacadePhoto } from '../../../lib/supabase';
 import { useAuthStore } from '../../../store/authStore';
 import { uploadImageToStorage } from '../../../lib/uploadImage';
 import { syncToAppsheetIfLinked } from '../../../lib/appsheetSync';
+import { ResponsiveContainer } from '../../../components/ResponsiveContainer';
 
 let ImagePicker: typeof import('expo-image-picker') | null = null;
 try { ImagePicker = require('expo-image-picker'); } catch { ImagePicker = null; }
@@ -182,7 +183,8 @@ export default function FacadePhotosScreen() {
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={styles.grid}>
+      <ScrollView contentContainerStyle={styles.gridScroll}>
+        <ResponsiveContainer maxWidth={500} style={styles.grid}>
         {DIRECTIONS.map(({ key, labelNL }) => {
           const photo     = photos[key];
           const displayUri = signedUrls[key];
@@ -218,6 +220,7 @@ export default function FacadePhotosScreen() {
             </TouchableOpacity>
           );
         })}
+        </ResponsiveContainer>
       </ScrollView>
 
       <View style={styles.footer}>
@@ -244,7 +247,8 @@ const styles = StyleSheet.create({
   title:          { fontSize: 17, fontWeight: '700', color: '#fff' },
   sub:            { fontSize: 12, color: '#A9C4E4', marginTop: 2 },
 
-  grid:           { padding: 12, flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  gridScroll:     { padding: 12 },
+  grid:           { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
 
   cell:           { width: '47%', aspectRatio: 4 / 3, borderRadius: 12, overflow: 'hidden',
                     backgroundColor: '#fff', borderWidth: 2, borderColor: '#e5e7eb',

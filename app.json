@@ -8,6 +8,7 @@
     "ios": {
       "bundleIdentifier": "com.krontivaafrica.scarnergyapp",
       "buildNumber": "33",
+      "supportsTablet": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSBluetoothAlwaysUsageDescription": "This app uses Bluetooth to connect to and communicate with your GLM device.",

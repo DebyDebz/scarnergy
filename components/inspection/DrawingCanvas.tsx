@@ -5,13 +5,12 @@ import {
 } from 'react-native';
 import { supabase, Zone } from '../../lib/supabase';
 import { useAuthStore } from '../../store/authStore';
+import { useCanvasSize } from '../../hooks/useResponsive';
 
-const CANVAS    = 300;
 const CLOSE_R   = 24;
 const DOT_R     = 6;
 const PRIMARY   = '#1E3A5F';
 const GRID_STEP = 20;
-const GRID_N    = Math.ceil(CANVAS / GRID_STEP);
 
 interface Point { x: number; y: number }
 
@@ -49,6 +48,8 @@ function LineSegment({ x1, y1, x2, y2, dashed }: { x1:number; y1:number; x2:numb
 }
 
 export function DrawingCanvas({ zoneId, zoneName, buildingId, onSaved }: Props) {
+  const CANVAS = useCanvasSize();
+  const GRID_N = Math.ceil(CANVAS / GRID_STEP);
   const { profile } = useAuthStore();
   const isNewZone = !zoneId && !!buildingId;
   const [newZoneName, setNewZoneName] = useState('');
@@ -133,7 +134,7 @@ export function DrawingCanvas({ zoneId, zoneName, buildingId, onSaved }: Props) 
         <>
           <Text style={styles.label}>Name this zone</Text>
           <TextInput
-            style={styles.nameInput}
+            style={[styles.nameInput, { width: CANVAS }]}
             placeholder="e.g. Ground Floor, Room A"
             value={newZoneName}
             onChangeText={setNewZoneName}
@@ -149,16 +150,16 @@ export function DrawingCanvas({ zoneId, zoneName, buildingId, onSaved }: Props) 
       <Text style={styles.hint}>{hint}</Text>
 
       <View
-        style={[styles.canvas, closed && styles.canvasClosed]}
+        style={[styles.canvas, { width: CANVAS, height: CANVAS }, closed && styles.canvasClosed]}
         onStartShouldSetResponder={() => true}
         onResponderGrant={handleTap}
       >
         {/* Grid */}
         {Array.from({ length: GRID_N + 1 }).map((_, i) => (
-          <View key={`v${i}`} pointerEvents="none" style={[styles.gridLine, styles.gridV, { left: i * GRID_STEP }]} />
+          <View key={`v${i}`} pointerEvents="none" style={[styles.gridLine, styles.gridV, { left: i * GRID_STEP, height: CANVAS }]} />
         ))}
         {Array.from({ length: GRID_N + 1 }).map((_, i) => (
-          <View key={`h${i}`} pointerEvents="none" style={[styles.gridLine, styles.gridH, { top: i * GRID_STEP }]} />
+          <View key={`h${i}`} pointerEvents="none" style={[styles.gridLine, styles.gridH, { top: i * GRID_STEP, width: CANVAS }]} />
         ))}
 
         {/* Edges */}
@@ -216,15 +217,15 @@ const styles = StyleSheet.create({
   label:       { fontSize: 14, color: '#374151', marginBottom: 4, textAlign: 'center' },
   bold:        { fontWeight: '700', color: PRIMARY },
   hint:        { fontSize: 12, color: '#6B7280', marginBottom: 12, textAlign: 'center' },
-  nameInput:   { width: CANVAS, borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8,
+  nameInput:   { borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8,
                  paddingHorizontal: 12, paddingVertical: 10, fontSize: 15,
                  backgroundColor: '#fff', marginBottom: 10 },
-  canvas:      { width: CANVAS, height: CANVAS, backgroundColor: '#ffffff',
+  canvas:      { backgroundColor: '#ffffff',
                  borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8, overflow: 'hidden' },
   canvasClosed:{ backgroundColor: 'rgba(30,58,95,0.04)', borderColor: PRIMARY },
   gridLine:    { position: 'absolute', backgroundColor: '#f0f0f0' },
-  gridV:       { width: 1, height: CANVAS },
-  gridH:       { height: 1, width: CANVAS },
+  gridV:       { width: 1 },
+  gridH:       { height: 1 },
   dot:         { position: 'absolute', width: DOT_R * 2, height: DOT_R * 2,
                  borderRadius: DOT_R, backgroundColor: PRIMARY,
                  borderWidth: 1.5, borderColor: '#fff' },

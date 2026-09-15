@@ -4,6 +4,7 @@ import {
 } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Svg, { Path, Rect } from 'react-native-svg';
+import { useCanvasSize } from '../../hooks/useResponsive';
 
 // Native module — absent until the app is rebuilt with a dev client that
 // includes it (same constraint as expo-image-picker's camera path below).
@@ -13,8 +14,7 @@ let ViewShot: typeof import('react-native-view-shot').default | null = null;
 try { ViewShot = require('react-native-view-shot').default; } catch { ViewShot = null; }
 export const isSketchAvailable = !!ViewShot;
 
-const SIZE         = 300; // matches FloorPlanImageUpload's CANVAS so the handoff to step 2 is seamless
-const CAPTURE_SIZE = 900; // explicit output resolution — gives auto-detect enough
+const CAPTURE_RATIO = 3; // explicit output resolution multiplier — gives auto-detect enough
                           // detail regardless of the device's pixel ratio
 const PRIMARY = '#1E3A5F';
 const THIN    = 2;
@@ -103,6 +103,8 @@ function SymbolMark({ s }: { s: SymbolAction }) {
  * inferred ink gap.
  */
 export function PaintCanvas({ onDone, onCancel, onDrawingChange }: Props) {
+  const SIZE         = useCanvasSize(); // matches FloorPlanImageUpload's CANVAS so the handoff to step 2 is seamless
+  const CAPTURE_SIZE = SIZE * CAPTURE_RATIO;
   const shotRef      = useRef<any>(null);
   const pointsRef    = useRef<{ x: number; y: number }[]>([]);
   const toolRef      = useRef<Tool>('thin');
@@ -214,11 +216,11 @@ export function PaintCanvas({ onDone, onCancel, onDrawingChange }: Props) {
         Use the Door/Window tools to tap-place openings — they're recorded as real elements, not guessed.
       </Text>
 
-      <View style={styles.canvasWrap}>
+      <View style={[styles.canvasWrap, { width: SIZE, height: SIZE }]}>
         {(() => {
           const surface = (
             <GestureDetector gesture={pan}>
-              <View style={styles.canvas}>
+              <View style={[styles.canvas, { width: SIZE, height: SIZE }]}>
                 <Svg width={SIZE} height={SIZE}>
                   {/* Explicit opaque background baked into the SVG itself — the auto-detect
                       pipeline reads the captured PNG and needs a true white background to
@@ -243,7 +245,7 @@ export function PaintCanvas({ onDone, onCancel, onDrawingChange }: Props) {
           return (
             <ViewShot
               ref={shotRef}
-              style={styles.shot}
+              style={[styles.shot, { width: SIZE, height: SIZE }]}
               options={{ format: 'png', quality: 1, width: CAPTURE_SIZE, height: CAPTURE_SIZE }}
             >
               {surface}
@@ -322,9 +324,9 @@ const styles = StyleSheet.create({
   title: { fontSize: 18, fontWeight: '700', color: PRIMARY, marginBottom: 6, textAlign: 'center' },
   sub:   { fontSize: 13, color: '#6B7280', marginBottom: 16, textAlign: 'center', lineHeight: 19, paddingHorizontal: 8 },
 
-  canvasWrap: { width: SIZE, height: SIZE, position: 'relative' },
-  shot:   { width: SIZE, height: SIZE },
-  canvas: { width: SIZE, height: SIZE, backgroundColor: '#ffffff',
+  canvasWrap: { position: 'relative' },
+  shot:   {},
+  canvas: { backgroundColor: '#ffffff',
             borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8, overflow: 'hidden' },
 
   toolRow:       { flexDirection: 'row', gap: 8, marginTop: 14, flexWrap: 'wrap', justifyContent: 'center' },

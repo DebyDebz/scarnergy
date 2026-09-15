@@ -11,9 +11,9 @@ import {
   projectPointsOnImage, fitPointsToInner, imageOffsets, unprojectPoint, Offsets,
 } from '../../lib/floorplanGeometry';
 import { ClippedGrid } from './ClippedGrid';
+import { useCanvasSize } from '../../hooks/useResponsive';
 
 const PRIMARY  = '#1E3A5F';
-const CANVAS   = 300;
 const CELL_PX  = 20;
 const PADDING  = 12;
 
@@ -138,6 +138,7 @@ interface Props {
 }
 
 export function ElementPlacer({ zones, sessionId, onSaved }: Props) {
+  const CANVAS = useCanvasSize();
   const { profile } = useAuthStore();
   const [activeZoneIdx, setActiveZoneIdx] = useState(0);
   const [elementsByZone, setElementsByZone] = useState<Record<string, PlacedElement[]>>({});
@@ -525,9 +526,9 @@ export function ElementPlacer({ zones, sessionId, onSaved }: Props) {
       )}
 
       {/* Canvas — fills remaining space between header and bottom controls */}
-      <View style={styles.canvasWrap}>
+      <View style={[styles.canvasWrap, { minHeight: CANVAS + 16 }]}>
       <View
-        style={styles.canvas}
+        style={[styles.canvas, { width: CANVAS, height: CANVAS }]}
         onStartShouldSetResponder={() => true}
         onResponderGrant={() => setSelectedId(null)}
       >
@@ -698,10 +699,9 @@ const styles = StyleSheet.create({
   tabTxtActive:   { color: '#fff', fontWeight: '600' },
   // canvasWrap: grows to centre the canvas when there's room, but keeps a
   // minHeight so the fixed-size canvas is never compressed or clipped.
-  canvasWrap:     { flexGrow: 1, minHeight: CANVAS + 16,
+  canvasWrap:     { flexGrow: 1,
                     alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
-  canvas:         { width: CANVAS, height: CANVAS,
-                    backgroundColor: '#fafafa', borderRadius: 8, overflow: 'hidden',
+  canvas:         { backgroundColor: '#fafafa', borderRadius: 8, overflow: 'hidden',
                     borderWidth: 1, borderColor: '#E5E7EB' },
   // bottomControls: sticks to the bottom, never clipped
   bottomControls: { paddingBottom: 16, paddingTop: 4 },

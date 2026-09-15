@@ -13,16 +13,15 @@ import {
 import { uploadImageToStorage } from '../../lib/uploadImage';
 import { syncToAppsheetIfLinked } from '../../lib/appsheetSync';
 import { PaintCanvas, isSketchAvailable } from './PaintCanvas';
+import { useCanvasSize } from '../../hooks/useResponsive';
 
 let ImagePicker: typeof import('expo-image-picker') | null = null;
 try { ImagePicker = require('expo-image-picker'); } catch { ImagePicker = null; }
 
-const CANVAS    = 300;
 const CLOSE_R   = 24;
 const DOT_R     = 6;
 const PRIMARY   = '#1E3A5F';
 const GRID_STEP = 20;
-const GRID_N    = Math.ceil(CANVAS / GRID_STEP);
 
 interface Point { x: number; y: number }
 
@@ -135,6 +134,8 @@ const DOOR_COLOR   = '#2563EB';
 const WINDOW_COLOR = '#0284c7';
 
 export function FloorPlanImageUpload({ zoneId, zoneName, buildingId, onSaved, onDetected, backdropPoints }: Props) {
+  const CANVAS = useCanvasSize();
+  const GRID_N = Math.ceil(CANVAS / GRID_STEP);
   const { profile } = useAuthStore();
   const isNewZone = !zoneId && !!buildingId;
 
@@ -489,7 +490,7 @@ export function FloorPlanImageUpload({ zoneId, zoneName, buildingId, onSaved, on
               <>
                 <Text style={styles.label}>Name this zone</Text>
                 <TextInput
-                  style={styles.nameInput}
+                  style={[styles.nameInput, { width: CANVAS }]}
                   placeholder="e.g. Ground Floor, Room A"
                   value={newZoneName}
                   onChangeText={setNewZoneName}
@@ -508,7 +509,7 @@ export function FloorPlanImageUpload({ zoneId, zoneName, buildingId, onSaved, on
             {/* Auto-detect (OpenCV) — pre-fills the outline for review */}
             {imgUri && (
               <TouchableOpacity
-                style={[styles.detectBtn, detecting && styles.btnDis]}
+                style={[styles.detectBtn, { width: CANVAS }, detecting && styles.btnDis]}
                 onPress={autoDetect}
                 disabled={detecting}
               >
@@ -519,7 +520,7 @@ export function FloorPlanImageUpload({ zoneId, zoneName, buildingId, onSaved, on
             )}
 
             <View
-              style={[styles.canvas, closed && styles.canvasClosed]}
+              style={[styles.canvas, { width: CANVAS, height: CANVAS }, closed && styles.canvasClosed]}
               onStartShouldSetResponder={() => true}
               onResponderGrant={handleTap}
             >
@@ -527,7 +528,7 @@ export function FloorPlanImageUpload({ zoneId, zoneName, buildingId, onSaved, on
               {imgUri && !imgLoadFailed && (
                 <Image
                   source={{ uri: imgUri }}
-                  style={styles.canvasImg}
+                  style={[styles.canvasImg, { width: CANVAS, height: CANVAS }]}
                   resizeMode="contain"
                   onError={(e) => {
                     setImgLoadFailed(true);
@@ -564,11 +565,11 @@ export function FloorPlanImageUpload({ zoneId, zoneName, buildingId, onSaved, on
               {/* Grid lines (blank canvas mode only) */}
               {!imgUri && Array.from({ length: GRID_N + 1 }).map((_, i) => (
                 <View key={`v${i}`} pointerEvents="none"
-                  style={[styles.gridLine, styles.gridV, { left: i * GRID_STEP }]} />
+                  style={[styles.gridLine, styles.gridV, { left: i * GRID_STEP, height: CANVAS }]} />
               ))}
               {!imgUri && Array.from({ length: GRID_N + 1 }).map((_, i) => (
                 <View key={`h${i}`} pointerEvents="none"
-                  style={[styles.gridLine, styles.gridH, { top: i * GRID_STEP }]} />
+                  style={[styles.gridLine, styles.gridH, { top: i * GRID_STEP, width: CANVAS }]} />
               ))}
 
               {/* Main floor-plan outline as a faint backdrop (Stage 3 sub-regions).
@@ -684,24 +685,24 @@ const styles = StyleSheet.create({
   detectBtn:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
                     gap: 8, backgroundColor: PRIMARY, borderRadius: 10,
                     paddingVertical: 11, paddingHorizontal: 16, marginBottom: 12,
-                    width: CANVAS, alignSelf: 'center' },
+                    alignSelf: 'center' },
   detectBtnTxt:   { fontSize: 14, color: '#fff', fontWeight: '700' },
 
-  nameInput:      { width: CANVAS, borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8,
+  nameInput:      { borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8,
                     paddingHorizontal: 12, paddingVertical: 10, fontSize: 15,
                     backgroundColor: '#fff', marginBottom: 10 },
 
-  canvas:         { width: CANVAS, height: CANVAS, backgroundColor: '#ffffff',
+  canvas:         { backgroundColor: '#ffffff',
                     borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8, overflow: 'hidden' },
   canvasClosed:   { backgroundColor: 'rgba(30,58,95,0.04)', borderColor: PRIMARY },
-  canvasImg:      { position: 'absolute', top: 0, left: 0, width: CANVAS, height: CANVAS },
+  canvasImg:      { position: 'absolute', top: 0, left: 0 },
   imgErrBanner:   { position: 'absolute', top: 0, left: 0, right: 0, backgroundColor: '#FEF3C7',
                     borderBottomWidth: 1, borderColor: '#F59E0B', paddingVertical: 6, paddingHorizontal: 10 },
   imgErrBannerTxt:{ fontSize: 11, color: '#92400E', textAlign: 'center' },
 
   gridLine:       { position: 'absolute', backgroundColor: '#f0f0f0' },
-  gridV:          { width: 1, height: CANVAS },
-  gridH:          { height: 1, width: CANVAS },
+  gridV:          { width: 1 },
+  gridH:          { height: 1 },
 
   dot:            { position: 'absolute', width: DOT_R * 2, height: DOT_R * 2,
                     borderRadius: DOT_R, backgroundColor: PRIMARY,

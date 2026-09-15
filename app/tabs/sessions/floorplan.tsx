@@ -1,14 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   View, Text, StyleSheet, TouchableOpacity, ActivityIndicator,
-  ScrollView, Dimensions,
+  ScrollView, useWindowDimensions,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { supabase, BuildingElement } from "../../../lib/supabase";
 import { elementTypeLabel } from "../../../lib/elementTypes";
+import { useIsTablet } from "../../../hooks/useResponsive";
 
-const { width: SCREEN_W } = Dimensions.get("window");
-const PLAN_SIZE = Math.min(SCREEN_W - 32, 340);
 const WALL_THICK = 56;
 
 // ── Orientation helpers ───────────────────────────────────────────────────────
@@ -138,6 +137,9 @@ export default function FloorPlanScreen() {
   const { zoneId, sessionId, zoneName, floorLevel } =
     useLocalSearchParams<{ zoneId: string; sessionId: string; zoneName: string; floorLevel: string }>();
   const router = useRouter();
+  const { width: screenW } = useWindowDimensions();
+  const isTablet = useIsTablet();
+  const planSize = Math.min(screenW - 32, isTablet ? 600 : 340);
 
   const [elements,       setElements]       = useState<BuildingElement[]>([]);
   const [loading,        setLoading]        = useState(true);
@@ -231,7 +233,7 @@ export default function FloorPlanScreen() {
         </TouchableOpacity>
 
         {/* ── Floor plan rectangle ─────────────────────────────────── */}
-        <View style={[styles.floorPlan, { width: PLAN_SIZE, height: PLAN_SIZE }]}>
+        <View style={[styles.floorPlan, { width: planSize, height: planSize }]}>
 
           {/* North wall (top) */}
           <WallBand
