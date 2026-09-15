@@ -1,0 +1,15 @@
+{
+  "name": "expo-ar-measure",
+  "version": "0.1.0",
+  "description": "ARKit camera-based door/window measurement (no LiDAR required)",
+  "main": "index.ts",
+  "types": "index.ts",
+  "license": "UNLICENSED",
+  "author": "Krontiva Africa",
+  "homepage": "https://github.com/krontiva-africa/scarnergy-app",
+  "peerDependencies": {
+    "expo": "*",
+    "react": "*",
+    "react-native": "*"
+  }
+}

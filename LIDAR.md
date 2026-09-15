@@ -1,6 +1,10 @@
-# LiDAR Room Scanning — Status
+# LiDAR Room Scanning + Camera AR Measurement — Status
 
 Last updated: 2026-09-15
+
+> Two capture paths exist: **RoomPlan** (LiDAR, Pro devices only, documented first) and
+> **camera-only ARKit measurement** (any ARKit iPhone/iPad, added 2026-09-15, see the
+> section at the end). Both write identical rows through `lib/saveOpenings.ts`.
 
 ## What this is
 
@@ -129,3 +133,81 @@ This is a **first-party native bridge straight onto Apple's system `RoomPlan` fr
    the calc pipeline needs.
 3. Add an entry to `GAP.md` so this feature is tracked against the same
    definition-of-done bar as the rest of the mobile app.
+
+---
+
+# Camera AR Measurement (no LiDAR) — added 2026-09-15
+
+## Why
+
+RoomPlan only runs on LiDAR hardware (iPhone 12 Pro+ / iPad Pro 2020+). Plain ARKit
+world tracking runs on every iPhone since the 6s and every iPad since 2017, so a
+camera-only path covers the large majority of inspectors' devices.
+
+## Where the code lives
+
+**Native module — `modules/expo-ar-measure/`** (local Expo module, `file:` dependency)
+- `ios/ExpoArMeasureModule.swift` — `isSupported()` → `ARWorldTrackingConfiguration.isSupported`;
+  `isDetectorAvailable()` → whether `OpeningDetector.mlmodelc` is in the app bundle;
+  view props `isActive`, `detectionEnabled`; view function `measureRect(x1,y1,x2,y2)`.
+- `ios/ExpoArMeasureView.swift` — `ARSCNView` running world tracking with vertical +
+  horizontal plane detection, plus `ARCoachingOverlayView` (safe here: this view owns
+  its own `ARSession`, unlike the RoomPlan case). `measureRect` raycasts two screen
+  points onto the nearest vertical surface (`existingPlaneGeometry` →
+  `existingPlaneInfinite` → `estimatedPlane`) and returns width (horizontal distance),
+  height (|Δy|, gravity-aligned) and camera distance in mm. Runs the detector on
+  `ARFrame`s at ~3 fps when enabled and maps Vision boxes to view points (aspect-fill,
+  orientation-aware).
+- `ios/OpeningDetector.swift` — thin `VNCoreMLRequest` wrapper. Looks up
+  `OpeningDetector.mlmodelc` by name at runtime; **no model is bundled yet**, so the
+  screen currently runs in manual-tap mode only. Class names containing "door"/"window"
+  are normalised; anything else is reported as `unknown`.
+- `android/...` — stub, `isSupported()` = `false`. ARCore (vertical planes + `hitTest`)
+  is the intended equivalent but needs a rendering surface (SceneView/Filament or raw GL)
+  and could not be built or compiled in this environment.
+
+**App integration**
+- `hooks/useArMeasure.ts` — `{ isSupported, isDetectorAvailable }`, gated off in Expo Go
+  and on non-iOS.
+- `app/tabs/sessions/armeasure.tsx` — the screen. User taps two opposite corners of an
+  opening on the live camera (2D markers drawn in JS), native returns mm, user picks
+  Window/Door, repeat; then review list → save. If a detector model is bundled, an
+  "Auto-detect" toggle shows proposed boxes that can be tapped to measure in one step.
+- `app/tabs/sessions/[id].tsx` — the 📡 zone button now routes to LiDAR when available,
+  to camera measure otherwise, and offers a choice when both are supported.
+- `lib/saveOpenings.ts` — shared persistence (element + opening + 2 measurements) used
+  by both screens; element name is suffixed `(LiDAR)` or `(AR)` for auditability.
+  Unit-tested in `__tests__/saveOpenings.test.ts`.
+- `components/inspection/OpeningReviewList.tsx` — shared review/edit/save list.
+
+**Config**
+- `package.json` — `"expo-ar-measure": "file:modules/expo-ar-measure"`.
+- Camera permission string (app.json image-picker plugin + `ios/scarnergyapp/Info.plist`)
+  now also mentions measuring doors and windows.
+
+## Status
+
+- **Written but not compiled or run on a device.** There is no Xcode in this environment,
+  so the Swift side needs a dev-client/EAS build and an on-device pass before it can be
+  ticked in GAP.md. Same caveat the RoomPlan module carried before its first build.
+- Accuracy expectation: roughly ±2–5 % on plain ARKit vs ~±1 % with LiDAR. Whether that
+  is acceptable for VABI inputs needs calc-owner sign-off; the `(AR)` suffix on the
+  element name keeps the two sources distinguishable in the data.
+
+## Adding the detector model
+
+1. Train or download a door/window object detector (public datasets exist on Roboflow
+   Universe; YOLOv8n is a good size for on-device use).
+2. Export with NMS baked in so Vision returns `VNRecognizedObjectObservation`s:
+   `yolo export model=best.pt format=coreml nms=True`.
+3. Rename the result to `OpeningDetector.mlpackage` and add it to the `scarnergyapp`
+   target in Xcode (it compiles to `OpeningDetector.mlmodelc`). Nothing else changes —
+   `isDetectorAvailable()` flips to true and the Auto-detect toggle appears.
+
+## Next steps
+
+1. Build a dev client, verify on a non-Pro iPhone: tracking start-up, tap → mm on a
+   known-size door, coaching overlay behaviour, error path when camera is denied.
+2. Bundle a detector model (above) and verify box → view mapping in portrait and on iPad
+   in landscape.
+3. Android: ARCore implementation of the same `measureRect` contract.

@@ -44,7 +44,7 @@
         "expo-image-picker",
         {
           "photosPermission": "Allow Scarnergy to access your photos to upload floor plan images.",
-          "cameraPermission": "Allow Scarnergy to use the camera to photograph floor plans."
+          "cameraPermission": "Allow Scarnergy to use the camera to photograph floor plans and measure doors and windows."
         }
       ],
       [

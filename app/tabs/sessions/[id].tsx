@@ -11,6 +11,7 @@ import { elementTypeLabel } from "../../../lib/elementTypes";
 import { FloorPlanReview } from "../../../components/inspection/FloorPlanReview";
 import { syncToAppsheetIfLinked } from "../../../lib/appsheetSync";
 import { useRoomScanner } from "../../../hooks/useRoomScanner";
+import { useArMeasure } from "../../../hooks/useArMeasure";
 import { useIsTablet } from "../../../hooks/useResponsive";
 import { CONTENT_MAX_WIDTH } from "../../../constants/layout";
 
@@ -21,6 +22,8 @@ export default function SessionDetailScreen() {
   const navigation = useNavigation();
   const { state: bleState, deviceName, isConnected, scan, disconnect } = useBLE();
   const { isSupported: roomScanSupported } = useRoomScanner();
+  const { isSupported: arMeasureSupported } = useArMeasure();
+  const anyScanSupported = roomScanSupported || arMeasureSupported;
 
   const [session,         setSession]         = useState<SessionSummary | null>(null);
   const [sessionLoading,  setSessionLoading]  = useState(true);
@@ -379,19 +382,29 @@ export default function SessionDetailScreen() {
                   <Text style={styles.floorPlanBtnText}>⊞</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.scanBtn, !roomScanSupported && styles.scanBtnDisabled]}
+                  style={[styles.scanBtn, !anyScanSupported && styles.scanBtnDisabled]}
                   onPress={() => {
-                    if (!roomScanSupported) {
+                    const params = { zoneId: z.id, sessionId: sessionId ?? "" };
+                    const goLidar = () => router.push({ pathname: "/tabs/sessions/roomscan", params });
+                    const goAr = () => router.push({ pathname: "/tabs/sessions/armeasure", params });
+                    // LiDAR (RoomPlan) is the most accurate path, so it's the default on Pro
+                    // devices; camera-only AR measurement covers every other ARKit iPhone/iPad.
+                    if (roomScanSupported && arMeasureSupported) {
+                      Alert.alert("Scan openings", "How do you want to capture doors and windows?", [
+                        { text: "LiDAR room scan", onPress: goLidar },
+                        { text: "Camera measure", onPress: goAr },
+                        { text: "Cancel", style: "cancel" },
+                      ]);
+                    } else if (roomScanSupported) {
+                      goLidar();
+                    } else if (arMeasureSupported) {
+                      goAr();
+                    } else {
                       Alert.alert(
-                        "Room Scan Unavailable",
-                        "This device doesn't support LiDAR room scanning. Room scan requires an iPhone or iPad Pro with a LiDAR sensor."
+                        "Scan Unavailable",
+                        "This device can't scan openings. Camera measurement needs an ARKit-capable iPhone or iPad in a development or production build."
                       );
-                      return;
                     }
-                    router.push({
-                      pathname: "/tabs/sessions/roomscan",
-                      params: { zoneId: z.id, sessionId: sessionId ?? "" },
-                    });
                   }}
                 >
                   <Text style={styles.scanBtnText}>📡</Text>

@@ -1,0 +1,9 @@
+{
+  "platforms": ["ios", "android"],
+  "ios": {
+    "modules": ["ExpoArMeasureModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.armeasure.ExpoArMeasureModule"]
+  }
+}

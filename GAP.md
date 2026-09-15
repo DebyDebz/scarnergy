@@ -444,6 +444,18 @@ existing functionality and design intact, all gates green.
 
 ### Open
 
+- [ ] **Opening capture without LiDAR — camera AR measurement** (`modules/expo-ar-measure`,
+      `app/tabs/sessions/armeasure.tsx`, `hooks/useArMeasure.ts`; shared
+      `lib/saveOpenings.ts` + `components/inspection/OpeningReviewList.tsx` now also
+      back the LiDAR `roomscan.tsx`). ARKit world tracking + vertical-plane raycast:
+      tap two corners → width/height mm → Window/Door → same building_elements /
+      openings / measurements rows as LiDAR, element name suffixed `(AR)`. CoreML
+      detector hook-up is in place but **no model is bundled** (manual mode only) —
+      see LIDAR.md for the export recipe. Android is a stub (ARCore follow-up).
+      Written 2026-09-15 · mobile `tsc` clean · 123 tests green · **not compiled or
+      device-verified** (no Xcode here) · accuracy (±2–5 %) needs calc-owner sign-off.
+      Companion LiDAR path (`modules/expo-room-scanner`, RoomPlan, Pro devices only)
+      shipped 2026-09-04..11 and is device-verified but was never listed here.
 - [ ] **On-device verification pass** (only human-executable): forgot-password
       flow end-to-end on the phone, profile edits, role-gated tabs, results
       screen render, VABI export **share** — the last unticked Phase 1 gate line.

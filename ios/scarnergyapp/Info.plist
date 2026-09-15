@@ -66,7 +66,7 @@
     <key>NSBluetoothPeripheralUsageDescription</key>
     <string>This app uses Bluetooth to connect to and communicate with your GLM device.</string>
     <key>NSCameraUsageDescription</key>
-    <string>Allow Scarnergy to use the camera to photograph floor plans.</string>
+    <string>Allow Scarnergy to use the camera to photograph floor plans and measure doors and windows.</string>
     <key>NSFaceIDUsageDescription</key>
     <string>Allow $(PRODUCT_NAME) to access your Face ID biometric data.</string>
     <key>NSMicrophoneUsageDescription</key>
