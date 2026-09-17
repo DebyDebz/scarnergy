@@ -211,3 +211,33 @@ camera-only path covers the large majority of inspectors' devices.
 2. Bundle a detector model (above) and verify box → view mapping in portrait and on iPad
    in landscape.
 3. Android: ARCore implementation of the same `measureRect` contract.
+
+---
+
+# iPad support — native fixes, 2026-09-17
+
+The responsive layout work (breakpoint hook, `ResponsiveContainer`, tablet canvas
+sizes) was landing on an iPad that was still running the app in **iPhone
+compatibility mode**, so none of it was actually taking effect — the phone-sized
+canvas was simply being scaled up, which is what read as "zoomed in".
+
+Three native/config settings were wrong, all unchanged since the initial commit:
+
+- `ios/scarnergyapp.xcodeproj/project.pbxproj` — `TARGETED_DEVICE_FAMILY` was
+  `"1"` (iPhone only) in both Debug and Release; now `"1,2"`. `supportsTablet`
+  in app.json is **inert** here: this is a bare-workflow project, so EAS ignores
+  app.json's iOS block (it says so in the build log) and the native files govern.
+- `ios/scarnergyapp/Info.plist` — all four orientations were allowed with no
+  lock anywhere; now portrait only. `UIRequiresFullScreen` flipped to `true`,
+  which is **required**: Apple only permits a restricted orientation set on iPad
+  if the app opts out of Split View / Slide Over multitasking.
+- `hooks/useResponsive.ts` — the tablet check read `useWindowDimensions()` (the
+  app *window*); switched to a one-time `Dimensions.get("screen")` read. In
+  Split View the window narrows below `TABLET_BREAKPOINT` and would snap the app
+  between tablet and phone layouts. Moot while full-screen is required, but
+  correct if that ever changes.
+
+Android `MainActivity` was locked to portrait too, to match the app-wide policy
+now declared by `expo.orientation` in app.json.
+
+**Not device-verified** — needs a build and an iPad.

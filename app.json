@@ -3,6 +3,7 @@
     "name": "scarnergy-app",
     "slug": "scarnergy-app",
     "version": "2.0.3",
+    "orientation": "portrait",
     "jsEngine": "hermes",
     "newArchEnabled": false,
     "ios": {
