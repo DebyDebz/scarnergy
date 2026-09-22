@@ -7,7 +7,7 @@
  * Run: npx jest __tests__/bleDecoder.test.ts
  */
 
-import { decodePacket, shouldDispatch, selectSlot, GLMMeasurement, SlotKey } from "../hooks/bleDecoder";
+import { decodePacket, shouldDispatch, selectSlot, nextSlotAfterFill, GLMMeasurement, SlotKey } from "../hooks/bleDecoder";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -249,5 +249,48 @@ describe("selectSlot — selects which slot to fill", () => {
     const result = selectSlot(null, SLOTS, { length_mm: "3000" });
     expect(result).toBe("height_mm");
     expect(result).not.toBeNull();
+  });
+});
+
+// ── nextSlotAfterFill ─────────────────────────────────────────────────────
+
+describe("nextSlotAfterFill — arms the next slot after a laser/manual fill", () => {
+  // Wall: width, height, then a two-reading thickness slot (matches SLOT_MAP.gevel).
+  const WALL = [
+    { key: "length_mm" as SlotKey },
+    { key: "height_mm" as SlotKey },
+    { key: "width_mm"  as SlotKey, thickness: true },
+  ];
+  // Window/door: width then height, no thickness.
+  const OPENING = [
+    { key: "width_mm"  as SlotKey },
+    { key: "height_mm" as SlotKey },
+  ];
+
+  test("width filled → arms height (the inspector's case)", () => {
+    expect(nextSlotAfterFill("width_mm", OPENING, {})).toBe("height_mm");
+  });
+
+  test("excludes the just-filled slot even when currentValues is stale/empty for it", () => {
+    // valuesRef lags one render behind setValues, so the filled key must be skipped by key.
+    expect(nextSlotAfterFill("length_mm", WALL, {})).toBe("height_mm");
+  });
+
+  test("skips slots that already hold a value", () => {
+    expect(nextSlotAfterFill("height_mm", OPENING, { width_mm: "1.200" })).toBeNull();
+  });
+
+  test("goes back to an earlier empty slot if the user measured out of order", () => {
+    expect(nextSlotAfterFill("height_mm", OPENING, {})).toBe("width_mm");
+  });
+
+  test("never arms a thickness slot", () => {
+    expect(nextSlotAfterFill("height_mm", WALL, { length_mm: "3.000" })).toBeNull();
+  });
+
+  test("treats zero / negative / non-numeric as empty", () => {
+    expect(nextSlotAfterFill("width_mm", OPENING, { height_mm: "0" })).toBe("height_mm");
+    expect(nextSlotAfterFill("width_mm", OPENING, { height_mm: "-1" })).toBe("height_mm");
+    expect(nextSlotAfterFill("width_mm", OPENING, { height_mm: "abc" })).toBe("height_mm");
   });
 });

@@ -13,6 +13,7 @@ import { syncToAppsheetIfLinked } from "../../../lib/appsheetSync";
 import { useBLE } from "../../../lib/BLEContext";
 import { useAuthStore } from "../../../store/authStore";
 import { GLMMeasurement } from "../../../hooks/useBLEDevice";
+import { nextSlotAfterFill } from "../../../hooks/bleDecoder";
 import { elementTypeLabel } from "../../../lib/elementTypes";
 import {
   EMPTY_SWEEP, SweepState, addSweepSample,
@@ -325,6 +326,13 @@ export default function InspectScreen() {
     setActiveSlot(slot);
   }, []);
 
+  // Mirror the connection flags in refs so advanceAfterFill (called from the
+  // BLE callback, which is registered once) reads current values.
+  const isConnectedRef = useRef(isConnected);
+  const cmdEnabledRef  = useRef(cmdEnabled);
+  useEffect(() => { isConnectedRef.current = isConnected; }, [isConnected]);
+  useEffect(() => { cmdEnabledRef.current  = cmdEnabled;  }, [cmdEnabled]);
+
   // Refs so the measurement callback always reads current values without stale closures.
   // liveValuesRef is updated SYNCHRONOUSLY in onChangeText so handleSubmitEditing
   // reads the correct value even when Enter arrives before React batches the state update.
@@ -336,6 +344,17 @@ export default function InspectScreen() {
   useEffect(() => {
     if (element) slotsRef.current = SLOT_MAP[element.element_type] ?? DEFAULT_SLOTS;
   }, [element]);
+
+  // Auto-advance after any fill (trigger press, Capture, thickness, or Enter):
+  // arm the next empty non-thickness slot so the following trigger press lands
+  // there without a tap. The armed slot also gets focused by the activeSlot
+  // effect below, and in GATT trigger mode we re-arm the device the same way
+  // toggleSlot does. Clears the active slot when nothing is left to arm.
+  const advanceAfterFill = useCallback((filled: SlotKey) => {
+    const next = nextSlotAfterFill(filled, slotsRef.current, valuesRef.current);
+    setActiveSlotSync(next);
+    if (next && isConnectedRef.current && cmdEnabledRef.current) requestMeasurement();
+  }, [setActiveSlotSync, requestMeasurement]);
 
   // Refs mirror the thickness-capture state so BLE callbacks read current values.
   const thicknessFaceARef = useRef<number | null>(null);
@@ -362,10 +381,10 @@ export default function InspectScreen() {
     }
     setValues(prev => ({ ...prev, [slot]: (t / 1000).toFixed(3) }));
     setFaceA(null);
-    setActiveSlotSync(null);
+    advanceAfterFill(slot);
     setFlashedSlot(slot);
     setTimeout(() => setFlashedSlot(null), 1500);
-  }, [setActiveSlotSync, setFaceA]);
+  }, [advanceAfterFill, setFaceA]);
 
   // Continuous mode: fold each live streaming sample into the sweep's running min/max.
   // Only continuous heartbeat packets count — trigger packets are ignored here.
@@ -391,10 +410,10 @@ export default function InspectScreen() {
       return;
     }
     setValues(prev => ({ ...prev, [slot]: (t / 1000).toFixed(3) }));
-    setActiveSlotSync(null);
+    advanceAfterFill(slot);
     setFlashedSlot(slot);
     setTimeout(() => setFlashedSlot(null), 1500);
-  }, [setActiveSlotSync]);
+  }, [advanceAfterFill]);
 
   // One ref per slot so we can programmatically focus the TextInput
   const inputRefs = useRef<Partial<Record<SlotKey, TextInput | null>>>({});
@@ -564,13 +583,13 @@ export default function InspectScreen() {
       }
       console.log("[BLE] Filling slot:", slot, "→", m.value_mm.toFixed(1), "mm");
       setValues(prev => ({ ...prev, [slot]: (m.value_mm / 1000).toFixed(3) }));
-      setActiveSlotSync(null);
+      advanceAfterFill(slot);
       // Flash the filled slot for 1.5 s so the user gets clear visual feedback.
       setFlashedSlot(slot);
       setTimeout(() => setFlashedSlot(null), 1500);
     });
     return () => setOnMeasurement(() => {});
-  }, [setOnMeasurement, setActiveSlotSync, captureThicknessFace]);
+  }, [setOnMeasurement, advanceAfterFill, captureThicknessFace]);
 
   // Manually capture the current live GLM reading into the active (or first unfilled) slot.
   // Works in continuous mode without requiring CMD_ENABLE or trigger-press indications.
@@ -582,10 +601,10 @@ export default function InspectScreen() {
     if (!slot) return;
     console.log("[BLE] Capture now:", slot, "→", value_mm.toFixed(1), "mm");
     setValues(prev => ({ ...prev, [slot]: (value_mm / 1000).toFixed(3) }));
-    setActiveSlotSync(null);
+    advanceAfterFill(slot);
     setFlashedSlot(slot);
     setTimeout(() => setFlashedSlot(null), 1500);
-  }, [setActiveSlotSync]);
+  }, [advanceAfterFill]);
 
   // GLM 50C can also be paired as a BLE keyboard in iOS Settings. Pressing its trigger
   // "types" the measurement (in metres) into whichever TextInput has first-responder focus.
@@ -613,19 +632,8 @@ export default function InspectScreen() {
     const isMaybeMeters = raw.includes(".") && num < 100;
     const mm = isMaybeMeters ? Math.round(num * 1000) : Math.round(num);
     setValues(prev => ({ ...prev, [key]: String(mm) }));
-    setActiveSlotSync(null);
-
-    // Auto-advance to the next unfilled slot (use valuesRef to avoid stale state)
-    const slots = SLOT_MAP[element?.element_type ?? ""] ?? DEFAULT_SLOTS;
-    const idx   = slots.findIndex(s => s.key === key);
-    const next  = slots.slice(idx + 1).find(s => {
-      const v = parseFloat(valuesRef.current[s.key] ?? "");
-      return isNaN(v) || v <= 0;
-    });
-    if (next) {
-      setActiveSlotSync(next.key as SlotKey);
-      setTimeout(() => inputRefs.current[next.key as SlotKey]?.focus(), 100);
-    }
+    // Same advance rule as a laser fill; the activeSlot effect handles focus.
+    advanceAfterFill(key);
   };
 
   const saveElement = useCallback(async () => {
@@ -992,7 +1000,12 @@ export default function InspectScreen() {
               )}
 
               {isFlashed && (
-                <Text style={styles.flashLabel}>✓ Captured from GLM</Text>
+                <Text style={styles.flashLabel}>
+                  ✓ Captured
+                  {activeSlot && activeSlot !== slot.key
+                    ? ` — next: ${slots.find(s => s.key === activeSlot)?.label ?? ""}`
+                    : ""}
+                </Text>
               )}
             </View>
           );

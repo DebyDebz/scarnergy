@@ -106,3 +106,29 @@ export function selectSlot(
   });
   return unfilled?.key ?? null;
 }
+
+/**
+ * After `filled` has just been written, picks the slot to arm next so the
+ * inspector's following trigger press lands there without a tap — they're
+ * on site holding the laser, so every tap saved matters.
+ *
+ * Rules:
+ *   - display order, skipping `filled` itself (its value may not have hit
+ *     `currentValues` yet, so it's excluded by key rather than by value)
+ *   - only slots that are still empty / zero / NaN
+ *   - never a thickness/depth slot: those need an explicit two-reading
+ *     (front/back or sweep) flow and must not be armed by accident
+ *   - null when nothing qualifies (all done, or only thickness remains)
+ */
+export function nextSlotAfterFill(
+  filled: SlotKey,
+  slots: { key: SlotKey; thickness?: boolean }[],
+  currentValues: Partial<Record<SlotKey, string>>
+): SlotKey | null {
+  const next = slots.find(s => {
+    if (s.key === filled || s.thickness) return false;
+    const v = parseFloat(currentValues[s.key] ?? "");
+    return isNaN(v) || v <= 0;
+  });
+  return next?.key ?? null;
+}
