@@ -225,12 +225,14 @@ export default function SessionsScreen() {
                   activeOpacity={0.75}
                 >
                   <View style={styles.top}>
-                    <Text style={styles.code}>{item.session_code}</Text>
+                    <Text style={styles.address} numberOfLines={2}>
+                      {item.building_address}, {item.building_city}
+                    </Text>
                     <View style={[styles.badge, { backgroundColor: color + "22" }]}>
                       <Text style={[styles.badgeText, { color }]}>{item.status}</Text>
                     </View>
                   </View>
-                  <Text style={styles.address}>{item.building_address}, {item.building_city}</Text>
+                  <Text style={styles.code}>{item.session_code}</Text>
                   <Text style={styles.meta}>
                     {item.inspector_name}
                     {" · "}
@@ -357,10 +359,10 @@ const styles = StyleSheet.create({
   cardTablet:  { width: "48%" },
   columnWrapper: { justifyContent: "space-between" },
   top:         { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  code:        { fontSize: 13, fontWeight: "700", color: "#1E3A5F" },
+  code:        { fontSize: 12, color: "#888", marginTop: 6 },
   badge:       { borderRadius: 8, paddingHorizontal: 10, paddingVertical: 3 },
   badgeText:   { fontSize: 12, fontWeight: "600" },
-  address:     { fontSize: 14, color: "#444", marginTop: 6 },
+  address:     { flex: 1, fontSize: 15, fontWeight: "700", color: "#1E3A5F", marginRight: 8 },
   meta:        { fontSize: 12, color: "#888", marginTop: 4 },
 
   emptyWrap:   { padding: 60, alignItems: "center" },

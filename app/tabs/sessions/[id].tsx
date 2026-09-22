@@ -303,7 +303,7 @@ export default function SessionDetailScreen() {
   const bleLabel = bleState === "scanning"   ? "Scanning..."
                  : bleState === "connecting" ? "Connecting..."
                  : isConnected              ? (deviceName ?? "GLM 50C")
-                 : "No device";
+                 : "No measuring device connected";
 
   const completedCount = elements.filter(e => e.is_complete).length;
   const selectedZone   = zones.find(z => z.id === selectedZoneId) ?? null;
@@ -316,14 +316,30 @@ export default function SessionDetailScreen() {
       {/* ── Session header ── */}
       <View style={styles.header}>
         <View style={styles.headerTop}>
-          <Text style={styles.code}>{session.session_code}</Text>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={styles.backBtn}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            accessibilityLabel="Back"
+          >
+            <Text style={styles.backBtnText}>‹</Text>
+          </TouchableOpacity>
+          {/* Address is what an inspector recognises on site; the session code is
+              kept for traceability but demoted to the subtitle. */}
+          <Text style={styles.address} numberOfLines={2}>
+            {session.building_address}, {session.building_city}
+          </Text>
           <View style={[styles.statusBadge, { backgroundColor: STATUS_BG[session.status] }]}>
             <Text style={[styles.statusText, { color: STATUS_FG[session.status] }]}>
               {session.status.toUpperCase()}
             </Text>
           </View>
         </View>
-        <Text style={styles.address}>{session.building_address}, {session.building_city}</Text>
+        <Text style={styles.code}>
+          {session.session_code}
+          {" · "}
+          {new Date(session.started_at).toLocaleDateString("nl-NL")}
+        </Text>
         {elements.length > 0 && (
           <Text style={styles.progress}>
             {completedCount} / {elements.length} elements complete
@@ -341,7 +357,7 @@ export default function SessionDetailScreen() {
               <Text style={styles.bleBtnText}>Disconnect</Text>
             </TouchableOpacity>
           : <TouchableOpacity onPress={scan} style={[styles.bleBtn, styles.bleBtnPrimary]}>
-              <Text style={[styles.bleBtnText, { color: "#fff" }]}>Scan</Text>
+              <Text style={[styles.bleBtnText, { color: "#fff" }]}>Connect</Text>
             </TouchableOpacity>
         }
       </View>
@@ -379,7 +395,7 @@ export default function SessionDetailScreen() {
                     },
                   })}
                 >
-                  <Text style={styles.floorPlanBtnText}>⊞</Text>
+                  <Text style={styles.floorPlanBtnText}>⊞ Plan</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.scanBtn, !anyScanSupported && styles.scanBtnDisabled]}
@@ -407,7 +423,7 @@ export default function SessionDetailScreen() {
                     }
                   }}
                 >
-                  <Text style={styles.scanBtnText}>📡</Text>
+                  <Text style={styles.scanBtnText}>📡 Scan</Text>
                 </TouchableOpacity>
               </View>
             ))}
@@ -593,10 +609,12 @@ const styles = StyleSheet.create({
 
   header:              { backgroundColor: "#1E3A5F", padding: 16, paddingTop: 20 },
   headerTop:           { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 4 },
-  code:                { fontSize: 18, fontWeight: "700", color: "#fff" },
+  backBtn:             { paddingRight: 6, marginLeft: -4 },
+  backBtnText:         { fontSize: 32, lineHeight: 34, color: "#fff", fontWeight: "300" },
+  address:             { flex: 1, fontSize: 17, fontWeight: "700", color: "#fff" },
   statusBadge:         { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
   statusText:          { fontSize: 10, fontWeight: "700", letterSpacing: 0.5 },
-  address:             { fontSize: 13, color: "#A9C4E4", marginTop: 2 },
+  code:                { fontSize: 12, color: "#A9C4E4", marginTop: 4 },
   progress:            { fontSize: 12, color: "#7FB3D3", marginTop: 6, fontStyle: "italic" },
 
   bleBar:              { flexDirection: "row", alignItems: "center", backgroundColor: "#fff",
@@ -619,13 +637,13 @@ const styles = StyleSheet.create({
   zoneChipActive:      { backgroundColor: "#1E3A5F", borderColor: "#1E3A5F" },
   zoneChipText:        { fontSize: 13, fontWeight: "600", color: "#555" },
   zoneChipTextActive:  { color: "#fff" },
-  floorPlanBtn:        { width: 32, height: 32, borderRadius: 8, backgroundColor: "#2E86C1",
+  floorPlanBtn:        { height: 32, paddingHorizontal: 10, borderRadius: 8, backgroundColor: "#2E86C1",
                          alignItems: "center", justifyContent: "center" },
-  floorPlanBtnText:    { fontSize: 16, color: "#fff", fontWeight: "700", lineHeight: 20 },
-  scanBtn:             { width: 32, height: 32, borderRadius: 8, backgroundColor: "#1E3A5F",
+  floorPlanBtnText:    { fontSize: 12, color: "#fff", fontWeight: "700", lineHeight: 16 },
+  scanBtn:             { height: 32, paddingHorizontal: 10, borderRadius: 8, backgroundColor: "#1E3A5F",
                          alignItems: "center", justifyContent: "center", marginLeft: 6 },
   scanBtnDisabled:     { backgroundColor: "#B0B8C1" },
-  scanBtnText:         { fontSize: 14 },
+  scanBtnText:         { fontSize: 12, color: "#fff", fontWeight: "700", lineHeight: 16 },
 
   list:                { padding: 16, gap: 12 },
   emptyWrap:           { padding: 40, alignItems: 'center', gap: 16 },

@@ -44,7 +44,7 @@ export function MeasurementInput({
 
   const handleBLEPress = () => {
     if (!isConnected) {
-      Alert.alert("No Device", "Connect a Bosch GLM 50C first from the Device screen.");
+      Alert.alert("No measuring device", "Connect the Bosch laser first from the Measuring Device tab.");
       return;
     }
 

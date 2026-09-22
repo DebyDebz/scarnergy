@@ -207,8 +207,8 @@ export default function Dashboard() {
                 router.push(`/tabs/sessions/${s.id}`);
               }}>
               <View style={styles.sessionLeft}>
+                <Text style={styles.sessionAddress} numberOfLines={2}>{s.building_address}</Text>
                 <Text style={styles.sessionCode}>{s.session_code}</Text>
-                <Text style={styles.sessionAddress}>{s.building_address}</Text>
                 <Text style={styles.sessionDate}>{new Date(s.started_at).toLocaleDateString("nl-NL")}</Text>
               </View>
               <View style={[styles.statusBadge,
@@ -253,8 +253,8 @@ const styles = StyleSheet.create({
   emptyText:      { color: "#AAA", fontStyle: "italic", textAlign: "center", padding: 20 },
   sessionCard:    { backgroundColor: "#FFF", borderRadius: 12, padding: 16, marginBottom: 8, flexDirection: "row", justifyContent: "space-between", alignItems: "center", elevation: 1, shadowColor: "#000", shadowOpacity: 0.04, shadowRadius: 3 },
   sessionLeft:    { flex: 1 },
-  sessionCode:    { fontSize: 14, fontWeight: "700", color: "#1E3A5F" },
-  sessionAddress: { fontSize: 13, color: "#444", marginTop: 2 },
+  sessionAddress: { fontSize: 14, fontWeight: "700", color: "#1E3A5F" },
+  sessionCode:    { fontSize: 12, color: "#888", marginTop: 2 },
   sessionDate:    { fontSize: 12, color: "#888", marginTop: 2 },
   statusBadge:    { borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 },
   statusText:     { fontSize: 12, fontWeight: "600" },
