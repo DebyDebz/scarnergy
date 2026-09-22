@@ -469,6 +469,24 @@ existing functionality and design intact, all gates green.
       (source, SCOP), ventilation (system class A–D, heat recovery), cooling and
       solar collectors — today they only get brand/model/fuel. The client's
       AppSheet app has per-type dynamic forms; its field list is the fastest source.
+- [ ] **Walkthrough follow-ups needing the calc owner** (built 2026-09-22 as
+      suggestions/inputs, not silent logic — see inspector-walkthrough decisions):
+      · **Perimeter auto-calc**: `inspect.tsx` offers "Σ walls in this zone ≈ X m — tap
+        to use" on `perimeter_m` (exterior 'Buitenlucht' walls when any are tagged,
+        else all). *Which walls count, per zone vs per floor* → calc owner.
+      · **Door with glass panel**: `opening_type = glazed_door` + a linked second
+        `openings` row `door_glass` (glass W×H); VABI exports the door as Deur and
+        the panel as Raam. Glass share is shown ("Glass ≈ N% of the door"). *The
+        reclassify-to-window threshold* → calc owner / AppSheet rule.
+      · **Insulation λ**: moved behind Advanced with insulation type (kept for the
+        export). *Can λ be derived from a material lookup so the field can go?* → calc owner.
+      · **Auto height per floor**: first measured wall height prompts "use for the
+        whole floor?" → `zones.ceiling_height_m` + fills empty wall heights; later
+        walls prefill from it with a per-wall override. No calc question; product
+        placement (prompt on first wall) is the AppSheet pattern.
+      · **PDF report**: `lib/sessionReport.ts` + expo-print/expo-sharing (native —
+        needs a new build). No photos embedded yet.
+      mobile `tsc` clean · 136 tests green · not device-verified.
 - [ ] **On-device verification pass** (only human-executable): forgot-password
       flow end-to-end on the phone, profile edits, role-gated tabs, results
       screen render, VABI export **share** — the last unticked Phase 1 gate line.

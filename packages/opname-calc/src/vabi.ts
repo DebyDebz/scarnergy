@@ -100,9 +100,15 @@ export interface VabiOpening {
 
 export function openingTypeVabi(t: string | null | undefined): string {
   switch ((t ?? '').toLowerCase()) {
-    case 'door':    return 'Deur';
-    case 'skylight': return 'Raam';
-    default:        return 'Raam';
+    case 'door':        return 'Deur';
+    // Door with glass panel: the door row exports as a door and its linked
+    // 'door_glass' row as glass, mirroring the client's AppSheet two-record
+    // model. Whether a high glass ratio should flip the door itself to a window
+    // is a calc-owner rule not applied here.
+    case 'glazed_door': return 'Deur';
+    case 'door_glass':  return 'Raam';
+    case 'skylight':    return 'Raam';
+    default:            return 'Raam';
   }
 }
 

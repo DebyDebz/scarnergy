@@ -32,7 +32,7 @@ type SlotKey = "length_mm" | "height_mm" | "width_mm";
 // distance-to-surface, so these are captured from TWO readings (front + back →
 // |Δ| in point mode, or a min/max sweep in continuous mode) rather than one shot.
 type SlotDef = { key: SlotKey; label: string; thickness?: boolean };
-type ElementWithZone = BuildingElement & { zone_name?: string; zone_scale_m?: number | null };
+type ElementWithZone = BuildingElement & { zone_name?: string; zone_scale_m?: number | null; zone_ceiling_m?: number | null };
 
 // ── Slot definitions — keys match the Dutch enum values stored in the DB ──────
 
@@ -84,7 +84,7 @@ type DetailField = {
   type: DetailType;
   options?: DetailOption[];
   dependsOn?: { key: string; value: string | boolean };
-  target?: 'element' | 'opening';  // which table to save to; default = element
+  target?: 'element' | 'opening' | 'glass';  // element row, openings row, or the linked door-glass openings row
   advanced?: boolean;              // hidden behind the Advanced toggle (kept for the export)
 };
 
@@ -132,7 +132,21 @@ const DETAIL_FIELDS: Record<string, DetailField[]> = {
   ],
   transparant_deel: [
     { key: 'opening_type',          label: 'Type',                 type: 'select', target: 'opening',
-      options: ['window','door','skylight'] },
+      options: [
+        { value: 'window',      label: 'Window' },
+        { value: 'door',        label: 'Door' },
+        { value: 'glazed_door', label: 'Door with glass panel' },
+        { value: 'skylight',    label: 'Skylight' },
+      ] },
+    // Door with glass panel = two linked openings rows (the door + its glass), as in
+    // the client's AppSheet app. The glass dims live on a second openings row of
+    // type 'door_glass' (target: 'glass'). Automatic reclassification to a window
+    // past a glass-ratio threshold needs the calc owner's rule — the ratio is
+    // shown, not acted on (GAP.md).
+    { key: 'glass_width_mm',  label: 'Glass panel width (mm)',  type: 'number', target: 'glass',
+      dependsOn: { key: 'opening_type', value: 'glazed_door' } },
+    { key: 'glass_height_mm', label: 'Glass panel height (mm)', type: 'number', target: 'glass',
+      dependsOn: { key: 'opening_type', value: 'glazed_door' } },
     { key: 'frame_type',            label: 'Frame material',       type: 'select', target: 'opening',
       options: [
         { value: 'Hout',          label: 'Wood' },
@@ -334,6 +348,8 @@ export default function InspectScreen() {
   const [details,       setDetails]       = useState<Record<string, string | boolean | number>>({});
   // Opening record for transparant_deel elements
   const [openingId,     setOpeningId]     = useState<string | null>(null);
+  // Linked 'door_glass' openings row for a door with glass panel.
+  const [glassOpeningId, setGlassOpeningId] = useState<string | null>(null);
   // NTA details accordion (collapsed by default — measurement flow first)
   const [showDetails,   setShowDetails]   = useState(false);
   // Insulation type + λ: the inspector doesn't work with these day to day, but the
@@ -454,20 +470,32 @@ export default function InspectScreen() {
     Promise.resolve(
       supabase
         .from("building_elements")
-        .select("*, zones(name, floor_plan_scale_m)")
+        .select("*, zones(name, floor_plan_scale_m, ceiling_height_m)")
         .eq("id", elementId)
         .single()
     ).then(({ data }) => {
         if (data) {
           const { zones: zoneData, ...rest } = data as any;
-          setElement({ ...rest, zone_name: zoneData?.name ?? null, zone_scale_m: zoneData?.floor_plan_scale_m ?? null });
+          setElement({
+            ...rest,
+            zone_name: zoneData?.name ?? null,
+            zone_scale_m: zoneData?.floor_plan_scale_m ?? null,
+            zone_ceiling_m: zoneData?.ceiling_height_m ?? null,
+          });
           setValues({
             ...(rest.length_mm != null ? { length_mm: (rest.length_mm / 1000).toFixed(3) } : {}),
-            ...(rest.height_mm != null ? { height_mm: (rest.height_mm / 1000).toFixed(3) } : {}),
+            ...(rest.height_mm != null
+              ? { height_mm: (rest.height_mm / 1000).toFixed(3) }
+              // Auto height (AppSheet parity): a wall with no height yet inherits the
+              // floor's ceiling height once one wall on that floor has been measured.
+              // Measuring again overrides it for this wall only.
+              : rest.element_type === 'gevel' && zoneData?.ceiling_height_m != null
+                ? { height_mm: Number(zoneData.ceiling_height_m).toFixed(3) }
+                : {}),
             ...(rest.width_mm  != null ? { width_mm:  (rest.width_mm  / 1000).toFixed(3) } : {}),
           });
           // Populate qualitative detail fields from existing element data
-          const elementFields = (DETAIL_FIELDS[rest.element_type] ?? []).filter(f => f.target !== 'opening');
+          const elementFields = (DETAIL_FIELDS[rest.element_type] ?? []).filter(f => f.target !== 'opening' && f.target !== 'glass');
           const initialDetails: Record<string, string | boolean | number> = {};
           for (const f of elementFields) {
             const v = rest[f.key];
@@ -509,6 +537,7 @@ export default function InspectScreen() {
       .select('*')
       .eq('element_id', element.id)
       .eq('is_active', true)
+      .neq('opening_type', 'door_glass')   // the glass panel row is loaded separately below
       .limit(1)
       .single()
       .then(({ data }) => {
@@ -523,7 +552,59 @@ export default function InspectScreen() {
         }
         setDetails(prev => ({ ...prev, ...od }));
       });
+    // Door-with-glass: the linked glass panel row.
+    supabase
+      .from('openings')
+      .select('id, width_mm, height_mm')
+      .eq('element_id', element.id)
+      .eq('is_active', true)
+      .eq('opening_type', 'door_glass')
+      .limit(1)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!data) return;
+        setGlassOpeningId((data as any).id);
+        setDetails(prev => ({
+          ...prev,
+          ...((data as any).width_mm  != null ? { glass_width_mm:  String((data as any).width_mm) }  : {}),
+          ...((data as any).height_mm != null ? { glass_height_mm: String((data as any).height_mm) } : {}),
+        }));
+      });
   }, [element]);
+
+  // ── Item 8: perimeter auto-suggestion — Σ wall lengths in this zone ──
+  // Exterior walls ('Buitenlucht') only when any are tagged, otherwise all walls.
+  // Which walls count is a calc-owner definition (GAP.md): this stays a one-tap
+  // suggestion with manual override, never a silent write.
+  const [zoneWalls, setZoneWalls] = useState<{ length_mm: number | null; description: string | null }[]>([]);
+  useEffect(() => {
+    if (!element || element.element_type !== 'gevel') return;
+    supabase
+      .from('building_elements')
+      .select('length_mm, description')
+      .eq('zone_id', element.zone_id)
+      .eq('element_type', 'gevel')
+      .eq('is_active', true)
+      .then(({ data }) => setZoneWalls((data ?? []) as any));
+  }, [element]);
+  const autoPerimeterM = (() => {
+    const withLen = zoneWalls.filter(w => w.length_mm != null && w.length_mm > 0);
+    if (withLen.length === 0) return null;
+    const exterior = withLen.filter(w => w.description === 'Buitenlucht');
+    const set = exterior.length ? exterior : withLen;
+    return set.reduce((sum, w) => sum + (w.length_mm as number), 0) / 1000;
+  })();
+
+  // Glass share of a door with glass panel — informational until the calc owner
+  // supplies the window-reclassification threshold.
+  const glassRatioPct = (() => {
+    const gw = parseFloat(String(details.glass_width_mm ?? ''));
+    const gh = parseFloat(String(details.glass_height_mm ?? ''));
+    const dw = parseFloat(values.width_mm ?? '') * 1000;
+    const dh = parseFloat(values.height_mm ?? '') * 1000;
+    if (!(gw > 0 && gh > 0 && dw > 0 && dh > 0)) return null;
+    return Math.round(((gw * gh) / (dw * dh)) * 100);
+  })();
 
   // Capture a photo from camera or library and upload to Supabase Storage
   const capturePhoto = useCallback(async (source: "camera" | "library") => {
@@ -680,7 +761,7 @@ export default function InspectScreen() {
       }
 
       // Add qualitative element-level fields
-      const elementDetailFields = (DETAIL_FIELDS[element.element_type] ?? []).filter(f => f.target !== 'opening');
+      const elementDetailFields = (DETAIL_FIELDS[element.element_type] ?? []).filter(f => f.target !== 'opening' && f.target !== 'glass');
       for (const f of elementDetailFields) {
         const v = details[f.key];
         if (v == null || v === '') continue;
@@ -742,6 +823,27 @@ export default function InspectScreen() {
             .select('id').single();
           if (newOpening) setOpeningId((newOpening as any).id);
         }
+
+        // Linked glass-panel row for a door with glass (second openings row, as in
+        // the client's AppSheet app). Deactivated if the type is changed away.
+        const glassW = parseFloat(String(details.glass_width_mm ?? ''));
+        const glassH = parseFloat(String(details.glass_height_mm ?? ''));
+        if (details.opening_type === 'glazed_door' && glassW > 0 && glassH > 0) {
+          const glassRow = {
+            org_id: profile.org_id, element_id: element.id, opening_type: 'door_glass',
+            name: 'Door glass panel', width_mm: glassW, height_mm: glassH,
+            glazing_type: (details.glazing_type as string) ?? null,
+          };
+          if (glassOpeningId) {
+            await supabase.from('openings').update(glassRow).eq('id', glassOpeningId);
+          } else {
+            const { data: g } = await supabase.from('openings').insert(glassRow).select('id').single();
+            if (g) setGlassOpeningId((g as any).id);
+          }
+        } else if (glassOpeningId) {
+          await supabase.from('openings').update({ is_active: false }).eq('id', glassOpeningId);
+          setGlassOpeningId(null);
+        }
       }
 
       // Insert measurement audit records.
@@ -789,6 +891,29 @@ export default function InspectScreen() {
         }
       }
 
+      // Auto height: the first measured wall height on a floor becomes the
+      // floor's ceiling height and fills every other wall on that floor that
+      // has no height yet. Per-wall override stays possible.
+      if (element.element_type === 'gevel' && typeof update.height_mm === 'number' && element.zone_ceiling_m == null) {
+        const hM = (update.height_mm as number) / 1000;
+        const applyToFloor = await new Promise<boolean>(resolve => Alert.alert(
+          "Use for the whole floor?",
+          `Set ${hM.toFixed(2)} m as the height for every wall on this floor that hasn't been measured yet? You can still remeasure any wall.`,
+          [
+            { text: "Just this wall", style: "cancel", onPress: () => resolve(false) },
+            { text: "Whole floor", onPress: () => resolve(true) },
+          ],
+          { cancelable: false },
+        ));
+        if (applyToFloor) {
+          await supabase.from("zones").update({ ceiling_height_m: hM }).eq("id", element.zone_id);
+          await supabase.from("building_elements")
+            .update({ height_mm: update.height_mm })
+            .eq("zone_id", element.zone_id).eq("element_type", "gevel").eq("is_active", true)
+            .is("height_mm", null);
+        }
+      }
+
       router.back();
     } catch (e: any) {
       Alert.alert("Save failed", e.message ?? "Unknown error");
@@ -813,6 +938,8 @@ export default function InspectScreen() {
     return !isNaN(v) && v > 0;
   }).length;
   const isInstallation  = element.element_type === 'installatie';
+  const heightFromZone  = element.element_type === 'gevel' && element.height_mm == null
+    && element.zone_ceiling_m != null && values.height_mm === Number(element.zone_ceiling_m).toFixed(3);
   const isFullyComplete = isInstallation ? !!details.installation_type : filledCount === slots.length;
 
   return (
@@ -934,6 +1061,12 @@ export default function InspectScreen() {
                   <Text style={styles.glmBtnText} allowFontScaling={false}>{isActive ? "⏸" : "▶ GLM"}</Text>
                 </TouchableOpacity>
               </View>
+
+              {slot.key === 'height_mm' && heightFromZone && (
+                <Text style={styles.planHintText}>
+                  ↕ From floor height {Number(element.zone_ceiling_m).toFixed(2)} m — measure to override for this wall
+                </Text>
+              )}
 
               {/* Plan-derived suggestion — one tap to use, then editable */}
               {slot.key === planLengthSlot && planLengthM != null && !isFilled && (
@@ -1125,6 +1258,16 @@ export default function InspectScreen() {
                     placeholder={f.key === 'tapwater_segments' ? 'badkamer: 4.77, 2.39; keuken: 0.2' : f.type === 'number' ? '0' : '…'}
                     placeholderTextColor="#CCC"
                   />
+                  {f.key === 'perimeter_m' && autoPerimeterM != null && (
+                    <TouchableOpacity onPress={() => setDetails(prev => ({ ...prev, perimeter_m: autoPerimeterM.toFixed(2) }))}>
+                      <Text style={styles.planHintText}>Σ walls in this zone ≈ {autoPerimeterM.toFixed(2)} m — tap to use</Text>
+                    </TouchableOpacity>
+                  )}
+                  {f.key === 'glass_height_mm' && glassRatioPct != null && (
+                    <Text style={styles.planHintText}>
+                      Glass ≈ {glassRatioPct}% of the door — window reclassification rule pending calc owner
+                    </Text>
+                  )}
                 </View>
               );
             })}
