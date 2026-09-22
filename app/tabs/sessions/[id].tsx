@@ -11,6 +11,7 @@ import { elementTypeLabel } from "../../../lib/elementTypes";
 import { FloorPlanReview } from "../../../components/inspection/FloorPlanReview";
 import { syncToAppsheetIfLinked } from "../../../lib/appsheetSync";
 import { useRoomScanner } from "../../../hooks/useRoomScanner";
+import { useAuthStore } from "../../../store/authStore";
 import { useArMeasure } from "../../../hooks/useArMeasure";
 import { useIsTablet } from "../../../hooks/useResponsive";
 import { CONTENT_MAX_WIDTH } from "../../../constants/layout";
@@ -20,6 +21,7 @@ export default function SessionDetailScreen() {
   const { id: sessionId } = useLocalSearchParams<{ id: string }>();
   const router     = useRouter();
   const navigation = useNavigation();
+  const { profile } = useAuthStore();
   const { state: bleState, deviceName, isConnected, scan, disconnect } = useBLE();
   const { isSupported: roomScanSupported } = useRoomScanner();
   const { isSupported: arMeasureSupported } = useArMeasure();
@@ -131,6 +133,29 @@ export default function SessionDetailScreen() {
     });
     return unsub;
   }, [navigation, loadElements, loadSession]);
+
+  // Installations (boiler, heat pump, PV…) aren't drawn on the floor plan, so
+  // they get a direct add path instead of the element placer. The inspect
+  // screen renames the row by type once the inspector picks one.
+  const addInstallation = useCallback(async () => {
+    if (!profile || !selectedZoneId) return;
+    const { data, error } = await supabase
+      .from("building_elements")
+      .insert({
+        org_id: profile.org_id,
+        zone_id: selectedZoneId,
+        element_type: "installatie",
+        name: "New installation",
+        sort_order: elements.length,
+      })
+      .select("id")
+      .single();
+    if (error || !data) {
+      Alert.alert("Couldn't add installation", error?.message ?? "Unknown error");
+      return;
+    }
+    router.push({ pathname: "/tabs/sessions/inspect", params: { elementId: data.id, sessionId: sessionId ?? "" } });
+  }, [profile, selectedZoneId, elements.length, router, sessionId]);
 
   // ── Session lifecycle actions ──────────────────────────────────────────────
 
@@ -431,6 +456,12 @@ export default function SessionDetailScreen() {
         </View>
       )}
 
+      {session.status === "active" && selectedZoneId && (
+        <TouchableOpacity style={styles.addInstallBtn} onPress={addInstallation} activeOpacity={0.75}>
+          <Text style={styles.addInstallBtnText}>+ Add installation (heating, hot water, PV…)</Text>
+        </TouchableOpacity>
+      )}
+
       {/* ── Element list ── */}
       {elementsLoading
         ? <ActivityIndicator style={{ marginTop: 32 }} color="#1E3A5F" />
@@ -649,6 +680,10 @@ const styles = StyleSheet.create({
                          alignItems: "center", justifyContent: "center", marginLeft: 6 },
   scanBtnDisabled:     { backgroundColor: "#B0B8C1" },
   scanBtnText:         { fontSize: 12, color: "#fff", fontWeight: "700", lineHeight: 16 },
+  addInstallBtn:       { marginHorizontal: 16, marginTop: 10, paddingVertical: 10, borderRadius: 10,
+                         borderWidth: 1, borderStyle: "dashed", borderColor: "#D97706", backgroundColor: "#FFFBEB",
+                         alignItems: "center" },
+  addInstallBtnText:   { color: "#B45309", fontWeight: "700", fontSize: 13 },
 
   list:                { padding: 16, gap: 12 },
   emptyWrap:           { padding: 40, alignItems: 'center', gap: 16 },

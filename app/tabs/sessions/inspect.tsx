@@ -43,7 +43,7 @@ const SLOT_MAP: Record<string, SlotDef[]> = {
   dakkapel:        [{ key: "width_mm",  label: "Width"     }, { key: "height_mm", label: "Height"    }, { key: "length_mm", label: "Depth", thickness: true }],
   vloer:           [{ key: "length_mm", label: "Length"    }, { key: "width_mm",  label: "Width"     }],
   transparant_deel:[{ key: "width_mm",  label: "Width"     }, { key: "height_mm", label: "Height"    }],
-  installatie:     [{ key: "length_mm", label: "Length"    }],
+  installatie:     [],   // no laser measurements — the inspect screen renders details-first
   // English fallbacks
   wall:    [{ key: "length_mm", label: "Length"    }, { key: "height_mm", label: "Height"    }, { key: "width_mm", label: "Thickness", thickness: true }],
   floor:   [{ key: "length_mm", label: "Length"    }, { key: "width_mm",  label: "Width"     }],
@@ -243,6 +243,12 @@ const DETAIL_FIELDS: Record<string, DetailField[]> = {
       ] },
     { key: 'brand',     label: 'Brand',     type: 'text' },
     { key: 'model_nr',  label: 'Model',     type: 'text' },
+    // These four were exported to VABI (<Locatie>, <Rendement>, <Vermogen>) and
+    // stored in building_elements, but had no inputs — found in the 2026-09-22 walkthrough.
+    { key: 'description',    label: 'Location (e.g. attic, kitchen)', type: 'text' },
+    { key: 'year_installed', label: 'Year installed',                 type: 'number' },
+    { key: 'capacity_kw',    label: 'Capacity (kW)',                  type: 'number' },
+    { key: 'efficiency',     label: 'Efficiency (0–1, e.g. 0.93)',    type: 'number' },
     { key: 'cv_klasse', label: 'Boiler class', type: 'select',
       options: ['CW3','CW4','CW5','CW6'],
       dependsOn: { key: 'installation_type', value: 'Verwarming' } },
@@ -678,9 +684,18 @@ export default function InspectScreen() {
         const num = parseFloat(raw);
         return !isNaN(num) && num > 0;
       });
-      // Completion is measurement-only: an element is complete once all of its
-      // required measurement slots are filled (the DETAILS section was removed).
-      if (allSlotsFilled) update.is_complete = true;
+      // Completion is measurement-only for built elements. Installations have no
+      // slots, so they're complete once the type is chosen.
+      const isInstallation = element.element_type === 'installatie';
+      if (isInstallation ? !!details.installation_type : allSlotsFilled) update.is_complete = true;
+      // A quick-added installation starts life as "New installation"; once the
+      // type is known, name it by type so the session list reads sensibly.
+      if (isInstallation && details.installation_type && /^new installation$/i.test(element.name)) {
+        const opt = (DETAIL_FIELDS.installatie ?? [])
+          .find(fld => fld.key === 'installation_type')?.options
+          ?.find(o => typeof o !== 'string' && o.value === details.installation_type);
+        if (opt && typeof opt !== 'string') update.name = opt.label;
+      }
 
       if (Object.keys(update).length > 0) {
         const { error } = await supabase
@@ -781,7 +796,8 @@ export default function InspectScreen() {
     const v = parseFloat(values[s.key] ?? "");
     return !isNaN(v) && v > 0;
   }).length;
-  const isFullyComplete = filledCount === slots.length;
+  const isInstallation  = element.element_type === 'installatie';
+  const isFullyComplete = isInstallation ? !!details.installation_type : filledCount === slots.length;
 
   return (
     <KeyboardAvoidingView
@@ -804,7 +820,8 @@ export default function InspectScreen() {
         </View>
       </View>
 
-      {/* ── GLM status + live reading banner ── */}
+      {/* ── GLM status + live reading banner (not for installations — nothing to measure) ── */}
+      {!isInstallation && (
       <View style={[styles.glmBanner, isConnected && styles.glmBannerConnected]}>
         <View style={styles.glmBannerRow}>
           <Text style={styles.glmBannerText}>
@@ -842,10 +859,12 @@ export default function InspectScreen() {
           );
         })()}
       </View>
+      )}
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <ResponsiveContainer>
 
+        {!isInstallation && (<>
         {/* ── Progress ── */}
         <View style={styles.progressRow}>
           <Text style={styles.progressLabel}>MEASUREMENTS</Text>
@@ -1011,6 +1030,7 @@ export default function InspectScreen() {
             </View>
           );
         })}
+        </>)}
 
         {/* ── Photos ── */}
         <View style={styles.photoSection}>
@@ -1044,14 +1064,17 @@ export default function InspectScreen() {
             <TouchableOpacity
               style={styles.detailsToggle}
               onPress={() => setShowDetails(v => !v)}
+              disabled={isInstallation}
             >
-              <Text style={styles.photoLabel}>DETAILS</Text>
-              <Text style={styles.detailsToggleHint}>
-                {showDetails ? "hide ▲" : "show ▼"}
-              </Text>
+              <Text style={styles.photoLabel}>{isInstallation ? "INSTALLATION" : "DETAILS"}</Text>
+              {!isInstallation && (
+                <Text style={styles.detailsToggleHint}>
+                  {showDetails ? "hide ▲" : "show ▼"}
+                </Text>
+              )}
             </TouchableOpacity>
 
-            {showDetails && (DETAIL_FIELDS[element.element_type] ?? []).map(f => {
+            {(showDetails || isInstallation) && (DETAIL_FIELDS[element.element_type] ?? []).map(f => {
               if (f.dependsOn && details[f.dependsOn.key] !== f.dependsOn.value) return null;
               if (f.type === 'toggle') {
                 return (
@@ -1102,7 +1125,7 @@ export default function InspectScreen() {
           </Text>
         </TouchableOpacity>
 
-        {!deviceId && (
+        {!deviceId && !isInstallation && (
           <Text style={styles.noDeviceNote}>
             No GLM device registered — values entered manually will still be saved.
           </Text>

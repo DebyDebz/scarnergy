@@ -456,6 +456,19 @@ existing functionality and design intact, all gates green.
       device-verified** (no Xcode here) · accuracy (±2–5 %) needs calc-owner sign-off.
       Companion LiDAR path (`modules/expo-room-scanner`, RoomPlan, Pro devices only)
       shipped 2026-09-04..11 and is device-verified but was never listed here.
+- [ ] **Installations capture** (top gap in the 2026-09-22 inspector walkthrough).
+      Done 2026-09-22: `inspect.tsx` renders `installatie` elements details-first
+      (no laser slots, no GLM banner, section always open, complete once a type is
+      chosen); added the four inputs the DB + VABI export already carried but the
+      form never asked for — `description` (→`<Locatie>`), `year_installed`,
+      `capacity_kw` (→`<Vermogen>`), `efficiency` (→`<Rendement>`); "+ Add
+      installation" on the session detail creates one directly (placer not
+      required) and the row is renamed by type on first save. mobile `tsc`
+      clean · 130 tests green · not device-verified.
+      **Blocked on calc owner / VABI spec:** type-specific fields for heat pump
+      (source, SCOP), ventilation (system class A–D, heat recovery), cooling and
+      solar collectors — today they only get brand/model/fuel. The client's
+      AppSheet app has per-type dynamic forms; its field list is the fastest source.
 - [ ] **On-device verification pass** (only human-executable): forgot-password
       flow end-to-end on the phone, profile edits, role-gated tabs, results
       screen render, VABI export **share** — the last unticked Phase 1 gate line.
