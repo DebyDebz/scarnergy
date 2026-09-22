@@ -227,12 +227,12 @@ export default function SessionDetailScreen() {
   const pauseSession = useCallback(() => {
     if (!sessionId || !session || session.status !== "active") return;
     Alert.alert(
-      "Pause Session",
-      "Pause this session? You can resume it later.",
+      "Save and leave",
+      "Your progress is saved. You can pick this inspection up again later.",
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Pause",
+          text: "Save and leave",
           onPress: async () => {
             setPausing(true);
             const { error } = await supabase
@@ -551,7 +551,7 @@ export default function SessionDetailScreen() {
                       style={styles.resultsBtn}
                       onPress={() => router.push({ pathname: "/tabs/sessions/results", params: { id: sessionId ?? "" } })}
                     >
-                      <Text style={styles.resultsBtnText}>⚡  Energy Results</Text>
+                      <Text style={styles.resultsBtnText}>📊  Data Completeness</Text>
                     </TouchableOpacity>
                     {appsheetLinked && (
                       <TouchableOpacity
@@ -602,7 +602,7 @@ export default function SessionDetailScreen() {
                       disabled={pausing}
                     >
                       <Text style={styles.pauseBtnText}>
-                        {pausing ? "Pausing…" : "⏸  Pause"}
+                        {pausing ? "Saving…" : "💾  Save & leave"}
                       </Text>
                     </TouchableOpacity>
                     <TouchableOpacity

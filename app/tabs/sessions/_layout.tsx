@@ -10,7 +10,7 @@ export default function SessionsLayout() {
       <Stack.Screen name="roomscan" />
       <Stack.Screen name="armeasure" />
       <Stack.Screen name="floorplan" />
-      <Stack.Screen name="results" options={{ headerShown: true, title: 'Energy Results', headerTintColor: '#1E3A5F', headerStyle: { backgroundColor: '#fff' } }} />
+      <Stack.Screen name="results" options={{ headerShown: true, title: 'Data Completeness', headerTintColor: '#1E3A5F', headerStyle: { backgroundColor: '#fff' } }} />
     </Stack>
   );
 }

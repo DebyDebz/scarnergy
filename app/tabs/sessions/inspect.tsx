@@ -58,6 +58,18 @@ const DEFAULT_SLOTS: SlotDef[] = [
   { key: "width_mm",  label: "Thickness", thickness: true },
 ];
 
+// A wall's thickness only matters when it's shared with a neighbouring space
+// (party wall). For outside-air / crawl-space walls the inspector shouldn't be
+// asked for it (2026-09-22 walkthrough). Both "Aangrenzende …" values of the
+// gevel "Adjacent to" field mean a neighbouring space.
+const SHARED_WALL_PREFIX = 'Aangrenzende';
+function slotsFor(elementType: string, details: Record<string, unknown>): SlotDef[] {
+  const base = SLOT_MAP[elementType] ?? DEFAULT_SLOTS;
+  if (elementType !== 'gevel') return base;
+  const adjacent = String(details.description ?? '');
+  return adjacent.startsWith(SHARED_WALL_PREFIX) ? base : base.filter(s => !s.thickness);
+}
+
 
 // ── Qualitative detail fields per element type ────────────────────────────────
 
@@ -73,6 +85,7 @@ type DetailField = {
   options?: DetailOption[];
   dependsOn?: { key: string; value: string | boolean };
   target?: 'element' | 'opening';  // which table to save to; default = element
+  advanced?: boolean;              // hidden behind the Advanced toggle (kept for the export)
 };
 
 const DETAIL_FIELDS: Record<string, DetailField[]> = {
@@ -91,7 +104,7 @@ const DETAIL_FIELDS: Record<string, DetailField[]> = {
         { value: 'Aangrenzende onverwarmde ruimte',    label: 'Adjacent unheated space' },
         { value: 'Aangrenzende verwarmde ruimte',      label: 'Adjacent heated space'   },
       ] },
-    { key: 'insulation_type',      label: 'Insulation type',           type: 'select',
+    { key: 'insulation_type',      label: 'Insulation type',           type: 'select', advanced: true,
       options: [
         { value: 'Glaswol',     label: 'Glass wool' },
         { value: 'Spouwvulling',label: 'Cavity fill' },
@@ -106,7 +119,7 @@ const DETAIL_FIELDS: Record<string, DetailField[]> = {
     // Migration 024 NTA fields (GAP M / §2.1 + §6)
     { key: 'dikte_vloerconstructie_mm', label: 'Floor construction thickness (mm)', type: 'number' },
     { key: 'isolatie_dikte_mm',    label: 'Insulation thickness (mm)', type: 'number' },
-    { key: 'isolatie_lambda',      label: 'Insulation λ (W/mK)',       type: 'number' },
+    { key: 'isolatie_lambda',      label: 'Insulation λ (W/mK)',       type: 'number', advanced: true },
     { key: 'na_isolatie',          label: 'Retrofit insulation',       type: 'toggle' },
     { key: 'na_isolatie_jaar',     label: 'Retrofit year',             type: 'number',
       dependsOn: { key: 'na_isolatie', value: true } },
@@ -156,7 +169,7 @@ const DETAIL_FIELDS: Record<string, DetailField[]> = {
         { value: 'Buitenlucht',                     label: 'Outside air' },
         { value: 'Aangrenzende onverwarmde ruimte', label: 'Adjacent unheated space' },
       ] },
-    { key: 'insulation_type', label: 'Floor insulation', type: 'select',
+    { key: 'insulation_type', label: 'Floor insulation', type: 'select', advanced: true,
       options: [
         { value: 'Geen',    label: 'None' },
         { value: 'Glaswol', label: 'Glass wool' },
@@ -171,7 +184,7 @@ const DETAIL_FIELDS: Record<string, DetailField[]> = {
     { key: 'kruipruimte_hoogte_m', label: 'Crawl space height (m)', type: 'number',
       dependsOn: { key: 'description', value: 'Kruipruimte' } },
     { key: 'isolatie_dikte_mm',    label: 'Insulation thickness (mm)', type: 'number' },
-    { key: 'isolatie_lambda',      label: 'Insulation λ (W/mK)',       type: 'number' },
+    { key: 'isolatie_lambda',      label: 'Insulation λ (W/mK)',       type: 'number', advanced: true },
     { key: 'na_isolatie',          label: 'Retrofit insulation',       type: 'toggle' },
     { key: 'na_isolatie_jaar',     label: 'Retrofit year',             type: 'number',
       dependsOn: { key: 'na_isolatie', value: true } },
@@ -210,7 +223,7 @@ const DETAIL_FIELDS: Record<string, DetailField[]> = {
       ] },
     { key: 'tilt_deg',          label: 'Angle (°)',       type: 'number' },
     { key: 'nokhoogte_m',       label: 'Ridge height (m)', type: 'number' },
-    { key: 'insulation_type',   label: 'Insulation type',  type: 'select',
+    { key: 'insulation_type',   label: 'Insulation type',  type: 'select', advanced: true,
       options: [
         { value: 'Glaswol', label: 'Glass wool' },
         { value: 'PUR',     label: 'PUR' },
@@ -219,7 +232,7 @@ const DETAIL_FIELDS: Record<string, DetailField[]> = {
       ] },
     // Migration 024 NTA fields (§6)
     { key: 'isolatie_dikte_mm',    label: 'Insulation thickness (mm)', type: 'number' },
-    { key: 'isolatie_lambda',      label: 'Insulation λ (W/mK)',       type: 'number' },
+    { key: 'isolatie_lambda',      label: 'Insulation λ (W/mK)',       type: 'number', advanced: true },
     { key: 'na_isolatie',          label: 'Retrofit insulation',       type: 'toggle' },
     { key: 'na_isolatie_jaar',     label: 'Retrofit year',             type: 'number',
       dependsOn: { key: 'na_isolatie', value: true } },
@@ -323,6 +336,9 @@ export default function InspectScreen() {
   const [openingId,     setOpeningId]     = useState<string | null>(null);
   // NTA details accordion (collapsed by default — measurement flow first)
   const [showDetails,   setShowDetails]   = useState(false);
+  // Insulation type + λ: the inspector doesn't work with these day to day, but the
+  // VABI export does, so they're tucked away rather than removed.
+  const [showAdvanced,  setShowAdvanced]  = useState(false);
 
   const activeSlotRef = useRef<SlotKey | null>(null);
   // setActiveSlotSync keeps the ref in sync IMMEDIATELY so BLE callbacks that
@@ -348,8 +364,8 @@ export default function InspectScreen() {
 
   const slotsRef = useRef<SlotDef[]>(DEFAULT_SLOTS);
   useEffect(() => {
-    if (element) slotsRef.current = SLOT_MAP[element.element_type] ?? DEFAULT_SLOTS;
-  }, [element]);
+    if (element) slotsRef.current = slotsFor(element.element_type, details);
+  }, [element, details]);
 
   // Auto-advance after any fill (trigger press, Capture, thickness, or Enter):
   // arm the next empty non-thickness slot so the following trigger press lands
@@ -647,7 +663,7 @@ export default function InspectScreen() {
     if (!element || !profile || !sessionId) return;
     setSaving(true);
     try {
-      const slots = SLOT_MAP[element.element_type] ?? DEFAULT_SLOTS;
+      const slots = slotsFor(element.element_type, details);
 
       // Build the update object — only include slots that have a valid number
       const update: Record<string, unknown> = {};
@@ -779,14 +795,14 @@ export default function InspectScreen() {
     } finally {
       setSaving(false);
     }
-  }, [element, profile, sessionId, values, router]);
+  }, [element, profile, sessionId, values, details, router]);
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
   if (loading)  return <ActivityIndicator style={styles.loader} color="#1E3A5F" />;
   if (!element) return <Text style={styles.error}>Element not found.</Text>;
 
-  const slots      = SLOT_MAP[element.element_type] ?? DEFAULT_SLOTS;
+  const slots      = slotsFor(element.element_type, details);
   // Plan-derived in-plan length (metres) from the element's grid width × the zone
   // scale. Offered as a one-tap suggestion on the matching slot — never auto-filled,
   // so the measurement audit trail only records values the inspector accepts.
@@ -1076,6 +1092,7 @@ export default function InspectScreen() {
 
             {(showDetails || isInstallation) && (DETAIL_FIELDS[element.element_type] ?? []).map(f => {
               if (f.dependsOn && details[f.dependsOn.key] !== f.dependsOn.value) return null;
+              if (f.advanced && !showAdvanced) return null;
               if (f.type === 'toggle') {
                 return (
                   <FieldToggle
@@ -1111,6 +1128,13 @@ export default function InspectScreen() {
                 </View>
               );
             })}
+            {(showDetails || isInstallation) && (DETAIL_FIELDS[element.element_type] ?? []).some(fld => fld.advanced) && (
+              <TouchableOpacity style={styles.detailsToggle} onPress={() => setShowAdvanced(v => !v)}>
+                <Text style={styles.detailsToggleHint}>
+                  {showAdvanced ? "Hide advanced (insulation type, λ) ▲" : "Advanced: insulation type, λ ▼"}
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
 

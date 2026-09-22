@@ -85,19 +85,11 @@ export default function Dashboard() {
         </View>
       )}
 
-      {/* Stats row */}
-      <View style={styles.statsRow}>
-        {[
-          { label: "Active Sessions", value: stats.activeSessions, color: "#2E86C1" },
-          { label: "Buildings",       value: stats.buildings,      color: "#1E8449" },
-          { label: "Measurements",    value: stats.measurements,   color: "#8E44AD" },
-        ].map(s => (
-          <View key={s.label} style={[styles.statCard, { borderTopColor: s.color }]}>
-            <Text style={[styles.statValue, { color: s.color }]}>{s.value}</Text>
-            <Text style={styles.statLabel}>{s.label}</Text>
-          </View>
-        ))}
-      </View>
+      {/* Stats — one quiet line. The inspector said the big tiles had no field
+          value; the space goes to the recent list instead. */}
+      <Text style={styles.statsLine}>
+        {stats.activeSessions} active · {stats.buildings} buildings · {stats.measurements} measurements
+      </Text>
 
       {/* Quick actions */}
       <View style={styles.section}>
@@ -239,6 +231,7 @@ const styles = StyleSheet.create({
   statCard:       { flex: 1, backgroundColor: "#FFF", borderRadius: 12, padding: 16, borderTopWidth: 3, elevation: 2, shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 4 },
   statValue:      { fontSize: 28, fontWeight: "800" },
   statLabel:      { fontSize: 11, color: "#888", marginTop: 2 },
+  statsLine:      { paddingHorizontal: 16, marginBottom: 12, fontSize: 12, color: "#888" },
   section:        { marginHorizontal: 16, marginBottom: 16 },
   sectionTitle:   { fontSize: 16, fontWeight: "700", color: "#1E3A5F", marginBottom: 12 },
   actionGrid:       { flexDirection: "row", flexWrap: "wrap", gap: 12 },
