@@ -87,7 +87,9 @@ export default function FacadePhotosScreen() {
     }
 
     const result = source === 'camera'
-      ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.85, allowsEditing: true, aspect: [4, 3] })
+      // Full frame, no crop UI: the inspector is on site and the extra step was the
+      // main photo complaint in the 2026-09-22 walkthrough. Thumbnails centre-fit.
+      ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.85, allowsEditing: false })
       : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.85 });
 
     if (result.canceled || !result.assets?.[0]) return;

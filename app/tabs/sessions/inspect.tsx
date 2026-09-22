@@ -519,7 +519,8 @@ export default function InspectScreen() {
     }
 
     const result = source === "camera"
-      ? await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 0.8, allowsEditing: true, aspect: [4, 3] })
+      // Full frame, no crop UI (see facade-photos.tsx for the walkthrough rationale).
+      ? await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 0.8, allowsEditing: false })
       : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.8, allowsMultipleSelection: false });
 
     if (result.canceled || !result.assets?.[0]) return;

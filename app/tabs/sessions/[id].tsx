@@ -499,6 +499,11 @@ export default function SessionDetailScreen() {
                   {item.length_mm === null && item.height_mm === null && item.width_mm === null && (
                     <Text style={styles.dimEmpty}>Not measured yet</Text>
                   )}
+                  {/* Photos are stored per element (building_elements.photo_urls); show
+                      that here so it's clear they don't belong to the zone. */}
+                  {(item.photo_urls?.length ?? 0) > 0 && (
+                    <Text style={styles.dim}>📷 {item.photo_urls.length}</Text>
+                  )}
                 </View>
                 <Text style={styles.inspectCta}>Inspect →</Text>
               </TouchableOpacity>
@@ -547,7 +552,7 @@ export default function SessionDetailScreen() {
                   </TouchableOpacity>
                 )}
 
-                {/* Gevel Foto's — always accessible */}
+                {/* Building-level facade photos (4 directions) — always accessible */}
                 <TouchableOpacity
                   style={styles.facadeBtn}
                   onPress={() => router.push({
@@ -555,7 +560,7 @@ export default function SessionDetailScreen() {
                     params: { sessionId: sessionId!, buildingId: session.building_id },
                   })}
                 >
-                  <Text style={styles.facadeBtnText}>📷  Gevel Foto's</Text>
+                  <Text style={styles.facadeBtnText}>📷  Facade Photos (building)</Text>
                 </TouchableOpacity>
 
                 {session.status === "active" && (
