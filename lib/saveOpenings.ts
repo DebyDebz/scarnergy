@@ -46,6 +46,7 @@ export async function saveOpenings(items: OpeningToSave[], ctx: SaveOpeningsCont
     const { data: element, error: elErr } = await supabase
       .from("building_elements")
       .insert({
+        org_id: ctx.orgId,
         zone_id: ctx.zoneId,
         element_type: "transparant_deel",
         name: label,

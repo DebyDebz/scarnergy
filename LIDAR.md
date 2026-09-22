@@ -81,8 +81,11 @@ This is a **first-party native bridge straight onto Apple's system `RoomPlan` fr
 ### Working end to end
 - Capability detection correctly disables the feature in Expo Go, on Android, and on
   unsupported iOS devices/versions.
-- Full capture → review → edit → save flow, on a real LiDAR device with a dev-client or
-  production/EAS build.
+- Full capture → review → edit flow, on a real LiDAR device with a dev-client or
+  production/EAS build. **Save was broken until 2026-09-22**: the `building_elements`
+  insert omitted `org_id` (NOT NULL + RLS-checked), so every save failed with a raw
+  Postgres error. Found in the inspector walkthrough; fixed in `lib/saveOpenings.ts`,
+  which both the LiDAR and camera-measure screens now use.
 - Error handling for common RoomPlan failures (world-tracking loss, room too large) with
   a retry path and user-facing messages.
 - A real double-`stop()` bug (stale `isCurrentlyScanning` flag) was found on-device and

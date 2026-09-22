@@ -41,8 +41,10 @@ test("writes element + opening + two measurements per item, labelled by source",
   ]);
 
   const [el, op, meas] = inserts;
+  // org_id is NOT NULL and RLS-checked on building_elements — omitting it was the
+  // "Save failed" seen on device in both scan flows.
   expect(el.rows[0]).toMatchObject({
-    zone_id: "z1", element_type: "transparant_deel", name: `${OPENING_TYPE_LABEL.window} (AR)`,
+    org_id: "org", zone_id: "z1", element_type: "transparant_deel", name: `${OPENING_TYPE_LABEL.window} (AR)`,
     width_mm: 1200, height_mm: 900, is_complete: true,
   });
   expect(op.rows[0]).toMatchObject({ org_id: "org", element_id: "el-1", opening_type: "window", width_mm: 1200, height_mm: 900 });
