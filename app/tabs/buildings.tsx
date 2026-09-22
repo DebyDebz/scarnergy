@@ -183,7 +183,7 @@ export default function BuildingsScreen() {
                   onPress={() => router.push(`/tabs/sessions?buildingId=${item.id}`)}
                 >
                   <Ionicons name="albums-outline" size={13} color="#777" />
-                  <Text style={styles.sessionsBtnText}>Sessions</Text>
+                  <Text style={styles.sessionsBtnText}>History</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.startBtn, { backgroundColor: typeColor }, starting === item.id && styles.startBtnDisabled]}

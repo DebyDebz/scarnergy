@@ -22,7 +22,7 @@ export default function TabLayout() {
     }}>
       <Tabs.Screen name="index"     options={{ title: "Dashboard", tabBarIcon: ({ color, size }) => <Ionicons name="home-outline"      size={size} color={color} /> }} />
       <Tabs.Screen name="buildings" options={{ title: "Buildings",  tabBarIcon: ({ color, size }) => <Ionicons name="business-outline"  size={size} color={color} /> }} />
-      <Tabs.Screen name="sessions"  options={{ title: "Sessions",   tabBarIcon: ({ color, size }) => <Ionicons name="albums-outline"    size={size} color={color} /> }} />
+      <Tabs.Screen name="sessions"  options={{ title: "History",   tabBarIcon: ({ color, size }) => <Ionicons name="albums-outline"    size={size} color={color} /> }} />
       <Tabs.Screen name="device"    options={{ href: showDevice ? undefined : null, title: "Measuring Device", tabBarIcon: ({ color, size }) => <Ionicons name="bluetooth-outline" size={size} color={color} /> }} />
       {/* Reached only via a link on the GLM Device screen — kept out of the
           tab bar (href: null) same as any hidden-but-navigable route here. */}

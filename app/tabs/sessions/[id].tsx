@@ -12,6 +12,9 @@ import { FloorPlanReview } from "../../../components/inspection/FloorPlanReview"
 import { syncToAppsheetIfLinked } from "../../../lib/appsheetSync";
 import { useRoomScanner } from "../../../hooks/useRoomScanner";
 import { useAuthStore } from "../../../store/authStore";
+import * as Print from "expo-print";
+import * as Sharing from "expo-sharing";
+import { buildSessionReportHtml } from "../../../lib/sessionReport";
 import { useArMeasure } from "../../../hooks/useArMeasure";
 import { useIsTablet } from "../../../hooks/useResponsive";
 import { CONTENT_MAX_WIDTH } from "../../../constants/layout";
@@ -262,9 +265,10 @@ export default function SessionDetailScreen() {
 
   // ── VABI XML export ───────────────────────────────────────────────────────
 
-  const exportXML = useCallback(async () => {
-    if (!session || !sessionId) return;
-    try {
+  // Shared by the VABI XML export and the PDF report.
+  const loadExportData = useCallback(async () => {
+    if (!session) return null;
+    {
       const [zonesRes, buildingRes, orgRes, rekenzonesRes] = await Promise.all([
         supabase.from("zones").select("*").eq("building_id", session.building_id).eq("is_active", true).order("floor_level"),
         (supabase.from("buildings") as any).select("construction_year, building_type").eq("id", session.building_id).single(),
@@ -287,6 +291,16 @@ export default function SessionDetailScreen() {
       const allElements: BuildingElement[] = elemRes.data ?? [];
       const elementIds = new Set(allElements.map(e => e.id));
       const allOpenings: Opening[] = ((openRes.data ?? []) as Opening[]).filter(o => elementIds.has((o as any).element_id));
+      return { allZones, allElements, allOpenings, buildingRes, orgRes, rekenzonesRes };
+    }
+  }, [session]);
+
+  const exportXML = useCallback(async () => {
+    if (!session || !sessionId) return;
+    try {
+      const data = await loadExportData();
+      if (!data) return;
+      const { allZones, allElements, allOpenings, buildingRes, orgRes, rekenzonesRes } = data;
 
       const xml = buildVabiXml(
         session,
@@ -304,6 +318,31 @@ export default function SessionDetailScreen() {
       Alert.alert("Export failed", e.message ?? "Unknown error");
     }
   }, [session, sessionId]);
+
+  // ── PDF report (expo-print → share sheet) ─────────────────────────────────
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const exportPDF = useCallback(async () => {
+    if (!session) return;
+    setExportingPdf(true);
+    try {
+      const data = await loadExportData();
+      if (!data) return;
+      const html = buildSessionReportHtml({
+        session, zones: data.allZones, elements: data.allElements, openings: data.allOpenings,
+        orgName: data.orgRes.data?.name ?? "",
+      });
+      const { uri } = await Print.printToFileAsync({ html });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, { mimeType: "application/pdf", dialogTitle: `${session.session_code} report`, UTI: "com.adobe.pdf" });
+      } else {
+        Alert.alert("PDF saved", uri);
+      }
+    } catch (e: any) {
+      Alert.alert("PDF failed", e.message ?? "Unknown error");
+    } finally {
+      setExportingPdf(false);
+    }
+  }, [session, loadExportData]);
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -567,9 +606,18 @@ export default function SessionDetailScreen() {
                   </>
                 )}
 
-                <TouchableOpacity style={styles.exportBtn} onPress={exportXML}>
-                  <Text style={styles.exportBtnText}>↓  Export XML</Text>
-                </TouchableOpacity>
+                <View style={styles.exportRow}>
+                  <TouchableOpacity style={[styles.exportBtn, { flex: 1 }]} onPress={exportXML}>
+                    <Text style={styles.exportBtnText}>↓  Export XML</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.exportBtn, { flex: 1 }, exportingPdf && styles.btnDisabled]}
+                    onPress={exportPDF}
+                    disabled={exportingPdf}
+                  >
+                    <Text style={styles.exportBtnText}>{exportingPdf ? "Building…" : "📄  PDF report"}</Text>
+                  </TouchableOpacity>
+                </View>
 
                 {session.status === "paused" && (
                   <TouchableOpacity
@@ -714,6 +762,7 @@ const styles = StyleSheet.create({
   resultsBtnText:      { color: "#fff", fontSize: 15, fontWeight: "700" },
   exportBtn:           { backgroundColor: "#2E86C1", borderRadius: 12, padding: 16, alignItems: "center" },
   exportBtnText:       { color: "#fff", fontSize: 15, fontWeight: "700" },
+  exportRow:           { flexDirection: "row", gap: 10 },
 
   facadeBtn:           { backgroundColor: '#f0f9ff', borderRadius: 12, padding: 14,
                          alignItems: 'center', borderWidth: 1.5, borderColor: '#0284c7', marginBottom: 4 },

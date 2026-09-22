@@ -109,37 +109,16 @@ export default function Dashboard() {
                 </View>
               )}
             </View>
-            <Text style={[styles.actionCardTitle, { color: "#1A5276" }]}>New Inspection</Text>
+            <Text style={[styles.actionCardTitle, { color: "#1A5276" }]}>Start Inspection</Text>
             <Text style={styles.actionCardSub}>
               {stats.activeSessions > 0
-                ? `${stats.activeSessions} active session${stats.activeSessions > 1 ? "s" : ""}`
-                : "Select a building to begin"}
+                ? `${stats.activeSessions} in progress`
+                : "Pick the building you're at"}
             </Text>
           </TouchableOpacity>
 
-          {/* Connect GLM */}
-          <TouchableOpacity
-            style={[styles.actionCard, isTablet && styles.actionCardTablet, { backgroundColor: isConnected ? "#EAFAF1" : "#FDFEFE", borderTopColor: isConnected ? "#27AE60" : "#CCC" }]}
-            onPress={() => router.push("/tabs/device")}
-            activeOpacity={0.75}
-          >
-            <View style={styles.actionCardTop}>
-              <Ionicons name="bluetooth-outline" size={26} color={isConnected ? "#27AE60" : "#1E3A5F"} />
-              <View style={[styles.statusDot, {
-                backgroundColor: isConnected ? "#27AE60" : bleState === "scanning" ? "#F39C12" : "#CCC",
-              }]} />
-            </View>
-            <Text style={[styles.actionCardTitle, { color: isConnected ? "#1E8449" : "#1E3A5F" }]}>
-              {isConnected ? "GLM Connected" : "Connect GLM"}
-            </Text>
-            <Text style={styles.actionCardSub}>
-              {isConnected
-                ? `${deviceName ?? "GLM 50C"}${batteryLevel != null ? ` · ${batteryLevel}%` : ""}`
-                : bleState === "scanning"
-                ? "Scanning for device…"
-                : "Tap to pair device"}
-            </Text>
-          </TouchableOpacity>
+          {/* GLM pairing lives in the session screen now — it means nothing until
+              the inspector is inside a building (2026-09-22 walkthrough). */}
 
           {/* Sessions */}
           <TouchableOpacity
@@ -150,10 +129,8 @@ export default function Dashboard() {
             <View style={styles.actionCardTop}>
               <Ionicons name="albums-outline" size={26} color="#6C3483" />
             </View>
-            <Text style={[styles.actionCardTitle, { color: "#6C3483" }]}>My Sessions</Text>
-            <Text style={styles.actionCardSub}>
-              {stats.measurements > 0 ? `${stats.measurements} measurements` : "View all sessions"}
-            </Text>
+            <Text style={[styles.actionCardTitle, { color: "#6C3483" }]}>History</Text>
+            <Text style={styles.actionCardSub}>Past inspections</Text>
           </TouchableOpacity>
 
           {/* Sync */}
@@ -186,9 +163,9 @@ export default function Dashboard() {
 
       {/* Recent sessions */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Recent Sessions</Text>
+        <Text style={styles.sectionTitle}>Recent Inspections</Text>
         {recentSessions.length === 0
-          ? <Text style={styles.emptyText}>No sessions yet. Start an inspection!</Text>
+          ? <Text style={styles.emptyText}>Nothing yet — start one from Buildings.</Text>
           : recentSessions.map(s => (
             <TouchableOpacity key={s.id} style={styles.sessionCard}
               onPress={() => {

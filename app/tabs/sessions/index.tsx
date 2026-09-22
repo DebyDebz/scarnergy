@@ -248,7 +248,9 @@ export default function SessionsScreen() {
       }
 
       {/* FAB */}
-      <TouchableOpacity style={styles.fab} onPress={openModal} activeOpacity={0.85}>
+      {/* Inspections start from the building (walkthrough decision). The in-place
+          "pick a building" modal below is kept but no longer reachable from here. */}
+      <TouchableOpacity style={styles.fab} onPress={() => router.push("/tabs/buildings")} activeOpacity={0.85}>
         <Text style={styles.fabText}>+</Text>
       </TouchableOpacity>
 
