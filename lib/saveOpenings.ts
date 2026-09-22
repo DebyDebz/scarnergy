@@ -6,6 +6,8 @@ export interface OpeningToSave {
   type: OpeningType;
   widthMm: number;
   heightMm: number;
+  /** True when the inspector overwrote the detected dimensions with GLM laser readings. */
+  confirmedByLaser?: boolean;
 }
 
 /** Where the dimensions came from — appended to the element name so it's auditable later. */
@@ -41,7 +43,10 @@ export async function saveOpenings(items: OpeningToSave[], ctx: SaveOpeningsCont
   let saved = 0;
 
   for (const item of items) {
-    const label = `${OPENING_TYPE_LABEL[item.type]} (${ctx.source})`;
+    // Provenance lives in the name so the calc owner can later tell a raw
+    // RoomPlan/ARKit estimate from one the inspector confirmed with the laser.
+    const provenance = item.confirmedByLaser ? `${ctx.source} · laser` : ctx.source;
+    const label = `${OPENING_TYPE_LABEL[item.type]} (${provenance})`;
 
     const { data: element, error: elErr } = await supabase
       .from("building_elements")

@@ -67,3 +67,9 @@ test("saves nothing for an empty list", async () => {
   expect(await saveOpenings([], ctx)).toBe(0);
   expect(inserts).toHaveLength(0);
 });
+
+test("laser-confirmed items carry that provenance in the element name", async () => {
+  await saveOpenings([{ type: "window", widthMm: 1180, heightMm: 2080, confirmedByLaser: true }], ctx);
+  expect(inserts[0].rows[0].name).toBe("Window (AR · laser)");
+  expect(inserts[0].rows[0]).toMatchObject({ width_mm: 1180, height_mm: 2080 });
+});

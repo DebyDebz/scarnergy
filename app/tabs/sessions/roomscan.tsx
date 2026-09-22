@@ -34,6 +34,9 @@ export default function RoomScanScreen() {
   const toggleKeep = (id: string) => {
     setItems(prev => prev.map(it => (it.id === id ? { ...it, keep: !it.keep } : it)));
   };
+  const setDims = (id: string, widthMm: number, heightMm: number, confirmedByLaser: boolean) => {
+    setItems(prev => prev.map(it => (it.id === id ? { ...it, widthMm, heightMm, confirmedByLaser } : it)));
+  };
 
   const save = useCallback(async () => {
     if (!profile || !sessionId || !zoneId) return;
@@ -123,6 +126,7 @@ export default function RoomScanScreen() {
           saving={saving}
           onSetType={setItemType}
           onToggleKeep={toggleKeep}
+          onSetDims={setDims}
           onSave={save}
         />
       )}

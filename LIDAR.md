@@ -181,7 +181,13 @@ camera-only path covers the large majority of inspectors' devices.
 - `lib/saveOpenings.ts` — shared persistence (element + opening + 2 measurements) used
   by both screens; element name is suffixed `(LiDAR)` or `(AR)` for auditability.
   Unit-tested in `__tests__/saveOpenings.test.ts`.
-- `components/inspection/OpeningReviewList.tsx` — shared review/edit/save list.
+- `components/inspection/OpeningReviewList.tsx` — shared review/edit/save list. Since
+  2026-09-22 each detected opening has a **Remeasure** action: width then height are
+  armed in turn and filled by GLM trigger presses (or a Capture button in
+  continuous-only mode, or typed). Items confirmed this way save with
+  `(LiDAR · laser)` / `(AR · laser)` in the element name so the calc owner can tell a
+  raw estimate from a laser-confirmed one. This is the inspector's requested shape:
+  detect automatically, confirm precisely.
 
 **Config**
 - `package.json` — `"expo-ar-measure": "file:modules/expo-ar-measure"`.

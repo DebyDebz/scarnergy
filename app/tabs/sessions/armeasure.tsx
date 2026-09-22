@@ -94,6 +94,8 @@ export default function ArMeasureScreen() {
     setItems(prev => prev.map(it => (it.id === id ? { ...it, type } : it)));
   const toggleKeep = (id: string) =>
     setItems(prev => prev.map(it => (it.id === id ? { ...it, keep: !it.keep } : it)));
+  const setDims = (id: string, widthMm: number, heightMm: number, confirmedByLaser: boolean) =>
+    setItems(prev => prev.map(it => (it.id === id ? { ...it, widthMm, heightMm, confirmedByLaser } : it)));
 
   const save = useCallback(async () => {
     if (!profile || !sessionId || !zoneId) return;
@@ -149,6 +151,7 @@ export default function ArMeasureScreen() {
           saving={saving}
           onSetType={setItemType}
           onToggleKeep={toggleKeep}
+          onSetDims={setDims}
           onSave={save}
           renderMeta={it => `from ${((it as ArItem).distanceMm / 1000).toFixed(1)} m`}
         />
