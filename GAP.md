@@ -471,13 +471,17 @@ existing functionality and design intact, all gates green.
       AppSheet app has per-type dynamic forms; its field list is the fastest source.
 - [ ] **Walkthrough follow-ups needing the calc owner** (built 2026-09-22 as
       suggestions/inputs, not silent logic — see inspector-walkthrough decisions):
-      · **Perimeter auto-calc**: `inspect.tsx` offers "Σ walls in this zone ≈ X m — tap
-        to use" on `perimeter_m` (exterior 'Buitenlucht' walls when any are tagged,
-        else all). *Which walls count, per zone vs per floor* → calc owner.
-      · **Door with glass panel**: `opening_type = glazed_door` + a linked second
-        `openings` row `door_glass` (glass W×H); VABI exports the door as Deur and
-        the panel as Raam. Glass share is shown ("Glass ≈ N% of the door"). *The
-        reclassify-to-window threshold* → calc owner / AppSheet rule.
+      · **Perimeter** ✅ rule received 2026-09-24 (ISSO 82.1/75.1): internal
+        circumference where the floor adjoins outside air or an unheated space
+        outside the thermal envelope; ground + basement floors only. Implemented as
+        `floorPerimeterM()` in `@scarnergy/opname-calc/rules` (Σ zone walls with
+        Adjacent-to ∈ {Buitenlucht, Aangrenzende onverwarmde ruimte}); auto-filled
+        on `vloer` when empty, editable. Unit-tested.
+      · **Door with glass panel** ✅ rule received 2026-09-24: < 65 % glass → split
+        into door (area net of glass) + window (the panel, `door_glass` row);
+        ≥ 65 % → the element is a window. `classifyGlazedDoor()` in
+        `@scarnergy/opname-calc/rules`, applied on save in `inspect.tsx`. Exactly
+        65 % treated as window (owner said "less than … / more than"). Unit-tested.
       · **Insulation λ**: moved behind Advanced with insulation type (kept for the
         export). *Can λ be derived from a material lookup so the field can go?* → calc owner.
       · **Auto height per floor**: first measured wall height prompts "use for the

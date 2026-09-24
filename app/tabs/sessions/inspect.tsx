@@ -14,6 +14,7 @@ import { useBLE } from "../../../lib/BLEContext";
 import { useAuthStore } from "../../../store/authStore";
 import { GLMMeasurement } from "../../../hooks/useBLEDevice";
 import { nextSlotAfterFill } from "../../../hooks/bleDecoder";
+import { floorPerimeterM, glassRatio, classifyGlazedDoor, GLAZED_DOOR_WINDOW_RATIO } from "@scarnergy/opname-calc";
 import { elementTypeLabel } from "../../../lib/elementTypes";
 import {
   EMPTY_SWEEP, SweepState, addSweepSample,
@@ -32,7 +33,9 @@ type SlotKey = "length_mm" | "height_mm" | "width_mm";
 // distance-to-surface, so these are captured from TWO readings (front + back →
 // |Δ| in point mode, or a min/max sweep in continuous mode) rather than one shot.
 type SlotDef = { key: SlotKey; label: string; thickness?: boolean };
-type ElementWithZone = BuildingElement & { zone_name?: string; zone_scale_m?: number | null; zone_ceiling_m?: number | null };
+type ElementWithZone = BuildingElement & {
+  zone_name?: string; zone_scale_m?: number | null; zone_ceiling_m?: number | null; zone_floor_level?: number | null;
+};
 
 // ── Slot definitions — keys match the Dutch enum values stored in the DB ──────
 
@@ -470,7 +473,7 @@ export default function InspectScreen() {
     Promise.resolve(
       supabase
         .from("building_elements")
-        .select("*, zones(name, floor_plan_scale_m, ceiling_height_m)")
+        .select("*, zones(name, floor_plan_scale_m, ceiling_height_m, floor_level)")
         .eq("id", elementId)
         .single()
     ).then(({ data }) => {
@@ -481,6 +484,7 @@ export default function InspectScreen() {
             zone_name: zoneData?.name ?? null,
             zone_scale_m: zoneData?.floor_plan_scale_m ?? null,
             zone_ceiling_m: zoneData?.ceiling_height_m ?? null,
+            zone_floor_level: zoneData?.floor_level ?? null,
           });
           setValues({
             ...(rest.length_mm != null ? { length_mm: (rest.length_mm / 1000).toFixed(3) } : {}),
@@ -572,13 +576,14 @@ export default function InspectScreen() {
       });
   }, [element]);
 
-  // ── Item 8: perimeter auto-suggestion — Σ wall lengths in this zone ──
-  // Exterior walls ('Buitenlucht') only when any are tagged, otherwise all walls.
-  // Which walls count is a calc-owner definition (GAP.md): this stays a one-tap
-  // suggestion with manual override, never a silent write.
+  // ── Floor perimeter (calc owner rule, ISSO 82.1/75.1): internal circumference
+  // where the floor adjoins outside air or an unheated space outside the thermal
+  // envelope; ground and basement floors only. Σ of this zone's qualifying wall
+  // lengths (floorPerimeterM). Auto-filled on the floor element when empty;
+  // the inspector can still overwrite it.
   const [zoneWalls, setZoneWalls] = useState<{ length_mm: number | null; description: string | null }[]>([]);
   useEffect(() => {
-    if (!element || element.element_type !== 'gevel') return;
+    if (!element || element.element_type !== 'vloer') return;
     supabase
       .from('building_elements')
       .select('length_mm, description')
@@ -587,24 +592,24 @@ export default function InspectScreen() {
       .eq('is_active', true)
       .then(({ data }) => setZoneWalls((data ?? []) as any));
   }, [element]);
-  const autoPerimeterM = (() => {
-    const withLen = zoneWalls.filter(w => w.length_mm != null && w.length_mm > 0);
-    if (withLen.length === 0) return null;
-    const exterior = withLen.filter(w => w.description === 'Buitenlucht');
-    const set = exterior.length ? exterior : withLen;
-    return set.reduce((sum, w) => sum + (w.length_mm as number), 0) / 1000;
-  })();
+  const autoPerimeterM = element?.element_type === 'vloer'
+    ? floorPerimeterM(zoneWalls, element.zone_floor_level)
+    : null;
+  useEffect(() => {
+    if (autoPerimeterM == null) return;
+    setDetails(prev => (prev.perimeter_m != null && prev.perimeter_m !== '' ? prev : { ...prev, perimeter_m: autoPerimeterM.toFixed(2) }));
+  }, [autoPerimeterM]);
 
-  // Glass share of a door with glass panel — informational until the calc owner
-  // supplies the window-reclassification threshold.
-  const glassRatioPct = (() => {
+  // Door with glass panel — 65 % rule (calc owner): below 65 % glass the element is
+  // split into a door plus a window (the glass panel); at 65 % or more it is a window.
+  const glazedDoorRatio = (() => {
     const gw = parseFloat(String(details.glass_width_mm ?? ''));
     const gh = parseFloat(String(details.glass_height_mm ?? ''));
     const dw = parseFloat(values.width_mm ?? '') * 1000;
     const dh = parseFloat(values.height_mm ?? '') * 1000;
-    if (!(gw > 0 && gh > 0 && dw > 0 && dh > 0)) return null;
-    return Math.round(((gw * gh) / (dw * dh)) * 100);
+    return glassRatio(dw, dh, gw, gh);
   })();
+  const glassRatioPct = glazedDoorRatio == null ? null : Math.round(glazedDoorRatio * 100);
 
   // Capture a photo from camera or library and upload to Supabase Storage
   const capturePhoto = useCallback(async (source: "camera" | "library") => {
@@ -815,20 +820,35 @@ export default function InspectScreen() {
           const v = details[f.key];
           if (v != null && v !== '') openingUpdate[f.key] = v;
         }
+        // Track the row id locally: setOpeningId won't have landed yet within this save.
+        let currentOpeningId: string | null = openingId;
         if (openingId) {
           await supabase.from('openings').update(openingUpdate).eq('id', openingId);
         } else {
           const { data: newOpening } = await supabase.from('openings')
             .insert({ ...openingUpdate, opening_type: (details.opening_type as string) ?? 'window' })
             .select('id').single();
-          if (newOpening) setOpeningId((newOpening as any).id);
+          if (newOpening) { currentOpeningId = (newOpening as any).id; setOpeningId(currentOpeningId); }
         }
 
-        // Linked glass-panel row for a door with glass (second openings row, as in
-        // the client's AppSheet app). Deactivated if the type is changed away.
+        // Door with glass panel, 65 % rule (calc owner, ISSO 82.1/75.1):
+        //  · < 65 % glass  → split: this row stays a door (area net of the glass)
+        //                    plus a linked 'door_glass' row that exports as a window
+        //  · ≥ 65 % glass  → the whole element is a window: this row becomes
+        //                    'window' and any glass row is deactivated.
         const glassW = parseFloat(String(details.glass_width_mm ?? ''));
         const glassH = parseFloat(String(details.glass_height_mm ?? ''));
-        if (details.opening_type === 'glazed_door' && glassW > 0 && glassH > 0) {
+        const doorClass = details.opening_type === 'glazed_door' && glazedDoorRatio != null
+          ? classifyGlazedDoor(glazedDoorRatio) : null;
+        if (doorClass === 'window' && currentOpeningId) {
+          await supabase.from('openings').update({ opening_type: 'window', area_m2: null }).eq('id', currentOpeningId);
+          setDetails(prev => ({ ...prev, opening_type: 'window' }));
+        } else if (doorClass === 'split' && currentOpeningId) {
+          const dw = Number(openingUpdate.width_mm), dh = Number(openingUpdate.height_mm);
+          const net = (dw * dh - glassW * glassH) / 1e6;
+          await supabase.from('openings').update({ area_m2: net > 0 ? Math.round(net * 100) / 100 : null }).eq('id', currentOpeningId);
+        }
+        if (doorClass === 'split') {
           const glassRow = {
             org_id: profile.org_id, element_id: element.id, opening_type: 'door_glass',
             name: 'Door glass panel', width_mm: glassW, height_mm: glassH,
@@ -1260,12 +1280,20 @@ export default function InspectScreen() {
                   />
                   {f.key === 'perimeter_m' && autoPerimeterM != null && (
                     <TouchableOpacity onPress={() => setDetails(prev => ({ ...prev, perimeter_m: autoPerimeterM.toFixed(2) }))}>
-                      <Text style={styles.planHintText}>Σ walls in this zone ≈ {autoPerimeterM.toFixed(2)} m — tap to use</Text>
+                      <Text style={styles.planHintText}>
+                        Auto {autoPerimeterM.toFixed(2)} m — Σ walls on outside air / unheated space (tap to reset)
+                      </Text>
                     </TouchableOpacity>
+                  )}
+                  {f.key === 'perimeter_m' && element.element_type === 'vloer' && autoPerimeterM == null
+                    && element.zone_floor_level != null && element.zone_floor_level > 0 && (
+                    <Text style={styles.planHintText}>Perimeter applies to ground and basement floors only</Text>
                   )}
                   {f.key === 'glass_height_mm' && glassRatioPct != null && (
                     <Text style={styles.planHintText}>
-                      Glass ≈ {glassRatioPct}% of the door — window reclassification rule pending calc owner
+                      Glass ≈ {glassRatioPct}% of the door — {glassRatioPct >= GLAZED_DOOR_WINDOW_RATIO * 100
+                        ? "≥ 65%: saved as a window"
+                        : "< 65%: saved as a door plus a window for the glass panel"}
                     </Text>
                   )}
                 </View>
