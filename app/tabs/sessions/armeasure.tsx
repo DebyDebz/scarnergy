@@ -149,6 +149,7 @@ export default function ArMeasureScreen() {
         <OpeningReviewList
           items={items}
           saving={saving}
+          source="AR"
           onSetType={setItemType}
           onToggleKeep={toggleKeep}
           onSetDims={setDims}

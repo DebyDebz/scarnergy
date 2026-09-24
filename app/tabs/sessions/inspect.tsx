@@ -122,7 +122,6 @@ const DETAIL_FIELDS: Record<string, DetailField[]> = {
     // Migration 024 NTA fields (GAP M / §2.1 + §6)
     { key: 'dikte_vloerconstructie_mm', label: 'Floor construction thickness (mm)', type: 'number' },
     { key: 'isolatie_dikte_mm',    label: 'Insulation thickness (mm)', type: 'number' },
-    { key: 'isolatie_lambda',      label: 'Insulation λ (W/mK)',       type: 'number', advanced: true },
     { key: 'na_isolatie',          label: 'Retrofit insulation',       type: 'toggle' },
     { key: 'na_isolatie_jaar',     label: 'Retrofit year',             type: 'number',
       dependsOn: { key: 'na_isolatie', value: true } },
@@ -201,7 +200,6 @@ const DETAIL_FIELDS: Record<string, DetailField[]> = {
     { key: 'kruipruimte_hoogte_m', label: 'Crawl space height (m)', type: 'number',
       dependsOn: { key: 'description', value: 'Kruipruimte' } },
     { key: 'isolatie_dikte_mm',    label: 'Insulation thickness (mm)', type: 'number' },
-    { key: 'isolatie_lambda',      label: 'Insulation λ (W/mK)',       type: 'number', advanced: true },
     { key: 'na_isolatie',          label: 'Retrofit insulation',       type: 'toggle' },
     { key: 'na_isolatie_jaar',     label: 'Retrofit year',             type: 'number',
       dependsOn: { key: 'na_isolatie', value: true } },
@@ -249,7 +247,6 @@ const DETAIL_FIELDS: Record<string, DetailField[]> = {
       ] },
     // Migration 024 NTA fields (§6)
     { key: 'isolatie_dikte_mm',    label: 'Insulation thickness (mm)', type: 'number' },
-    { key: 'isolatie_lambda',      label: 'Insulation λ (W/mK)',       type: 'number', advanced: true },
     { key: 'na_isolatie',          label: 'Retrofit insulation',       type: 'toggle' },
     { key: 'na_isolatie_jaar',     label: 'Retrofit year',             type: 'number',
       dependsOn: { key: 'na_isolatie', value: true } },
@@ -279,6 +276,7 @@ const DETAIL_FIELDS: Record<string, DetailField[]> = {
     { key: 'year_installed', label: 'Year installed',                 type: 'number' },
     { key: 'capacity_kw',    label: 'Capacity (kW)',                  type: 'number' },
     { key: 'efficiency',     label: 'Efficiency (0–1, e.g. 0.93)',    type: 'number' },
+    { key: 'notes',          label: 'Notes',                          type: 'text' },
     { key: 'cv_klasse', label: 'Boiler class', type: 'select',
       options: ['CW3','CW4','CW5','CW6'],
       dependsOn: { key: 'installation_type', value: 'Verwarming' } },
@@ -355,8 +353,9 @@ export default function InspectScreen() {
   const [glassOpeningId, setGlassOpeningId] = useState<string | null>(null);
   // NTA details accordion (collapsed by default — measurement flow first)
   const [showDetails,   setShowDetails]   = useState(false);
-  // Insulation type + λ: the inspector doesn't work with these day to day, but the
-  // VABI export does, so they're tucked away rather than removed.
+  // Insulation type: the inspector doesn't work with it day to day, but the VABI
+  // export does, so it's tucked away rather than removed. Insulation λ was removed
+  // 2026-09-24 — the Rc formula uses a fixed λ (see opname-calc/rules).
   const [showAdvanced,  setShowAdvanced]  = useState(false);
 
   const activeSlotRef = useRef<SlotKey | null>(null);
@@ -1302,7 +1301,7 @@ export default function InspectScreen() {
             {(showDetails || isInstallation) && (DETAIL_FIELDS[element.element_type] ?? []).some(fld => fld.advanced) && (
               <TouchableOpacity style={styles.detailsToggle} onPress={() => setShowAdvanced(v => !v)}>
                 <Text style={styles.detailsToggleHint}>
-                  {showAdvanced ? "Hide advanced (insulation type, λ) ▲" : "Advanced: insulation type, λ ▼"}
+                  {showAdvanced ? "Hide advanced (insulation type) ▲" : "Advanced: insulation type ▼"}
                 </Text>
               </TouchableOpacity>
             )}

@@ -1,5 +1,6 @@
 import {
   floorPerimeterM, glassRatio, classifyGlazedDoor, GLAZED_DOOR_WINDOW_RATIO,
+  rcFromInsulation, INSULATION_LAMBDA_W_PER_MK, MAX_MEASUREMENT_VARIATION,
 } from "../packages/opname-calc/src/rules";
 
 describe("floorPerimeterM — internal circumference on the envelope boundary", () => {
@@ -35,4 +36,18 @@ describe("glazed door — 65 % rule", () => {
     expect(classifyGlazedDoor(0.9)).toBe("window");
     expect(GLAZED_DOOR_WINDOW_RATIO).toBe(0.65);
   });
+});
+
+describe("insulation Rc formula (recorded, not yet applied)", () => {
+  test("Rc = d/0.045 + Rad with thickness rounded to 0.1 m", () => {
+    // 90 mm → 0.1 m → 0.1/0.045 = 2.222… + Rad 0.17
+    expect(rcFromInsulation(90, 0.17)).toBeCloseTo(2.392, 3);
+    // 140 mm → 0.1 m (0.14 rounds down)
+    expect(rcFromInsulation(140, 0)).toBeCloseTo(2.222, 3);
+    expect(INSULATION_LAMBDA_W_PER_MK).toBe(0.045);
+  });
+});
+
+test("3 % is the maximum measurement variation", () => {
+  expect(MAX_MEASUREMENT_VARIATION).toBe(0.03);
 });

@@ -49,3 +49,24 @@ export function glassRatio(
 export function classifyGlazedDoor(ratio: number): GlazedDoorClass {
   return ratio >= GLAZED_DOOR_WINDOW_RATIO ? 'window' : 'split';
 }
+
+/**
+ * Insulation Rc (calc owner, 2026-09-24):  Rc = (d_insulation_m / λ) + Rad
+ * with a fixed λ = 0.045 W/mK (so no λ is captured in the field) and Rad a
+ * standard addition per element kind (floor / wall / roof) still to be supplied.
+ * Thickness is captured in mm, rounded to one decimal in metres for the formula.
+ * Recorded here, NOT yet applied anywhere in the app ("leave this out for now").
+ */
+export const INSULATION_LAMBDA_W_PER_MK = 0.045;
+
+export function rcFromInsulation(thicknessMm: number, radM2KPerW: number): number {
+  const dM = Math.round((thicknessMm / 1000) * 10) / 10;
+  return dM / INSULATION_LAMBDA_W_PER_MK + radM2KPerW;
+}
+
+/**
+ * Maximum acceptable measurement variation (calc owner, 2026-09-24): 3 %.
+ * LiDAR (~1 %) and the GLM laser meet it; camera-only AR (~2–5 %) does not,
+ * so AR values are estimates until confirmed with the laser.
+ */
+export const MAX_MEASUREMENT_VARIATION = 0.03;

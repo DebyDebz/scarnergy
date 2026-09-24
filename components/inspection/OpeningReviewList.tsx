@@ -3,7 +3,7 @@ import {
   View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, FlatList, TextInput,
 } from "react-native";
 import { FieldSelect } from "../ui/FieldSelect";
-import { OpeningType, OpeningToSave } from "../../lib/saveOpenings";
+import { OpeningType, OpeningToSave, OpeningSource, meetsTolerance } from "../../lib/saveOpenings";
 import { useBLE } from "../../lib/BLEContext";
 import { GLMMeasurement } from "../../hooks/useBLEDevice";
 
@@ -17,6 +17,8 @@ type Dim = "width" | "height";
 interface Props {
   items: ReviewItem[];
   saving: boolean;
+  /** Capture path — decides whether unconfirmed values meet the 3 % tolerance. */
+  source: OpeningSource;
   onSetType: (id: string, type: OpeningType) => void;
   onToggleKeep: (id: string) => void;
   /** Called when the inspector overwrites the detected dimensions (laser or typed). */
@@ -32,7 +34,7 @@ const parseM = (s: string) => {
   return isNaN(n) || n <= 0 ? null : Math.round(n * 1000);
 };
 
-export function OpeningReviewList({ items, saving, onSetType, onToggleKeep, onSetDims, onSave, renderMeta }: Props) {
+export function OpeningReviewList({ items, saving, source, onSetType, onToggleKeep, onSetDims, onSave, renderMeta }: Props) {
   const { isConnected, cmdEnabled, lastMeasurement, setOnMeasurement, requestMeasurement } = useBLE();
   const keptCount = items.filter(i => i.keep).length;
 
@@ -99,7 +101,9 @@ export function OpeningReviewList({ items, saving, onSetType, onToggleKeep, onSe
         {items.length} opening{items.length === 1 ? "" : "s"} captured
       </Text>
       <Text style={styles.reviewSub}>
-        Detected sizes are estimates — use Remeasure to confirm with the laser.
+        {source === "AR"
+          ? "Camera estimates are outside the 3 % limit — remeasure with the laser to mark them complete."
+          : "Detected sizes are estimates — use Remeasure to confirm with the laser."}
       </Text>
       <FlatList
         data={items}
@@ -114,12 +118,16 @@ export function OpeningReviewList({ items, saving, onSetType, onToggleKeep, onSe
             <View style={[styles.reviewCard, !item.keep && styles.reviewCardOff]}>
               <View style={styles.reviewCardTop}>
                 <View style={{ flex: 1 }}>
-                  <FieldSelect
-                    label="Type"
-                    value={item.type}
-                    options={["window", "door"]}
-                    onSelect={v => onSetType(item.id, v as OpeningType)}
-                  />
+                  {item.type === "wall" ? (
+                    <Text style={styles.wallLabel}>Wall</Text>
+                  ) : (
+                    <FieldSelect
+                      label="Type"
+                      value={item.type}
+                      options={["window", "door"]}
+                      onSelect={v => onSetType(item.id, v as OpeningType)}
+                    />
+                  )}
                 </View>
                 <TouchableOpacity onPress={() => onToggleKeep(item.id)} style={styles.keepBtn}>
                   <Text style={styles.keepBtnText}>{item.keep ? "Remove" : "Restore"}</Text>
@@ -129,7 +137,9 @@ export function OpeningReviewList({ items, saving, onSetType, onToggleKeep, onSe
               {!isRemeasuring ? (
                 <View style={styles.dimsRow}>
                   <Text style={styles.dims}>
-                    {item.widthMm} mm × {item.heightMm} mm{meta ? `  ·  ${meta}` : ""}
+                    {item.type === "wall" ? "L " : ""}{item.widthMm} mm × {item.type === "wall" ? "H " : ""}{item.heightMm} mm
+                    {meta ? `  ·  ${meta}` : ""}
+                    {!meetsTolerance(item, source) ? "  ·  estimate" : ""}
                   </Text>
                   {item.confirmedByLaser
                     ? <Text style={styles.confirmedTag}>✓ laser</Text>
@@ -237,6 +247,7 @@ const styles = StyleSheet.create({
   reviewCardTop: { flexDirection: "row", alignItems: "center" },
   keepBtn: { paddingHorizontal: 16 },
   keepBtnText: { color: "#C0392B", fontWeight: "600", fontSize: 13 },
+  wallLabel: { fontSize: 14, fontWeight: "600", color: "#374151", paddingVertical: 12, paddingHorizontal: 16 },
 
   dimsRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingBottom: 12, gap: 8 },
   dims: { flex: 1, fontSize: 13, color: "#6b7280" },

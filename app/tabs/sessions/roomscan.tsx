@@ -115,7 +115,7 @@ export default function RoomScanScreen() {
             )}
             {scanner.state !== "finishing" && (
               <Text style={styles.hint}>
-                Walk slowly around the room, keeping doors and windows in view.
+                Walk slowly around the room — walls, doors and windows are captured.
               </Text>
             )}
           </View>
@@ -124,6 +124,7 @@ export default function RoomScanScreen() {
         <OpeningReviewList
           items={items}
           saving={saving}
+          source="LiDAR"
           onSetType={setItemType}
           onToggleKeep={toggleKeep}
           onSetDims={setDims}

@@ -167,7 +167,9 @@ private class RoomCaptureDelegateProxy: NSObject, RoomCaptureSessionDelegate {
     }
   }
 
-  // Maps RoomPlan's detected doors/windows (meters) into the plain mm payload JS expects.
+  // Maps RoomPlan's detected walls/doors/windows (meters) into the plain mm payload
+  // JS expects. Walls come first so the review list reads top-down like the room;
+  // for a wall, dimensions.x is its length along the room and y its height.
   private static func extractOpenings(from room: CapturedRoom) -> [[String: Any]] {
     func toPayload(_ surface: CapturedRoom.Surface, type: String) -> [String: Any] {
       [
@@ -176,7 +178,8 @@ private class RoomCaptureDelegateProxy: NSObject, RoomCaptureSessionDelegate {
         "heightMm": Int((surface.dimensions.y * 1000).rounded()),
       ]
     }
-    return room.doors.map { toPayload($0, type: "door") }
+    return room.walls.map { toPayload($0, type: "wall") }
+      + room.doors.map { toPayload($0, type: "door") }
       + room.windows.map { toPayload($0, type: "window") }
   }
 }

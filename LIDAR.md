@@ -101,9 +101,9 @@ This is a **first-party native bridge straight onto Apple's system `RoomPlan` fr
   device, so this needs on-device re-verification before retrying.
 
 ### Not implemented
-- No point cloud / mesh / USDZ export — only door/window bounding dimensions are pulled
-  out of `CapturedRoom`; the rest of RoomPlan's geometry (walls, floor, full mesh) is
-  discarded.
+- No point cloud / mesh / USDZ export. Since 2026-09-24 **walls** are pulled out of
+  `CapturedRoom` too (as `gevel` elements with length + height) alongside doors and
+  windows; floors and the full mesh are still discarded.
 - No connection to the separate `floorplan.tsx` screen — that's a distinct manual/photo
   upload feature (`expo-image-picker`), unrelated to this RoomPlan path.
 - No Android/ARCore equivalent — explicitly out of scope (Kotlin stub comment).
@@ -176,6 +176,9 @@ camera-only path covers the large majority of inspectors' devices.
   opening on the live camera (2D markers drawn in JS), native returns mm, user picks
   Window/Door, repeat; then review list → save. If a detector model is bundled, an
   "Auto-detect" toggle shows proposed boxes that can be tapped to measure in one step.
+- **Tolerance (calc owner 2026-09-24): 3 % max.** LiDAR and laser-confirmed values meet it;
+  camera-only AR values save as `is_complete: false` ("estimate") until remeasured with the
+  laser — `meetsTolerance()` in `lib/saveOpenings.ts`.
 - `app/tabs/sessions/[id].tsx` — the 📡 zone button now routes to LiDAR when available,
   to camera measure otherwise, and offers a choice when both are supported.
 - `lib/saveOpenings.ts` — shared persistence (element + opening + 2 measurements) used

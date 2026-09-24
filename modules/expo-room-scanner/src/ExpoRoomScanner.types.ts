@@ -1,5 +1,6 @@
-export type DetectedOpeningType = "door" | "window";
+export type DetectedOpeningType = "door" | "window" | "wall";
 
+/** A surface RoomPlan detected. For walls widthMm is the wall's length along the room. */
 export interface DetectedOpening {
   type: DetectedOpeningType;
   widthMm: number;

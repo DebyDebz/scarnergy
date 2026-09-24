@@ -482,8 +482,19 @@ existing functionality and design intact, all gates green.
         ≥ 65 % → the element is a window. `classifyGlazedDoor()` in
         `@scarnergy/opname-calc/rules`, applied on save in `inspect.tsx`. Exactly
         65 % treated as window (owner said "less than … / more than"). Unit-tested.
-      · **Insulation λ**: moved behind Advanced with insulation type (kept for the
-        export). *Can λ be derived from a material lookup so the field can go?* → calc owner.
+      · **Insulation λ** ✅ resolved 2026-09-24: removed from the form. Rc =
+        (d_insulation_m / 0.045) + Rad with fixed λ; Rad per floor/wall/roof still
+        to be supplied; formula recorded as `rcFromInsulation()` in
+        `@scarnergy/opname-calc/rules`, not yet applied ("leave out for now").
+      · **Measurement tolerance** ✅ 2026-09-24: 3 % max. LiDAR/laser meet it; camera
+        AR items save as not-complete ("estimate") until laser-confirmed.
+      · **LiDAR creates walls** 2026-09-24: RoomPlan walls → `gevel` elements
+        (length + height) in the same save, per calc owner ("start the scans with
+        laser information"). Native change → needs a build; not device-verified.
+      · **Installation fields**: every column already in `building_elements` is now
+        on the form (added `notes`). Per-type fields (heat pump source/SCOP,
+        ventilation class, cooling) don't exist as columns → need a migration + the
+        field list.
       · **Auto height per floor**: first measured wall height prompts "use for the
         whole floor?" → `zones.ceiling_height_m` + fills empty wall heights; later
         walls prefill from it with a per-wall override. No calc question; product
