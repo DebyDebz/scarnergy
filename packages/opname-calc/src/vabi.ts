@@ -48,6 +48,8 @@ export interface VabiRekenzone {
 }
 
 export interface VabiElement {
+  /** Explicit rekenzone override; falls back to the zone's rekenzone when null. */
+  rekenzone_id?: string | null;
   id: string;
   name: string;
   element_type: string;
@@ -470,14 +472,15 @@ export function buildVabiXml(
       }
     }
 
-    // Elements land in their zone's rekenzone (element → zone → rekenzone,
-    // so an element can never straddle two rekenzones). A dakkapel is only
+    // An element lands in its own rekenzone when set (one air-conditioned
+    // room on an ordinary floor), otherwise in its zone's. A dakkapel is only
     // ever rendered nested under its parent dak, so it follows the parent
     // even if its own zone was assigned elsewhere.
     const elementsByRz = new Map<string, VabiElement[]>();
     const looseElements: VabiElement[] = [];
     for (const e of elements) {
-      const rzId = e.zone_id ? rzByZoneId.get(e.zone_id) : undefined;
+      const own = e.rekenzone_id && rzIds.has(e.rekenzone_id) ? e.rekenzone_id : undefined;
+      const rzId = own ?? (e.zone_id ? rzByZoneId.get(e.zone_id) : undefined);
       if (rzId) {
         (elementsByRz.get(rzId) ?? elementsByRz.set(rzId, []).get(rzId)!).push(e);
       } else {

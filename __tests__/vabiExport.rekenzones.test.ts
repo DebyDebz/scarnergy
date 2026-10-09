@@ -157,3 +157,17 @@ describe('VABI export — rekenzone grouping', () => {
     expect(xml.length).toBeGreaterThan(0);
   });
 });
+
+test("an element's own rekenzone_id overrides its floor's rekenzone", () => {
+  // g1 sits on z0 (rz-a) but is explicitly assigned to rz-b — e.g. the one
+  // room with air conditioning. It must render inside B, not A.
+  jest.useFakeTimers().setSystemTime(new Date('2026-05-20T12:00:00.000Z'));
+  try {
+    const moved = elements.map(e => (e.id === 'g1' ? { ...e, rekenzone_id: 'rz-b' } : e));
+    const xml = buildVabiXml(session, org, building, zonesFor('rz-a', 'rz-b'), moved, openings, rekenzones);
+    expect(blockOf(xml, 'B')).toContain('Voorgevel (Noord)');
+    expect(blockOf(xml, 'A')).not.toContain('Voorgevel (Noord)');
+  } finally {
+    jest.useRealTimers();
+  }
+});

@@ -136,6 +136,8 @@ export interface Zone {
   floor_plan_image_url: string | null;
   metadata?: Record<string, unknown> | null;
 }
+export type PhotoRole = 'situational' | 'detail' | 'crawlspace';
+
 export interface BuildingElement {
   id: string; zone_id: string; element_type: string; name: string;
   description: string | null;
@@ -161,6 +163,10 @@ export interface BuildingElement {
   dikte_vloer_onder_mm: number | null;
   dikte_muren_mm: number | null;
   photo_urls: string[];
+  /** photo path -> role (migration 037) */
+  photo_roles?: Record<string, PhotoRole> | null;
+  /** Explicit rekenzone override; null = inherit from the zone (migration 037) */
+  rekenzone_id?: string | null;
   is_complete: boolean; is_active: boolean; sort_order: number;
   notes: string | null;
   grid_x: number | null; grid_y: number | null;
@@ -204,7 +210,7 @@ export interface Opening {
 }
 export interface InspectionSession {
   id: string; org_id: string; building_id: string; inspector_id: string;
-  session_code: string; status: string; started_at: string; completed_at: string | null;
+  session_code: string; status: string; started_at: string; planned_at?: string | null; completed_at: string | null;
   total_measurements: number; anomaly_count: number; sync_status: string;
   notes: string | null;
   flow_stage: number;
@@ -227,6 +233,6 @@ export interface RecentMeasurement extends Measurement {
 }
 export interface BuildingFacadePhoto {
   id: string; org_id: string; building_id: string; session_id: string | null;
-  direction: 'voor' | 'achter' | 'links' | 'rechts';
+  direction: 'voor' | 'achter' | 'links' | 'rechts' | 'entree';
   photo_url: string; captured_at: string; created_at: string;
 }

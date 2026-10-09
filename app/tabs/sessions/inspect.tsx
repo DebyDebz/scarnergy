@@ -7,14 +7,14 @@ import {
 let ImagePicker: typeof import("expo-image-picker") | null = null;
 try { ImagePicker = require("expo-image-picker"); } catch { ImagePicker = null; }
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { supabase, BuildingElement, Opening } from "../../../lib/supabase";
+import { supabase, BuildingElement, Opening, PhotoRole, Rekenzone } from "../../../lib/supabase";
 import { uploadImageToStorage } from "../../../lib/uploadImage";
 import { syncToAppsheetIfLinked } from "../../../lib/appsheetSync";
 import { useBLE } from "../../../lib/BLEContext";
 import { useAuthStore } from "../../../store/authStore";
 import { GLMMeasurement } from "../../../hooks/useBLEDevice";
 import { nextSlotAfterFill } from "../../../hooks/bleDecoder";
-import { floorPerimeterM, glassRatio, classifyGlazedDoor, GLAZED_DOOR_WINDOW_RATIO } from "@scarnergy/opname-calc";
+import { floorPerimeterM, glassRatio, classifyGlazedDoor, GLAZED_DOOR_WINDOW_RATIO, roofSlopeLengthM } from "@scarnergy/opname-calc";
 import { elementTypeLabel } from "../../../lib/elementTypes";
 import {
   EMPTY_SWEEP, SweepState, addSweepSample,
@@ -35,6 +35,7 @@ type SlotKey = "length_mm" | "height_mm" | "width_mm";
 type SlotDef = { key: SlotKey; label: string; thickness?: boolean };
 type ElementWithZone = BuildingElement & {
   zone_name?: string; zone_scale_m?: number | null; zone_ceiling_m?: number | null; zone_floor_level?: number | null;
+  zone_rekenzone_id?: string | null; building_id?: string | null;
 };
 
 // ── Slot definitions — keys match the Dutch enum values stored in the DB ──────
@@ -349,6 +350,13 @@ export default function InspectScreen() {
   const [details,       setDetails]       = useState<Record<string, string | boolean | number>>({});
   // Opening record for transparant_deel elements
   const [openingId,     setOpeningId]     = useState<string | null>(null);
+  // Calculation zone (Nils, 2026-10-05): an element follows its floor's
+  // rekenzone unless the inspector picks another — fixed at review time
+  // instead of re-entering the wall. null = inherit.
+  const [rekenzones,    setRekenzones]    = useState<Rekenzone[]>([]);
+  const [rekenzoneId,   setRekenzoneId]   = useState<string | null>(null);
+  // Photo roles: situational shot vs close-up (glass, crawl-space hatch).
+  const [photoRoles,    setPhotoRoles]    = useState<Record<string, PhotoRole>>({});
   // Linked 'door_glass' openings row for a door with glass panel.
   const [glassOpeningId, setGlassOpeningId] = useState<string | null>(null);
   // NTA details accordion (collapsed by default — measurement flow first)
@@ -472,7 +480,7 @@ export default function InspectScreen() {
     Promise.resolve(
       supabase
         .from("building_elements")
-        .select("*, zones(name, floor_plan_scale_m, ceiling_height_m, floor_level)")
+        .select("*, zones(name, floor_plan_scale_m, ceiling_height_m, floor_level, rekenzone_id, building_id)")
         .eq("id", elementId)
         .single()
     ).then(({ data }) => {
@@ -484,7 +492,11 @@ export default function InspectScreen() {
             zone_scale_m: zoneData?.floor_plan_scale_m ?? null,
             zone_ceiling_m: zoneData?.ceiling_height_m ?? null,
             zone_floor_level: zoneData?.floor_level ?? null,
+            zone_rekenzone_id: zoneData?.rekenzone_id ?? null,
+            building_id: zoneData?.building_id ?? null,
           });
+          setRekenzoneId(rest.rekenzone_id ?? null);
+          setPhotoRoles((rest.photo_roles as Record<string, PhotoRole>) ?? {});
           setValues({
             ...(rest.length_mm != null ? { length_mm: (rest.length_mm / 1000).toFixed(3) } : {}),
             ...(rest.height_mm != null
@@ -531,6 +543,14 @@ export default function InspectScreen() {
       })
       .catch(() => setLoading(false));
   }, [elementId]);
+
+  // Rekenzones of this building, for the picker in the header.
+  useEffect(() => {
+    if (!element?.building_id) return;
+    supabase.from("rekenzones").select("*")
+      .eq("building_id", element.building_id).eq("is_active", true).order("sort_order")
+      .then(({ data }) => setRekenzones((data ?? []) as Rekenzone[]));
+  }, [element?.building_id]);
 
   // Load existing opening record for transparant_deel elements
   useEffect(() => {
@@ -611,7 +631,7 @@ export default function InspectScreen() {
   const glassRatioPct = glazedDoorRatio == null ? null : Math.round(glazedDoorRatio * 100);
 
   // Capture a photo from camera or library and upload to Supabase Storage
-  const capturePhoto = useCallback(async (source: "camera" | "library") => {
+  const capturePhoto = useCallback(async (source: "camera" | "library", role: PhotoRole = "situational") => {
     if (!ImagePicker) {
       Alert.alert("Not available", "Photo capture requires a dev build.");
       return;
@@ -647,18 +667,15 @@ export default function InspectScreen() {
         "inspection-photos", storagePath, localUri, "image/jpeg", { upsert: false },
       );
 
-      if (upErr) {
-        // Keep the local URI in photo_urls as fallback
-        await supabase.from("building_elements")
-          .update({ photo_urls: [...(element.photo_urls ?? []), localUri] })
-          .eq("id", element.id);
-      } else {
-        // Replace the local URI with the storage path in DB
-        await supabase.from("building_elements")
-          .update({ photo_urls: [...(element.photo_urls ?? []), storagePath] })
-          .eq("id", element.id);
+      const storedPath = upErr ? localUri : storagePath;   // local URI kept as fallback
+      const nextRoles = { ...(element.photo_roles ?? {}), ...photoRoles, [storedPath]: role };
+      await supabase.from("building_elements")
+        .update({ photo_urls: [...(element.photo_urls ?? []), storedPath], photo_roles: nextRoles })
+        .eq("id", element.id);
+      setPhotoRoles(nextRoles);
+      if (!upErr) {
         // Update local element state so subsequent saves are correct
-        setElement(prev => prev ? { ...prev, photo_urls: [...(prev.photo_urls ?? []), storagePath] } : prev);
+        setElement(prev => prev ? { ...prev, photo_urls: [...(prev.photo_urls ?? []), storagePath], photo_roles: nextRoles } : prev);
 
         // Best-effort push to AppSheet if this element's building is linked
         // (no-op otherwise). Never blocks or reverts the save above on failure.
@@ -670,7 +687,7 @@ export default function InspectScreen() {
     } finally {
       setUploadingPhoto(false);
     }
-  }, [element, profile]);
+  }, [element, profile, photoRoles]);
 
   // Wire GLM measurement — fires when the physical trigger is pressed (GATT mode).
   // Trigger-press packets always fill the slot; continuous heartbeats only fill when
@@ -797,6 +814,11 @@ export default function InspectScreen() {
           ?.find(o => typeof o !== 'string' && o.value === details.installation_type);
         if (opt && typeof opt !== 'string') update.name = opt.label;
       }
+
+      // Store the rekenzone only when it differs from the floor's; null keeps
+      // "follow the floor" so re-grouping floors later still moves the element.
+      const rzOverride = rekenzoneId && rekenzoneId !== element.zone_rekenzone_id ? rekenzoneId : null;
+      if ((element.rekenzone_id ?? null) !== rzOverride) update.rekenzone_id = rzOverride;
 
       if (Object.keys(update).length > 0) {
         const { error } = await supabase
@@ -974,8 +996,25 @@ export default function InspectScreen() {
         <View style={styles.headerText}>
           <Text style={styles.elementName}>{element.name}</Text>
           {element.zone_name
-            ? <Text style={styles.zoneName}>Zone: {element.zone_name}</Text>
+            ? <Text style={styles.zoneName}>Floor: {element.zone_name}</Text>
             : null}
+          {rekenzones.length > 0 && (
+            <TouchableOpacity
+              onPress={() => Alert.alert(
+                "Calculation zone",
+                "Which calculation zone does this element belong to?",
+                [
+                  ...rekenzones.map(rz => ({ text: rz.name, onPress: () => setRekenzoneId(rz.id) })),
+                  { text: "Cancel", style: "cancel" as const },
+                ],
+              )}
+            >
+              <Text style={styles.zoneName}>
+                Calc zone: {rekenzones.find(rz => rz.id === (rekenzoneId ?? element.zone_rekenzone_id))?.name ?? "—"}
+                {rekenzoneId && rekenzoneId !== element.zone_rekenzone_id ? " (overridden)" : ""} ›
+              </Text>
+            </TouchableOpacity>
+          )}
         </View>
         <View style={styles.typeBadge}>
           <Text style={styles.typeText}>{elementTypeLabel(element.element_type).toUpperCase()}</Text>
@@ -1081,6 +1120,17 @@ export default function InspectScreen() {
                 </TouchableOpacity>
               </View>
 
+              {element.element_type === 'dak' && slot.key === 'length_mm' && !isFilled && (() => {
+                const slope = roofSlopeLengthM(
+                  parseFloat(String(details.nokhoogte_m ?? '')), parseFloat(String(details.tilt_deg ?? '')));
+                return slope == null ? null : (
+                  <TouchableOpacity onPress={() => { setValues(prev => ({ ...prev, length_mm: slope.toFixed(3) })); setActiveSlotSync(null); }}>
+                    <Text style={styles.planHintText}>
+                      ⟋ From ridge height + angle ≈ {slope.toFixed(2)} m — tap to use
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })()}
               {slot.key === 'height_mm' && heightFromZone && (
                 <Text style={styles.planHintText}>
                   ↕ From floor height {Number(element.zone_ceiling_m).toFixed(2)} m — measure to override for this wall
@@ -1203,21 +1253,43 @@ export default function InspectScreen() {
         {/* ── Photos ── */}
         <View style={styles.photoSection}>
           <Text style={styles.photoLabel}>PHOTOS</Text>
+          <Text style={styles.photoHint}>
+            {element.element_type === 'vloer' && details.description === 'Kruipruimte'
+              ? "Open the hatch and photograph the crawl space to show its insulation."
+              : element.element_type === 'transparant_deel'
+                ? "One situational shot of the window in the room, plus a close-up of the glass."
+                : "A situational shot proves you were here; add a close-up for details."}
+          </Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photoScroll} contentContainerStyle={styles.photoRow}>
-            {photoUris.map((uri, i) => (
-              <Image key={`${uri}-${i}`} source={{ uri }} style={styles.photoThumb} />
-            ))}
+            {photoUris.map((uri, i) => {
+              const path = (element.photo_urls ?? [])[i] ?? uri;
+              const role = photoRoles[path] ?? photoRoles[uri];
+              return (
+                <View key={`${uri}-${i}`}>
+                  <Image source={{ uri }} style={styles.photoThumb} />
+                  {role && role !== 'situational' && (
+                    <Text style={styles.photoRoleTag}>{role === 'detail' ? 'close-up' : 'crawl space'}</Text>
+                  )}
+                </View>
+              );
+            })}
             <TouchableOpacity
               style={styles.photoAddBtn}
-              onPress={() => Alert.alert(
-                "Add Photo",
-                "Choose source",
-                [
-                  { text: "Camera",  onPress: () => capturePhoto("camera")  },
-                  { text: "Library", onPress: () => capturePhoto("library") },
-                  { text: "Cancel",  style: "cancel" },
-                ]
-              )}
+              onPress={() => {
+                const isCrawl = element.element_type === 'vloer' && details.description === 'Kruipruimte';
+                Alert.alert(
+                  "Add Photo",
+                  "What is this photo?",
+                  [
+                    { text: "Situational (camera)",  onPress: () => capturePhoto("camera", "situational") },
+                    isCrawl
+                      ? { text: "Crawl space (camera)", onPress: () => capturePhoto("camera", "crawlspace") }
+                      : { text: "Close-up / detail (camera)", onPress: () => capturePhoto("camera", "detail") },
+                    { text: "From library", onPress: () => capturePhoto("library", "situational") },
+                    { text: "Cancel",  style: "cancel" },
+                  ]
+                );
+              }}
               disabled={uploadingPhoto}
             >
               <Text style={styles.photoAddBtnText}>{uploadingPhoto ? "…" : "+"}</Text>
@@ -1446,6 +1518,8 @@ const styles = StyleSheet.create({
   photoScroll:    { flexGrow: 0 },
   photoRow:       { gap: 8, alignItems: "center" },
   photoThumb:     { width: 72, height: 72, borderRadius: 8, backgroundColor: "#EEF2F7" },
+  photoHint:      { fontSize: 12, color: "#6b7280", marginBottom: 8 },
+  photoRoleTag:   { fontSize: 10, color: "#1E3A5F", fontWeight: "600", textAlign: "center", marginTop: 2 },
   photoAddBtn:    { width: 72, height: 72, borderRadius: 8, borderWidth: 2,
                     borderColor: "#DDE", borderStyle: "dashed",
                     alignItems: "center", justifyContent: "center",

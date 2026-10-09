@@ -80,12 +80,25 @@ export function FloorPlanReview({ zone, elements, onMeasure }: Props) {
   const scaleM = zone.floor_plan_scale_m ?? null;
   // floor_plan_scale_m = metres across the full canvas width.
   const cellM  = scaleM != null ? (CELL_PX / CANVAS) * scaleM : null;
-  const placed = elements.filter(e => e.grid_x != null && e.grid_y != null);
+  // Openings are a layer under the wall, not peers of it (Nils, 2026-10-05):
+  // the overview shows walls, roofs, floors and installations; doors and
+  // windows are reachable from their wall and can be toggled on.
+  const [showOpenings, setShowOpenings] = useState(false);
+  const placed = elements.filter(e => e.grid_x != null && e.grid_y != null
+    && (showOpenings || e.element_type !== 'transparant_deel'));
+  const openingCount = elements.filter(e => e.element_type === 'transparant_deel' && e.grid_x != null).length;
 
   return (
     <View style={styles.wrap}>
       <Text style={styles.title}>Floor Plan — {zone.name}</Text>
       <Text style={styles.sub}>Tap an element on the plan to measure it. Captured values are shown in place.</Text>
+      {openingCount > 0 && (
+        <TouchableOpacity onPress={() => setShowOpenings(v => !v)} style={styles.toggle}>
+          <Text style={styles.toggleTxt}>
+            {showOpenings ? "Hide" : "Show"} {openingCount} window{openingCount === 1 ? "" : "s"}/door{openingCount === 1 ? "" : "s"} on the plan
+          </Text>
+        </TouchableOpacity>
+      )}
 
       <View style={[styles.canvas, { width: CANVAS, height: CANVAS }]}>
         {/* Grid clipped to the footprint outline (full grid when not yet traced) */}
@@ -145,6 +158,8 @@ export function FloorPlanReview({ zone, elements, onMeasure }: Props) {
 }
 
 const styles = StyleSheet.create({
+  toggle:    { alignSelf: 'flex-start', marginBottom: 8 },
+  toggleTxt: { fontSize: 12, color: '#2E86C1', fontWeight: '600' },
   wrap:       { backgroundColor: '#fff', borderRadius: 12, padding: 14, marginBottom: 12,
                 elevation: 1, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 4 },
   title:      { fontSize: 15, fontWeight: '700', color: PRIMARY },

@@ -574,6 +574,11 @@ export default function SessionDetailScreen() {
                   {(item.photo_urls?.length ?? 0) > 0 && (
                     <Text style={styles.dim}>📷 {item.photo_urls.length}</Text>
                   )}
+                  {item.rekenzone_id && rekenzones.some(r => r.id === item.rekenzone_id) && (
+                    <Text style={[styles.dim, { color: "#6C3483" }]}>
+                      ⊕ {rekenzones.find(r => r.id === item.rekenzone_id)!.name}
+                    </Text>
+                  )}
                 </View>
                 <Text style={styles.inspectCta}>Inspect →</Text>
               </TouchableOpacity>
