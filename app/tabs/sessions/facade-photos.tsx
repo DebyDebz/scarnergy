@@ -13,13 +13,15 @@ import { ResponsiveContainer } from '../../../components/ResponsiveContainer';
 let ImagePicker: typeof import('expo-image-picker') | null = null;
 try { ImagePicker = require('expo-image-picker'); } catch { ImagePicker = null; }
 
-type Direction = 'voor' | 'achter' | 'links' | 'rechts';
+type Direction = 'voor' | 'achter' | 'links' | 'rechts' | 'entree';
 
 const DIRECTIONS: { key: Direction; label: string; labelNL: string }[] = [
   { key: 'voor',   label: 'Front',  labelNL: 'Voorgevel'   },
   { key: 'achter', label: 'Rear',   labelNL: 'Achtergevel' },
   { key: 'links',  label: 'Left',   labelNL: 'Linkergevel' },
   { key: 'rechts', label: 'Right',  labelNL: 'Rechtergevel'},
+  // Proof of presence: the entrance with the house number visible.
+  { key: 'entree', label: 'Entrance + house no.', labelNL: 'Entree' },
 ];
 
 export default function FacadePhotosScreen() {
@@ -28,7 +30,7 @@ export default function FacadePhotosScreen() {
   const router = useRouter();
 
   const [photos, setPhotos]   = useState<Record<Direction, BuildingFacadePhoto | null>>({
-    voor: null, achter: null, links: null, rechts: null,
+    voor: null, achter: null, links: null, rechts: null, entree: null,
   });
   const [loading,   setLoading]   = useState(true);
   const [uploading, setUploading] = useState<Direction | null>(null);
@@ -42,7 +44,7 @@ export default function FacadePhotosScreen() {
       .eq('building_id', buildingId)
       .then(({ data }) => {
         const map: Record<Direction, BuildingFacadePhoto | null> = {
-          voor: null, achter: null, links: null, rechts: null,
+          voor: null, achter: null, links: null, rechts: null, entree: null,
         };
         for (const p of data ?? []) map[p.direction as Direction] = p as BuildingFacadePhoto;
         setPhotos(map);
@@ -153,7 +155,7 @@ export default function FacadePhotosScreen() {
   }, []);
 
   const [signedUrls, setSignedUrls] = useState<Record<Direction, string | null>>({
-    voor: null, achter: null, links: null, rechts: null,
+    voor: null, achter: null, links: null, rechts: null, entree: null,
   });
 
   useEffect(() => {
@@ -163,7 +165,7 @@ export default function FacadePhotosScreen() {
         return [key, url] as [Direction, string | null];
       })
     ).then(pairs => {
-      const map: Record<Direction, string | null> = { voor: null, achter: null, links: null, rechts: null };
+      const map: Record<Direction, string | null> = { voor: null, achter: null, links: null, rechts: null, entree: null };
       for (const [key, url] of pairs) map[key] = url;
       setSignedUrls(map);
     });

@@ -75,6 +75,8 @@ export default function SessionsScreen() {
       .from("session_summary")
       .select("*")
       .eq("org_id", profile.org_id)
+      // Planned visit first (Nils: "I was there last Tuesday"), then start time.
+      .order("planned_at", { ascending: false, nullsFirst: false })
       .order("started_at", { ascending: false });
     if (buildingId) query = query.eq("building_id", buildingId);
     query.then(({ data, error }) => {
@@ -207,10 +209,11 @@ export default function SessionsScreen() {
             }
             renderItem={({ item }) => {
               const color = STATUS_COLOR[item.status] ?? "#888";
-              const startedDate = new Date(item.started_at);
+              const startedDate = new Date(item.planned_at ?? item.started_at);
               const startedLabel = Number.isNaN(startedDate.getTime())
                 ? "—"
-                : startedDate.toLocaleDateString("nl-NL");
+                : startedDate.toLocaleDateString("nl-NL")
+                  + (item.planned_at ? " " + startedDate.toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" }) : "");
               const measurementsLabel = source === "appsheet" ? "—" : item.total_measurements;
               return (
                 <TouchableOpacity

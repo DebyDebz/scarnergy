@@ -70,3 +70,14 @@ export function rcFromInsulation(thicknessMm: number, radM2KPerW: number): numbe
  * so AR values are estimates until confirmed with the laser.
  */
 export const MAX_MEASUREMENT_VARIATION = 0.03;
+
+/**
+ * Sloped-roof length from inside the attic (Nils, 2026-10-05): measure the
+ * roof angle with the laser against the roof and the vertical height from
+ * floor level to the ridge, then length = height / sin(angle). Returns null
+ * for a flat or vertical angle or missing input.
+ */
+export function roofSlopeLengthM(ridgeHeightM: number | null | undefined, tiltDeg: number | null | undefined): number | null {
+  if (ridgeHeightM == null || tiltDeg == null || !(ridgeHeightM > 0) || !(tiltDeg > 0) || !(tiltDeg < 90)) return null;
+  return Math.round((ridgeHeightM / Math.sin((tiltDeg * Math.PI) / 180)) * 100) / 100;
+}

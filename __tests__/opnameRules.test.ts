@@ -1,6 +1,6 @@
 import {
   floorPerimeterM, glassRatio, classifyGlazedDoor, GLAZED_DOOR_WINDOW_RATIO,
-  rcFromInsulation, INSULATION_LAMBDA_W_PER_MK, MAX_MEASUREMENT_VARIATION,
+  rcFromInsulation, INSULATION_LAMBDA_W_PER_MK, MAX_MEASUREMENT_VARIATION, roofSlopeLengthM,
 } from "../packages/opname-calc/src/rules";
 
 describe("floorPerimeterM — internal circumference on the envelope boundary", () => {
@@ -50,4 +50,16 @@ describe("insulation Rc formula (recorded, not yet applied)", () => {
 
 test("3 % is the maximum measurement variation", () => {
   expect(MAX_MEASUREMENT_VARIATION).toBe(0.03);
+});
+
+describe("roofSlopeLengthM — slope from ridge height and angle", () => {
+  test("height / sin(angle), 2 decimals", () => {
+    expect(roofSlopeLengthM(2.5, 30)).toBe(5);
+    expect(roofSlopeLengthM(3, 45)).toBeCloseTo(4.24, 2);
+  });
+  test("null for flat, vertical or missing", () => {
+    expect(roofSlopeLengthM(2.5, 0)).toBeNull();
+    expect(roofSlopeLengthM(2.5, 90)).toBeNull();
+    expect(roofSlopeLengthM(null, 30)).toBeNull();
+  });
 });
