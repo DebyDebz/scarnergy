@@ -502,6 +502,19 @@ existing functionality and design intact, all gates green.
       · **PDF report**: `lib/sessionReport.ts` + expo-print/expo-sharing (native —
         needs a new build). No photos embedded yet.
       mobile `tsc` clean · 136 tests green · not device-verified.
+- [ ] **Flow walkthrough (Nils, 2026-10-05)** — built 2026-10-09, migration 037
+      **not yet applied** to any environment:
+      · element-level `rekenzone_id` override (+ picker in inspect, export honours
+        it) ✅ · openings hidden on the plan overview by default ✅ · entrance/house-no.
+        photo ✅ · photo roles situational/detail/crawl-space ✅ · sessions ordered by
+        `planned_at` ✅ (no mobile input yet) · roof slope from ridge height + angle ✅
+      · **Open:** floor plans per floor with rekenzones spanning floors is the
+        model Nils described; zones==floors already, so the remaining gap is a
+        plan-level "which rekenzone is this wall in" colouring. Installations
+        placed on the plan exist (ElementPlacer). The flow wizard's stage order
+        should be checked against "top-down or bottom-up, not set in stone".
+      · Nils to share the AppSheet reference video before the data-model pass.
+      mobile `tsc` clean · calc `tsc` clean · 146 tests green · not device-verified.
 - [ ] **On-device verification pass** (only human-executable): forgot-password
       flow end-to-end on the phone, profile edits, role-gated tabs, results
       screen render, VABI export **share** — the last unticked Phase 1 gate line.
