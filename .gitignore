@@ -19,6 +19,9 @@ yarn-debug.log*
 yarn-error.log*
 .DS_Store
 .claude/settings.local.json
+# Claude Code session worktrees live inside the repo; .git/info/exclude hides them
+# from git but EAS only reads .gitignore, so builds would upload a second app copy.
+.claude/worktrees/
 supabase/.temp/
 supabase/.branches/
 supabase/snippets/
