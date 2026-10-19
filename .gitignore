@@ -34,3 +34,9 @@ cloudflared-linux-amd64.deb
 
 # Playwright MCP debug output
 .playwright-mcp/
+
+# Downloaded build artifacts (.ipa/.apk). Ignored so they're never committed
+# and never uploaded inside the next EAS build archive.
+/builds/
+*.ipa
+*.apk
