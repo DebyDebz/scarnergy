@@ -1,4 +1,4 @@
-import { DEMO_TOUR_STEPS, clampTourStep, isDemoSession } from "../lib/demoTour";
+import { DEMO_TOUR_STEPS, clampTourStep, isDemoSession, autoplayDwellMs } from "../lib/demoTour";
 
 describe("demo walkthrough steps", () => {
   test("ids are unique and every step has text", () => {
@@ -41,4 +41,16 @@ test("isDemoSession only for inspections tagged as demo", () => {
   expect(isDemoSession({ demo: "" })).toBe(false);
   expect(isDemoSession(null)).toBe(false);
   expect(isDemoSession(undefined)).toBe(false);
+});
+
+test("auto-play dwell stays readable but brisk: 7–15 s per step, ~2–4 min overall", () => {
+  const all = DEMO_TOUR_STEPS.map((_, i) => autoplayDwellMs(i));
+  for (const ms of all) {
+    expect(ms).toBeGreaterThanOrEqual(7000);
+    expect(ms).toBeLessThanOrEqual(15000);
+  }
+  const total = all.reduce((a, b) => a + b, 0);
+  expect(total).toBeGreaterThan(120000);
+  expect(total).toBeLessThan(240000);
+  expect(autoplayDwellMs(999)).toBe(autoplayDwellMs(DEMO_TOUR_STEPS.length - 1));
 });

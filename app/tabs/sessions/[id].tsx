@@ -424,14 +424,24 @@ export default function SessionDetailScreen() {
 
       {/* ── Demo walkthrough offer (demo inspections only) ── */}
       {isDemoSession(session.metadata) && !(demoTour.active && demoTour.sessionId === session.id) && (
-        <TouchableOpacity
-          style={styles.demoCard}
-          onPress={() => demoTour.start(session.id, session.building_id)}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.demoCardTitle}>▶  Start the demo walkthrough</Text>
-          <Text style={styles.demoCardSub}>{DEMO_TOUR_STEPS.length} steps through what's new, taking you to each screen.</Text>
-        </TouchableOpacity>
+        <View style={styles.demoCard}>
+          <Text style={styles.demoCardTitle}>Demo walkthrough</Text>
+          <Text style={styles.demoCardSub}>{DEMO_TOUR_STEPS.length} steps through what's new, on each screen.</Text>
+          <View style={styles.demoCardButtons}>
+            <TouchableOpacity
+              style={[styles.demoBtn, styles.demoBtnGhost]}
+              onPress={() => demoTour.start(session.id, session.building_id, false)}
+            >
+              <Text style={styles.demoBtnGhostText}>Step by step</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.demoBtn, styles.demoBtnPrimary]}
+              onPress={() => demoTour.start(session.id, session.building_id, true)}
+            >
+              <Text style={styles.demoBtnPrimaryText}>▶  Auto-play</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       )}
 
       {/* ── BLE bar ── */}
@@ -795,6 +805,12 @@ const styles = StyleSheet.create({
                          backgroundColor: "#EBF5FB", borderWidth: 1, borderColor: "#AED6F1" },
   demoCardTitle:       { fontSize: 15, fontWeight: "700", color: "#1E3A5F" },
   demoCardSub:         { fontSize: 12, color: "#4b5563", marginTop: 2 },
+  demoCardButtons:     { flexDirection: "row", gap: 8, marginTop: 10 },
+  demoBtn:             { flex: 1, borderRadius: 10, paddingVertical: 10, alignItems: "center" },
+  demoBtnGhost:        { borderWidth: 1, borderColor: "#2E86C1", backgroundColor: "#fff" },
+  demoBtnGhostText:    { color: "#1E3A5F", fontWeight: "700", fontSize: 14 },
+  demoBtnPrimary:      { backgroundColor: "#2E86C1" },
+  demoBtnPrimaryText:  { color: "#fff", fontWeight: "700", fontSize: 14 },
 
   facadeBtn:           { backgroundColor: '#f0f9ff', borderRadius: 12, padding: 14,
                          alignItems: 'center', borderWidth: 1.5, borderColor: '#0284c7', marginBottom: 4 },

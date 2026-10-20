@@ -141,3 +141,14 @@ export function isDemoSession(metadata: unknown): boolean {
   const demo = (metadata as { demo?: unknown } | null | undefined)?.demo;
   return typeof demo === "string" && demo.length > 0;
 }
+
+/**
+ * How long auto-play stays on a step: a base for the screen to load plus
+ * reading time for the title and "you should see" text, kept between 7 s and 15 s.
+ * The 16 steps play in roughly three minutes.
+ */
+export function autoplayDwellMs(step: number): number {
+  const s = DEMO_TOUR_STEPS[clampTourStep(step)];
+  const chars = s.title.length + s.see.length;
+  return Math.min(15000, Math.max(7000, 5000 + chars * 45));
+}

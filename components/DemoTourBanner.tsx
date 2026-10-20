@@ -1,10 +1,10 @@
 import { useEffect, useRef } from "react";
-import { View, Text, TouchableOpacity, StyleSheet, Alert } from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet, Alert, Animated, Easing } from "react-native";
 import { useRouter, usePathname } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../lib/supabase";
 import { useDemoTour } from "../store/demoTourStore";
-import { DEMO_TOUR_STEPS, DemoTourTarget } from "../lib/demoTour";
+import { DEMO_TOUR_STEPS, DemoTourTarget, autoplayDwellMs } from "../lib/demoTour";
 
 const NAVY = "#1E3A5F";
 const ACCENT = "#2E86C1";
@@ -14,8 +14,11 @@ const ACCENT = "#2E86C1";
 // Each step first shows its instructions. "Try it" shrinks the card to a slim
 // bar so the screen underneath is usable; tapping the bar brings the
 // instructions back. Next / Back move to the step's screen automatically.
+// Auto-play shows a compact card with a progress bar and moves on by itself,
+// so a viewer can watch the whole flow without touching anything.
 export function DemoTourBanner() {
-  const { active, step, minimized, sessionId, buildingId, go, setMinimized, exit } = useDemoTour();
+  const { active, step, minimized, autoplay, sessionId, buildingId, go, setMinimized, setAutoplay, exit } = useDemoTour();
+  const progress = useRef(new Animated.Value(0)).current;
   const router = useRouter();
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
@@ -71,6 +74,22 @@ export function DemoTourBanner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, step, sessionId]);
 
+  // Auto-play: fill the progress bar over the step's dwell time, then advance.
+  // Stops on the last step rather than ending, so the final card stays up.
+  useEffect(() => {
+    if (!active || !autoplay || minimized) return;
+    const dwell = autoplayDwellMs(step);
+    progress.setValue(0);
+    const anim = Animated.timing(progress, { toValue: 1, duration: dwell, easing: Easing.linear, useNativeDriver: false });
+    anim.start();
+    const t = setTimeout(() => {
+      if (step >= DEMO_TOUR_STEPS.length - 1) setAutoplay(false);
+      else go(step + 1);
+    }, dwell);
+    return () => { clearTimeout(t); anim.stop(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, autoplay, minimized, step]);
+
   if (!active || !sessionId) return null;
 
   const s = DEMO_TOUR_STEPS[step];
@@ -79,6 +98,30 @@ export function DemoTourBanner() {
   const next = () => (last ? exit() : go(step + 1));
   // Sit above the tab bar (~50 pt) plus the home indicator.
   const bottom = insets.bottom + 58;
+
+  if (autoplay && !minimized) {
+    const width = progress.interpolate({ inputRange: [0, 1], outputRange: ["0%", "100%"] });
+    return (
+      <View pointerEvents="box-none" style={[styles.wrap, { bottom }]}>
+        <View style={styles.card}>
+          <View style={styles.topRow}>
+            <Text style={styles.eyebrow}>AUTO-PLAY · STEP {step + 1} OF {total}</Text>
+            <TouchableOpacity onPress={() => setAutoplay(false)} hitSlop={10} accessibilityLabel="Pause auto-play">
+              <Text style={styles.link}>Pause ❚❚</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={exit} hitSlop={10} accessibilityLabel="End walkthrough">
+              <Text style={styles.link}>End ✕</Text>
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.title}>{s.title}</Text>
+          <Text style={styles.seeText}>{s.see}</Text>
+          <View style={styles.track}>
+            <Animated.View style={[styles.fill, { width }]} />
+          </View>
+        </View>
+      </View>
+    );
+  }
 
   if (minimized) {
     return (
@@ -104,7 +147,12 @@ export function DemoTourBanner() {
     <View pointerEvents="box-none" style={[styles.wrap, { bottom }]}>
       <View style={styles.card}>
         <View style={styles.topRow}>
-          <Text style={styles.eyebrow}>DEMO WALKTHROUGH · STEP {step + 1} OF {total}</Text>
+          <Text style={styles.eyebrow}>STEP {step + 1} OF {total}</Text>
+          {!last && (
+            <TouchableOpacity onPress={() => setAutoplay(true)} hitSlop={10} accessibilityLabel="Resume auto-play">
+              <Text style={styles.link}>Play ▶</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity onPress={() => setMinimized(true)} hitSlop={10} accessibilityLabel="Hide instructions">
             <Text style={styles.link}>Hide ▾</Text>
           </TouchableOpacity>
@@ -174,4 +222,6 @@ const styles = StyleSheet.create({
   barTitle: { fontSize: 14, fontWeight: "700", color: "#fff", marginTop: 1 },
   barNext: { backgroundColor: ACCENT, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 9 },
   barNextText: { color: "#fff", fontWeight: "700", fontSize: 14 },
+  track: { height: 4, borderRadius: 2, backgroundColor: "#E2E8F0", overflow: "hidden", marginTop: 4 },
+  fill: { height: 4, backgroundColor: ACCENT },
 });
