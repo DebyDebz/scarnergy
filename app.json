@@ -8,7 +8,7 @@
     "newArchEnabled": false,
     "ios": {
       "bundleIdentifier": "com.krontivaafrica.scarnergyapp",
-      "buildNumber": "43",
+      "buildNumber": "44",
       "supportsTablet": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
