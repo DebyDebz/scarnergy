@@ -108,7 +108,10 @@ export function DemoTourBanner() {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const tick = async () => {
-      const done = await isStepDone(check, buildingId, startedAt).catch(() => false);
+      // "Wizard finished" = the setup handed over to the inspection screen.
+      const done = check === "wizard_finished"
+        ? pathRef.current === `/tabs/sessions/${sessionId}`
+        : await isStepDone(check, buildingId, startedAt).catch(() => false);
       if (cancelled) return;
       if (done) {
         setStepDone(true);

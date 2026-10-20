@@ -29,10 +29,9 @@ export async function isStepDone(check: DemoTourCheck, buildingId: string, start
       return (data ?? []).some(z =>
         !!z.floor_plan_image_url || (Array.isArray(z.floor_plan_points) && z.floor_plan_points.length >= 3));
     }
-    case "elements_placed": {
-      const { data } = await elements().gte("created_at", since).limit(1);
-      return (data?.length ?? 0) > 0;
-    }
+    case "wizard_finished":
+      // Screen-based; the guide decides this from the current route, not the database.
+      return false;
     case "wall_measured": {
       const { data } = await elements().eq("element_type", "gevel")
         .not("length_mm", "is", null).not("height_mm", "is", null).gte("updated_at", since).limit(1);

@@ -15,7 +15,7 @@ export type DemoTourTarget =
  * passes, the guide moves on by itself.
  */
 export type DemoTourCheck =
-  | "facade_entrance" | "floor_plan" | "elements_placed"
+  | "facade_entrance" | "floor_plan" | "wizard_finished"
   | "wall_measured" | "window_measured" | "closeup_photo" | "installation";
 
 export interface DemoTourStep {
@@ -172,7 +172,10 @@ export const SCRATCH_TOUR_STEPS: DemoTourStep[] = [
     body: "Name the floor and set the scale. Then drag walls, windows and the boiler onto the plan and save.",
     see: "You land on the inspection, with everything you placed listed.",
     target: { kind: "flow" },
-    doneWhen: "elements_placed",
+    // Not a database check: saving the plan already creates draft walls, so
+    // "elements exist" passes too early. Done = the wizard finished and you
+    // landed on the inspection (checked by the guide from the current screen).
+    doneWhen: "wizard_finished",
   },
   {
     id: "scratch-wall",
