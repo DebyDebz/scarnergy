@@ -1,71 +1,101 @@
-import { useState } from "react";
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from "react-native";
+import { useEffect, useRef } from "react";
+import { View, Text, TouchableOpacity, StyleSheet, Alert } from "react-native";
 import { useRouter, usePathname } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../lib/supabase";
 import { useDemoTour } from "../store/demoTourStore";
-import { DEMO_TOUR_STEPS } from "../lib/demoTour";
+import { DEMO_TOUR_STEPS, DemoTourTarget } from "../lib/demoTour";
 
 const NAVY = "#1E3A5F";
 const ACCENT = "#2E86C1";
 
-// Floating guide card for the demo-house walkthrough. Mounted once in the root
-// layout; renders nothing unless a tour was started from a demo inspection.
+// Floating guide for the demo-house walkthrough, mounted once in the root layout.
+//
+// Each step first shows its instructions. "Try it" shrinks the card to a slim
+// bar so the screen underneath is usable; tapping the bar brings the
+// instructions back. Next / Back move to the step's screen automatically.
 export function DemoTourBanner() {
   const { active, step, minimized, sessionId, buildingId, go, setMinimized, exit } = useDemoTour();
   const router = useRouter();
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
-  const [busy, setBusy] = useState(false);
+
+  // Latest pathname for the navigation effect without re-running it on every route change.
+  const pathRef = useRef(pathname);
+  pathRef.current = pathname;
+  const lastNavigated = useRef<number | null>(null);
+
+  const navigateTo = async (t: DemoTourTarget) => {
+    if (!sessionId) return;
+    if (t.kind === "session") {
+      router.navigate({
+        pathname: "/tabs/sessions/[id]",
+        params: { id: sessionId, ...(t.zone ? { zone: t.zone } : {}) },
+      });
+      return;
+    }
+    if (t.kind === "facade") {
+      router.push({ pathname: "/tabs/sessions/facade-photos", params: { sessionId, buildingId: buildingId ?? "" } });
+      return;
+    }
+    const { data, error } = await supabase
+      .from("building_elements")
+      .select("id, zones!inner(building_id)")
+      .eq("name", t.name)
+      .eq("zones.building_id", buildingId ?? "")
+      .eq("is_active", true)
+      .limit(1)
+      .maybeSingle();
+    if (error || !data) {
+      Alert.alert("Not found", `"${t.name}" isn't in this house any more.`);
+      return;
+    }
+    const dest = { pathname: "/tabs/sessions/inspect" as const, params: { elementId: (data as { id: string }).id, sessionId } };
+    // Swap element screens instead of stacking one per step.
+    if (pathRef.current.includes("/inspect")) router.replace(dest);
+    else router.push(dest);
+  };
+
+  // Move to each step's screen when the step changes. The first step is the
+  // inspection itself, where the tour was started, so it doesn't navigate.
+  useEffect(() => {
+    if (!active || !sessionId) {
+      lastNavigated.current = null;
+      return;
+    }
+    if (lastNavigated.current === step) return;
+    const isStart = lastNavigated.current === null && step === 0;
+    lastNavigated.current = step;
+    if (!isStart) void navigateTo(DEMO_TOUR_STEPS[step].target);
+    // navigateTo reads refs/props at call time; re-running on its identity would re-navigate.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, step, sessionId]);
 
   if (!active || !sessionId) return null;
 
   const s = DEMO_TOUR_STEPS[step];
   const total = DEMO_TOUR_STEPS.length;
   const last = step === total - 1;
+  const next = () => (last ? exit() : go(step + 1));
   // Sit above the tab bar (~50 pt) plus the home indicator.
   const bottom = insets.bottom + 58;
-
-  const takeMeThere = async () => {
-    const t = s.target;
-    setBusy(true);
-    try {
-      if (t.kind === "session") {
-        router.navigate({
-          pathname: "/tabs/sessions/[id]",
-          params: { id: sessionId, ...(t.zone ? { zone: t.zone } : {}) },
-        });
-      } else if (t.kind === "facade") {
-        router.push({ pathname: "/tabs/sessions/facade-photos", params: { sessionId, buildingId: buildingId ?? "" } });
-      } else {
-        const { data, error } = await supabase
-          .from("building_elements")
-          .select("id, zones!inner(building_id)")
-          .eq("name", t.name)
-          .eq("zones.building_id", buildingId ?? "")
-          .eq("is_active", true)
-          .limit(1)
-          .maybeSingle();
-        if (error || !data) {
-          Alert.alert("Not found", `"${t.name}" isn't in this house any more.`);
-          return;
-        }
-        const dest = { pathname: "/tabs/sessions/inspect" as const, params: { elementId: (data as { id: string }).id, sessionId } };
-        // Swap element screens instead of stacking one per step.
-        if (pathname.includes("/inspect")) router.replace(dest);
-        else router.push(dest);
-      }
-    } finally {
-      setBusy(false);
-    }
-  };
 
   if (minimized) {
     return (
       <View pointerEvents="box-none" style={[styles.wrap, { bottom }]}>
-        <TouchableOpacity style={styles.pill} onPress={() => setMinimized(false)} accessibilityLabel="Show walkthrough">
-          <Text style={styles.pillText}>Walkthrough · {step + 1}/{total} ▴</Text>
-        </TouchableOpacity>
+        <View style={styles.bar}>
+          <TouchableOpacity
+            style={styles.barInfo}
+            onPress={() => setMinimized(false)}
+            accessibilityLabel="Show instructions"
+          >
+            <Text style={styles.barEyebrow}>STEP {step + 1} OF {total} · TAP FOR INSTRUCTIONS ▴</Text>
+            <Text style={styles.barTitle} numberOfLines={1}>{s.title}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.barNext} onPress={next}>
+            <Text style={styles.barNextText}>{last ? "Finish" : "Next ›"}</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   }
@@ -75,15 +105,16 @@ export function DemoTourBanner() {
       <View style={styles.card}>
         <View style={styles.topRow}>
           <Text style={styles.eyebrow}>DEMO WALKTHROUGH · STEP {step + 1} OF {total}</Text>
-          <TouchableOpacity onPress={() => setMinimized(true)} hitSlop={10} accessibilityLabel="Minimise walkthrough">
-            <Text style={styles.icon}>▾</Text>
+          <TouchableOpacity onPress={() => setMinimized(true)} hitSlop={10} accessibilityLabel="Hide instructions">
+            <Text style={styles.link}>Hide ▾</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={exit} hitSlop={10} accessibilityLabel="End walkthrough">
-            <Text style={styles.icon}>✕</Text>
+            <Text style={styles.link}>End ✕</Text>
           </TouchableOpacity>
         </View>
 
         <Text style={styles.title}>{s.title}</Text>
+        <Text style={styles.label}>WHAT TO DO</Text>
         <Text style={styles.body}>{s.body}</Text>
         <View style={styles.see}>
           <Text style={styles.seeLabel}>YOU SHOULD SEE</Text>
@@ -98,13 +129,10 @@ export function DemoTourBanner() {
           >
             <Text style={styles.btnGhostText}>Back</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.btn, styles.btnPrimary]} onPress={takeMeThere} disabled={busy}>
-            {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnPrimaryText}>Take me there</Text>}
+          <TouchableOpacity style={[styles.btn, styles.btnPrimary]} onPress={() => setMinimized(true)}>
+            <Text style={styles.btnPrimaryText}>Try it</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.btn, styles.btnGhost]}
-            onPress={() => (last ? exit() : go(step + 1))}
-          >
+          <TouchableOpacity style={[styles.btn, styles.btnGhost]} onPress={next}>
             <Text style={styles.btnGhostText}>{last ? "Finish" : "Next"}</Text>
           </TouchableOpacity>
         </View>
@@ -122,8 +150,9 @@ const styles = StyleSheet.create({
   },
   topRow: { flexDirection: "row", alignItems: "center", gap: 14 },
   eyebrow: { flex: 1, fontSize: 10, fontWeight: "700", letterSpacing: 0.8, color: "#6b7280" },
-  icon: { fontSize: 16, color: "#6b7280", fontWeight: "600" },
+  link: { fontSize: 13, color: ACCENT, fontWeight: "700" },
   title: { fontSize: 16, fontWeight: "700", color: NAVY },
+  label: { fontSize: 9, fontWeight: "700", letterSpacing: 0.8, color: "#6b7280", marginTop: 2 },
   body: { fontSize: 13, lineHeight: 18, color: "#374151" },
   see: { backgroundColor: "#EEF4FA", borderRadius: 8, padding: 8, gap: 2 },
   seeLabel: { fontSize: 9, fontWeight: "700", letterSpacing: 0.8, color: NAVY },
@@ -135,9 +164,14 @@ const styles = StyleSheet.create({
   btnGhost: { borderWidth: 1, borderColor: "#cbd5e1" },
   btnGhostText: { color: NAVY, fontWeight: "600", fontSize: 14 },
   btnDisabled: { opacity: 0.35 },
-  pill: {
-    backgroundColor: NAVY, borderRadius: 18, paddingHorizontal: 14, paddingVertical: 8,
-    shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 8, shadowOffset: { width: 0, height: 3 },
+  bar: {
+    width: "100%", maxWidth: 560, flexDirection: "row", alignItems: "center", gap: 10,
+    backgroundColor: NAVY, borderRadius: 12, paddingVertical: 8, paddingLeft: 14, paddingRight: 8,
+    shadowColor: "#000", shadowOpacity: 0.22, shadowRadius: 8, shadowOffset: { width: 0, height: 3 },
   },
-  pillText: { color: "#fff", fontWeight: "700", fontSize: 13 },
+  barInfo: { flex: 1, minWidth: 0 },
+  barEyebrow: { fontSize: 9, fontWeight: "700", letterSpacing: 0.6, color: "#A9C4E4" },
+  barTitle: { fontSize: 14, fontWeight: "700", color: "#fff", marginTop: 1 },
+  barNext: { backgroundColor: ACCENT, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 9 },
+  barNextText: { color: "#fff", fontWeight: "700", fontSize: 14 },
 });

@@ -1,7 +1,7 @@
 // Guided walkthrough for the Demostraat 1 demo house (seeded 2026-10-15, every
 // row tagged metadata.demo). It only offers itself on inspections carrying that
 // tag, so real inspections never see it. Element and floor names below must
-// match the seeded rows — "Take me there" looks them up by name.
+// match the seeded rows — Next / Back open each step's screen by looking them up by name.
 
 export type DemoTourTarget =
   | { kind: "session"; zone?: string }   // the inspection screen, optionally on one floor
@@ -20,7 +20,7 @@ export const DEMO_TOUR_STEPS: DemoTourStep[] = [
   {
     id: "start",
     title: "Start from the building",
-    body: "This inspection was opened from the address, the way you arrive on site.",
+    body: "This inspection was opened from the address, the way you arrive on site. Tap Try it to use the screen; tap the bar at the bottom to see these instructions again. Next takes you to each screen.",
     see: "Demostraat 1 as the title, with the inspection number and date underneath.",
     target: { kind: "session" },
   },
