@@ -5,8 +5,18 @@
 
 export type DemoTourTarget =
   | { kind: "session"; zone?: string }   // the inspection screen, optionally on one floor
+  | { kind: "flow" }                     // the setup wizard (floor plan, zones, scale, placing elements)
   | { kind: "facade" }                   // the building's facade photos
   | { kind: "element"; name: string };   // one element's inspect screen
+
+/**
+ * Things the from-scratch guide can see the user has actually done, checked
+ * against the database (lib/demoTourChecks.ts). When the current step's check
+ * passes, the guide moves on by itself.
+ */
+export type DemoTourCheck =
+  | "facade_entrance" | "floor_plan" | "elements_placed"
+  | "wall_measured" | "window_measured" | "closeup_photo" | "installation";
 
 export interface DemoTourStep {
   id: string;
@@ -14,7 +24,12 @@ export interface DemoTourStep {
   body: string;
   see: string;
   target: DemoTourTarget;
+  /** From-scratch guide only: advance automatically once this is done. */
+  doneWhen?: DemoTourCheck;
 }
+
+/** "house" tours the seeded Demostraat 1; "scratch" guides a real inspection of the bare Demostraat 2. */
+export type DemoTourKind = "house" | "scratch";
 
 export const DEMO_TOUR_STEPS: DemoTourStep[] = [
   {
@@ -131,15 +146,100 @@ export const DEMO_TOUR_STEPS: DemoTourStep[] = [
   },
 ];
 
-export function clampTourStep(step: number): number {
+// From scratch on the bare Demostraat 2: the user does every task for real and
+// the guide moves on when it sees the result. Order follows Nils's route:
+// proof of visit outside first, then the plan, then measuring room by room.
+export const SCRATCH_TOUR_STEPS: DemoTourStep[] = [
+  {
+    id: "scratch-facade",
+    title: "Proof of visit first",
+    body: "Photograph the front of the house, then the entrance with the house number visible.",
+    see: "Five photo slots. As soon as the entrance photo is saved, the guide moves on by itself.",
+    target: { kind: "facade" },
+    doneWhen: "facade_entrance",
+  },
+  {
+    id: "scratch-plan",
+    title: "Draw the floor plan",
+    body: "Back in the setup, photograph an existing floor plan or draw the outline by hand, then save it.",
+    see: "The outline of the floor. Once it's saved, the guide moves on.",
+    target: { kind: "flow" },
+    doneWhen: "floor_plan",
+  },
+  {
+    id: "scratch-place",
+    title: "Place walls, windows and installations",
+    body: "Name the floor and set the scale. Then drag walls, windows and the boiler onto the plan and save.",
+    see: "You land on the inspection, with everything you placed listed.",
+    target: { kind: "flow" },
+    doneWhen: "elements_placed",
+  },
+  {
+    id: "scratch-wall",
+    title: "Measure a wall with the laser",
+    body: "Connect the laser. Open a wall, press the trigger for the length, then for the height, and save.",
+    see: "Each reading jumps to the next field by itself. The wall turns complete.",
+    target: { kind: "session" },
+    doneWhen: "wall_measured",
+  },
+  {
+    id: "scratch-window",
+    title: "Measure a window",
+    body: "Open a window, measure its width and height, and save.",
+    see: "The window's size on its card in the list.",
+    target: { kind: "session" },
+    doneWhen: "window_measured",
+  },
+  {
+    id: "scratch-photo",
+    title: "Photograph the window",
+    body: "On the window, tap + under Photos. Take a situational shot, then a close-up of the glass.",
+    see: "The close-up gets a tag on its thumbnail.",
+    target: { kind: "session" },
+    doneWhen: "closeup_photo",
+  },
+  {
+    id: "scratch-installation",
+    title: "Record the boiler",
+    body: "Open the installation you placed, or tap + Add installation. Choose its type, fill in brand and model, and save.",
+    see: "The installation shows as complete.",
+    target: { kind: "session" },
+    doneWhen: "installation",
+  },
+  {
+    id: "scratch-report",
+    title: "Create the report",
+    body: "Scroll to the bottom of the inspection and tap PDF report.",
+    see: "A PDF with everything you just captured.",
+    target: { kind: "session" },
+  },
+];
+
+export const DEMO_TOURS: Record<DemoTourKind, DemoTourStep[]> = {
+  house: DEMO_TOUR_STEPS,
+  scratch: SCRATCH_TOUR_STEPS,
+};
+
+export function clampTourStep(step: number, steps: DemoTourStep[] = DEMO_TOUR_STEPS): number {
   if (!Number.isFinite(step)) return 0;
-  return Math.min(Math.max(Math.trunc(step), 0), DEMO_TOUR_STEPS.length - 1);
+  return Math.min(Math.max(Math.trunc(step), 0), steps.length - 1);
 }
 
 /** True for inspections created for a demo (metadata.demo is a non-empty string). */
 export function isDemoSession(metadata: unknown): boolean {
   const demo = (metadata as { demo?: unknown } | null | undefined)?.demo;
   return typeof demo === "string" && demo.length > 0;
+}
+
+/** Which tour an inspection gets: null for real inspections. */
+export function demoTourKind(metadata: unknown): DemoTourKind | null {
+  if (!isDemoSession(metadata)) return null;
+  return (metadata as { tour?: unknown }).tour === "scratch" ? "scratch" : "house";
+}
+
+/** True for the bare demo address, where starting an inspection starts the guided setup. */
+export function isBlankDemoBuilding(metadata: unknown): boolean {
+  return isDemoSession(metadata) && (metadata as { blank?: unknown }).blank === true;
 }
 
 /**

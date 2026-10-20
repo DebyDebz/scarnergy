@@ -1,4 +1,7 @@
-import { DEMO_TOUR_STEPS, clampTourStep, isDemoSession, autoplayDwellMs } from "../lib/demoTour";
+import {
+  DEMO_TOUR_STEPS, SCRATCH_TOUR_STEPS, clampTourStep, isDemoSession, autoplayDwellMs,
+  demoTourKind, isBlankDemoBuilding,
+} from "../lib/demoTour";
 
 describe("demo walkthrough steps", () => {
   test("ids are unique and every step has text", () => {
@@ -53,4 +56,29 @@ test("auto-play dwell stays readable but brisk: 7–15 s per step, ~2–4 min ov
   expect(total).toBeGreaterThan(120000);
   expect(total).toBeLessThan(240000);
   expect(autoplayDwellMs(999)).toBe(autoplayDwellMs(DEMO_TOUR_STEPS.length - 1));
+});
+
+describe("from-scratch guide (bare Demostraat 2)", () => {
+  test("every step but the last waits for a real result; ids unique; no seeded names", () => {
+    const ids = SCRATCH_TOUR_STEPS.map(s => s.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    SCRATCH_TOUR_STEPS.slice(0, -1).forEach(s => expect(s.doneWhen).toBeDefined());
+    expect(SCRATCH_TOUR_STEPS[SCRATCH_TOUR_STEPS.length - 1].doneWhen).toBeUndefined();
+    // The house is empty, so no step may target a seeded element by name.
+    SCRATCH_TOUR_STEPS.forEach(s => expect(s.target.kind).not.toBe("element"));
+  });
+
+  test("clamp uses the tour's own length", () => {
+    expect(clampTourStep(999, SCRATCH_TOUR_STEPS)).toBe(SCRATCH_TOUR_STEPS.length - 1);
+  });
+
+  test("tour kind and blank-building detection", () => {
+    expect(demoTourKind({ demo: "nils-2026-10" })).toBe("house");
+    expect(demoTourKind({ demo: "nils-2026-10", tour: "scratch" })).toBe("scratch");
+    expect(demoTourKind({ tour: "scratch" })).toBeNull();
+    expect(demoTourKind(null)).toBeNull();
+    expect(isBlankDemoBuilding({ demo: "nils-2026-10", blank: true })).toBe(true);
+    expect(isBlankDemoBuilding({ demo: "nils-2026-10" })).toBe(false);
+    expect(isBlankDemoBuilding({ blank: true })).toBe(false);
+  });
 });

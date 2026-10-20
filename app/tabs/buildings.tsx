@@ -10,6 +10,8 @@ import { useAuthStore } from "../../store/authStore";
 import { useDataSourceStore } from "../../store/dataSourceStore";
 import { fetchAppsheetBuildings, materializeAppsheetBuilding, AppsheetProxyError } from "../../lib/appsheetProxy";
 import { useIsTablet } from "../../hooks/useResponsive";
+import { isBlankDemoBuilding } from "../../lib/demoTour";
+import { useDemoTour } from "../../store/demoTourStore";
 
 export default function BuildingsScreen() {
   const isTablet = useIsTablet();
@@ -83,12 +85,19 @@ export default function BuildingsScreen() {
       }
     }
 
+    // The bare demo address (Demostraat 2) starts a guided from-scratch setup:
+    // the inspection is tagged so it can be resumed, and the guide opens on
+    // top of the setup wizard.
+    const buildingMeta = (building as { metadata?: Record<string, unknown> | null }).metadata ?? null;
+    const guided = source !== "appsheet" && isBlankDemoBuilding(buildingMeta);
+
     const { data, error } = await supabase
       .from("inspection_sessions")
       .insert({
         org_id:       profile.org_id,
         building_id:  buildingId,
         inspector_id: profile.id,
+        ...(guided ? { metadata: { demo: buildingMeta!.demo, tour: "scratch" } } : {}),
       })
       .select()
       .single();
@@ -96,6 +105,7 @@ export default function BuildingsScreen() {
     setStarting(null);
     if (error) { Alert.alert("Could not start inspection", error.message || "Server error — please try again."); return; }
     router.push(`/tabs/sessions/flow?id=${data.id}&buildingId=${buildingId}`);
+    if (guided) useDemoTour.getState().start(data.id, buildingId, false, "scratch");
   }, [profile, router, source]);
 
   if (loading && buildings.length === 0) return <ActivityIndicator style={styles.loader} color="#1E3A5F" />;

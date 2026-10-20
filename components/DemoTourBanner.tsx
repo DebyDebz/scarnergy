@@ -1,10 +1,11 @@
-import { useEffect, useRef } from "react";
-import { View, Text, TouchableOpacity, StyleSheet, Alert, Animated, Easing } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { View, Text, TouchableOpacity, StyleSheet, Alert, Animated, Easing, ActivityIndicator } from "react-native";
 import { useRouter, usePathname } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../lib/supabase";
 import { useDemoTour } from "../store/demoTourStore";
-import { DEMO_TOUR_STEPS, DemoTourTarget, autoplayDwellMs } from "../lib/demoTour";
+import { DEMO_TOURS, DemoTourTarget, autoplayDwellMs } from "../lib/demoTour";
+import { isStepDone } from "../lib/demoTourChecks";
 
 const NAVY = "#1E3A5F";
 const ACCENT = "#2E86C1";
@@ -16,9 +17,13 @@ const ACCENT = "#2E86C1";
 // instructions back. Next / Back move to the step's screen automatically.
 // Auto-play shows a compact card with a progress bar and moves on by itself,
 // so a viewer can watch the whole flow without touching anything.
+// The from-scratch guide (bare Demostraat 2) has no timer: the user does each
+// task for real and the guide moves on when it sees the result in the database.
 export function DemoTourBanner() {
-  const { active, step, minimized, autoplay, sessionId, buildingId, go, setMinimized, setAutoplay, exit } = useDemoTour();
+  const { active, tour, step, minimized, autoplay, startedAt, sessionId, buildingId, go, setMinimized, setAutoplay, exit } = useDemoTour();
+  const steps = DEMO_TOURS[tour];
   const progress = useRef(new Animated.Value(0)).current;
+  const [stepDone, setStepDone] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
@@ -35,6 +40,10 @@ export function DemoTourBanner() {
         pathname: "/tabs/sessions/[id]",
         params: { id: sessionId, ...(t.zone ? { zone: t.zone } : {}) },
       });
+      return;
+    }
+    if (t.kind === "flow") {
+      router.navigate({ pathname: "/tabs/sessions/flow", params: { id: sessionId, buildingId: buildingId ?? "" } });
       return;
     }
     if (t.kind === "facade") {
@@ -59,17 +68,17 @@ export function DemoTourBanner() {
     else router.push(dest);
   };
 
-  // Move to each step's screen when the step changes. The first step is the
-  // inspection itself, where the tour was started, so it doesn't navigate.
+  // Move to each step's screen when the step changes. The house tour starts on
+  // the inspection itself, so its first step doesn't navigate.
   useEffect(() => {
     if (!active || !sessionId) {
       lastNavigated.current = null;
       return;
     }
     if (lastNavigated.current === step) return;
-    const isStart = lastNavigated.current === null && step === 0;
+    const isStart = lastNavigated.current === null && step === 0 && tour === "house";
     lastNavigated.current = step;
-    if (!isStart) void navigateTo(DEMO_TOUR_STEPS[step].target);
+    if (!isStart) void navigateTo(steps[step].target);
     // navigateTo reads refs/props at call time; re-running on its identity would re-navigate.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, step, sessionId]);
@@ -83,17 +92,41 @@ export function DemoTourBanner() {
     const anim = Animated.timing(progress, { toValue: 1, duration: dwell, easing: Easing.linear, useNativeDriver: false });
     anim.start();
     const t = setTimeout(() => {
-      if (step >= DEMO_TOUR_STEPS.length - 1) setAutoplay(false);
+      if (step >= steps.length - 1) setAutoplay(false);
       else go(step + 1);
     }, dwell);
     return () => { clearTimeout(t); anim.stop(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, autoplay, minimized, step]);
 
+  // From scratch: check every 3 s whether the user has done this step; when
+  // they have, show "Done" briefly and move on (which opens the next screen).
+  useEffect(() => {
+    setStepDone(false);
+    const check = steps[step]?.doneWhen;
+    if (!active || tour !== "scratch" || !check || !buildingId || !startedAt) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const tick = async () => {
+      const done = await isStepDone(check, buildingId, startedAt).catch(() => false);
+      if (cancelled) return;
+      if (done) {
+        setStepDone(true);
+        timer = setTimeout(() => { if (!cancelled) go(step + 1); }, 1500);
+        return;
+      }
+      timer = setTimeout(tick, 3000);
+    };
+    void tick();
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, tour, step, buildingId, startedAt]);
+
   if (!active || !sessionId) return null;
 
-  const s = DEMO_TOUR_STEPS[step];
-  const total = DEMO_TOUR_STEPS.length;
+  const s = steps[step];
+  const total = steps.length;
+  const watching = tour === "scratch" && !!s.doneWhen;
   const last = step === total - 1;
   const next = () => (last ? exit() : go(step + 1));
   // Sit above the tab bar (~50 pt) plus the home indicator.
@@ -123,6 +156,20 @@ export function DemoTourBanner() {
     );
   }
 
+  // From scratch, minimised: a small bubble in the corner so the wizard's own
+  // buttons stay reachable. Tap it for the instructions.
+  if (minimized && tour === "scratch") {
+    return (
+      <View pointerEvents="box-none" style={[styles.wrap, styles.wrapRight, { bottom }]}>
+        <TouchableOpacity style={styles.bubble} onPress={() => setMinimized(false)} accessibilityLabel="Show instructions">
+          {stepDone
+            ? <Text style={styles.bubbleText}>✓ Done</Text>
+            : <Text style={styles.bubbleText}>{step + 1}/{total} · ?</Text>}
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   if (minimized) {
     return (
       <View pointerEvents="box-none" style={[styles.wrap, { bottom }]}>
@@ -148,7 +195,7 @@ export function DemoTourBanner() {
       <View style={styles.card}>
         <View style={styles.topRow}>
           <Text style={styles.eyebrow}>STEP {step + 1} OF {total}</Text>
-          {!last && (
+          {!last && tour === "house" && (
             <TouchableOpacity onPress={() => setAutoplay(true)} hitSlop={10} accessibilityLabel="Resume auto-play">
               <Text style={styles.link}>Play ▶</Text>
             </TouchableOpacity>
@@ -168,6 +215,16 @@ export function DemoTourBanner() {
           <Text style={styles.seeLabel}>YOU SHOULD SEE</Text>
           <Text style={styles.seeText}>{s.see}</Text>
         </View>
+        {watching && (
+          <View style={styles.status}>
+            {stepDone
+              ? <Text style={styles.statusDone}>✓ Done, moving on…</Text>
+              : <>
+                  <ActivityIndicator size="small" color={ACCENT} />
+                  <Text style={styles.statusText}>Waiting for you to do this. The guide moves on by itself.</Text>
+                </>}
+          </View>
+        )}
 
         <View style={styles.buttons}>
           <TouchableOpacity
@@ -191,6 +248,15 @@ export function DemoTourBanner() {
 
 const styles = StyleSheet.create({
   wrap: { position: "absolute", left: 10, right: 10, alignItems: "center", zIndex: 1000, elevation: 20 },
+  wrapRight: { left: undefined, right: 12, alignItems: "flex-end" },
+  bubble: {
+    backgroundColor: NAVY, borderRadius: 22, paddingHorizontal: 14, paddingVertical: 10,
+    shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 8, shadowOffset: { width: 0, height: 3 },
+  },
+  bubbleText: { color: "#fff", fontWeight: "700", fontSize: 13 },
+  status: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 2 },
+  statusText: { flex: 1, fontSize: 12, color: "#4b5563" },
+  statusDone: { fontSize: 13, fontWeight: "700", color: "#1E8449" },
   card: {
     width: "100%", maxWidth: 560, backgroundColor: "#fff", borderRadius: 14, padding: 14, gap: 6,
     borderWidth: 1, borderColor: "#D6E2EF",

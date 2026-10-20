@@ -13,7 +13,7 @@ import { syncToAppsheetIfLinked } from "../../../lib/appsheetSync";
 import { useRoomScanner } from "../../../hooks/useRoomScanner";
 import { useAuthStore } from "../../../store/authStore";
 import { useDemoTour } from "../../../store/demoTourStore";
-import { DEMO_TOUR_STEPS, isDemoSession } from "../../../lib/demoTour";
+import { DEMO_TOUR_STEPS, demoTourKind } from "../../../lib/demoTour";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import { buildSessionReportHtml } from "../../../lib/sessionReport";
@@ -423,7 +423,21 @@ export default function SessionDetailScreen() {
       </View>
 
       {/* ── Demo walkthrough offer (demo inspections only) ── */}
-      {isDemoSession(session.metadata) && !(demoTour.active && demoTour.sessionId === session.id) && (
+      {demoTourKind(session.metadata) === "scratch" && !(demoTour.active && demoTour.sessionId === session.id) && (
+        <View style={styles.demoCard}>
+          <Text style={styles.demoCardTitle}>Guided setup</Text>
+          <Text style={styles.demoCardSub}>Do each task for real; the guide moves on when it sees it's done.</Text>
+          <View style={styles.demoCardButtons}>
+            <TouchableOpacity
+              style={[styles.demoBtn, styles.demoBtnPrimary]}
+              onPress={() => demoTour.start(session.id, session.building_id, false, "scratch")}
+            >
+              <Text style={styles.demoBtnPrimaryText}>▶  Resume guided setup</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+      {demoTourKind(session.metadata) === "house" && !(demoTour.active && demoTour.sessionId === session.id) && (
         <View style={styles.demoCard}>
           <Text style={styles.demoCardTitle}>Demo walkthrough</Text>
           <Text style={styles.demoCardSub}>{DEMO_TOUR_STEPS.length} steps through what's new, on each screen.</Text>
