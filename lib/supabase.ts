@@ -214,6 +214,7 @@ export interface InspectionSession {
   total_measurements: number; anomaly_count: number; sync_status: string;
   notes: string | null;
   flow_stage: number;
+  metadata?: Record<string, unknown> | null;
 }
 export interface Measurement {
   id: string; session_id: string; device_id: string | null; value_mm: number;

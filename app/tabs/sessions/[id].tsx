@@ -12,6 +12,8 @@ import { FloorPlanReview } from "../../../components/inspection/FloorPlanReview"
 import { syncToAppsheetIfLinked } from "../../../lib/appsheetSync";
 import { useRoomScanner } from "../../../hooks/useRoomScanner";
 import { useAuthStore } from "../../../store/authStore";
+import { useDemoTour } from "../../../store/demoTourStore";
+import { DEMO_TOUR_STEPS, isDemoSession } from "../../../lib/demoTour";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import { buildSessionReportHtml } from "../../../lib/sessionReport";
@@ -21,7 +23,9 @@ import { CONTENT_MAX_WIDTH } from "../../../constants/layout";
 
 export default function SessionDetailScreen() {
   const isTablet = useIsTablet();
-  const { id: sessionId } = useLocalSearchParams<{ id: string }>();
+  // `zone` (a floor name) lets the demo walkthrough open the inspection on a given floor.
+  const { id: sessionId, zone: zoneParam } = useLocalSearchParams<{ id: string; zone?: string }>();
+  const demoTour = useDemoTour();
   const router     = useRouter();
   const navigation = useNavigation();
   const { profile } = useAuthStore();
@@ -95,6 +99,13 @@ export default function SessionDetailScreen() {
       if (grouped.length > 0) setSelectedZoneId(grouped[0].id);
     });
   }, [session?.building_id]);
+
+  // Walkthrough "Take me there" to a floor: select it once the floors are loaded.
+  useEffect(() => {
+    if (!zoneParam) return;
+    const z = zones.find(zz => zz.name === zoneParam);
+    if (z) setSelectedZoneId(z.id);
+  }, [zoneParam, zones]);
 
   // Whether this building has an AppSheet source to sync to — drives the
   // "Retry AppSheet Sync" button below (only meaningful for AppSheet-linked
@@ -410,6 +421,18 @@ export default function SessionDetailScreen() {
           </Text>
         )}
       </View>
+
+      {/* ── Demo walkthrough offer (demo inspections only) ── */}
+      {isDemoSession(session.metadata) && !(demoTour.active && demoTour.sessionId === session.id) && (
+        <TouchableOpacity
+          style={styles.demoCard}
+          onPress={() => demoTour.start(session.id, session.building_id)}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.demoCardTitle}>▶  Start the demo walkthrough</Text>
+          <Text style={styles.demoCardSub}>{DEMO_TOUR_STEPS.length} steps through what's new, taking you to each screen.</Text>
+        </TouchableOpacity>
+      )}
 
       {/* ── BLE bar ── */}
       <View style={styles.bleBar}>
@@ -768,6 +791,10 @@ const styles = StyleSheet.create({
   exportBtn:           { backgroundColor: "#2E86C1", borderRadius: 12, padding: 16, alignItems: "center" },
   exportBtnText:       { color: "#fff", fontSize: 15, fontWeight: "700" },
   exportRow:           { flexDirection: "row", gap: 10 },
+  demoCard:            { marginHorizontal: 16, marginTop: 10, padding: 12, borderRadius: 12,
+                         backgroundColor: "#EBF5FB", borderWidth: 1, borderColor: "#AED6F1" },
+  demoCardTitle:       { fontSize: 15, fontWeight: "700", color: "#1E3A5F" },
+  demoCardSub:         { fontSize: 12, color: "#4b5563", marginTop: 2 },
 
   facadeBtn:           { backgroundColor: '#f0f9ff', borderRadius: 12, padding: 14,
                          alignItems: 'center', borderWidth: 1.5, borderColor: '#0284c7', marginBottom: 4 },

@@ -29,6 +29,7 @@ import { supabaseConfigError } from "../lib/supabase";
 import { BLEProvider } from "../lib/BLEContext";
 import { installErrorHandlers, reportError } from "../lib/errorLog";
 import { ErrorOverlay } from "../components/ui/ErrorOverlay";
+import { DemoTourBanner } from "../components/DemoTourBanner";
 import { initSentry, captureException, wrapWithSentry } from "../lib/sentry";
 
 // Initialize the native crash reporter first (it installs its own global
@@ -119,6 +120,7 @@ function RootLayout() {
       <ErrorBoundary>
         <BLEProvider>
           <Slot />
+          <DemoTourBanner />
         </BLEProvider>
         <ErrorOverlay />
       </ErrorBoundary>

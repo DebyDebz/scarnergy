@@ -34,7 +34,11 @@
           }
         }
       ]
-    }
+    },
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/.claude/"
+    ]
   },
   "dependencies": {
     "@expo/cli": "^54.0.23",
