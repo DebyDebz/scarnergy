@@ -45,6 +45,17 @@
         "EXPO_PUBLIC_AI_SERVER_URL": "http://212.69.86.210:8001",
         "EXPO_PUBLIC_WEB_APP_URL": "https://scanergy.krontiva.africa"
       }
+    },
+    "simulator": {
+      "extends": "production",
+      "distribution": "internal",
+      "autoIncrement": false,
+      "ios": {
+        "simulator": true
+      },
+      "env": {
+        "SENTRY_DISABLE_AUTO_UPLOAD": "true"
+      }
     }
   },
   "submit": {
