@@ -11,6 +11,7 @@ import { useDataSourceStore } from "../../store/dataSourceStore";
 import { fetchAppsheetBuildings, materializeAppsheetBuilding, AppsheetProxyError } from "../../lib/appsheetProxy";
 import { useIsTablet } from "../../hooks/useResponsive";
 import { isBlankDemoBuilding } from "../../lib/demoTour";
+import { AddBuildingModal } from "../../components/AddBuildingModal";
 import { useDemoTour } from "../../store/demoTourStore";
 
 export default function BuildingsScreen() {
@@ -23,6 +24,7 @@ export default function BuildingsScreen() {
   const [loading,    setLoading]    = useState(true);
   const [error,      setError]      = useState<string | null>(null);
   const [starting,   setStarting]   = useState<string | null>(null);
+  const [adding,     setAdding]     = useState(false);
   const didInitialLoad = useRef(false);
 
   const load = useCallback(() => {
@@ -108,6 +110,16 @@ export default function BuildingsScreen() {
     if (guided) useDemoTour.getState().start(data.id, buildingId, false, "scratch");
   }, [profile, router, source]);
 
+  // A new building from the app: reload the list, then optionally go straight
+  // into an inspection — the inspector is usually standing at the address.
+  const onBuildingCreated = useCallback(async (buildingId: string, startNow: boolean) => {
+    setAdding(false);
+    load();
+    if (!startNow) return;
+    const { data } = await supabase.from("building_summary").select("*").eq("id", buildingId).single();
+    if (data) startInspection(data as BuildingSummary);
+  }, [load, startInspection]);
+
   if (loading && buildings.length === 0) return <ActivityIndicator style={styles.loader} color="#1E3A5F" />;
   if (error)   return (
     <View style={styles.errorWrap}>
@@ -120,6 +132,14 @@ export default function BuildingsScreen() {
 
   return (
     <View style={styles.container}>
+      {/* Adding buildings writes native rows, so it's only offered in Scanergy mode. */}
+      {source !== "appsheet" && (
+        <TouchableOpacity style={styles.addBtn} onPress={() => setAdding(true)} activeOpacity={0.8}>
+          <Ionicons name="add-circle-outline" size={18} color="#fff" />
+          <Text style={styles.addBtnText}>Add building</Text>
+        </TouchableOpacity>
+      )}
+      <AddBuildingModal visible={adding} onClose={() => setAdding(false)} onCreated={onBuildingCreated} />
       <FlatList
         key={numColumns}
         numColumns={numColumns}
@@ -250,6 +270,10 @@ function energyLabelStyle(label: string) {
 
 const styles = StyleSheet.create({
   container:       { flex: 1, backgroundColor: "#F5F7FA" },
+  addBtn:          { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
+                     marginHorizontal: 16, marginTop: 12, paddingVertical: 12, borderRadius: 12,
+                     backgroundColor: "#1E3A5F" },
+  addBtnText:      { color: "#fff", fontWeight: "700", fontSize: 15 },
   loader:          { flex: 1 },
   list:            { padding: 16, gap: 12 },
   empty:           { textAlign: "center", color: "#AAA", fontStyle: "italic", padding: 40 },
