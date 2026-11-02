@@ -43,3 +43,10 @@ test("installations are listed under Installations, not inside their zone table"
 test("esc neutralises markup", () => {
   expect(esc(`<a href="x">&'</a>`)).toBe("&lt;a href=&quot;x&quot;&gt;&amp;&#39;&lt;/a&gt;");
 });
+
+test("facade photos are embedded with their labels", () => {
+  const html = buildSessionReportHtml({ session, zones, elements, openings, photos: [{ label: "Front facade", src: "data:image/jpeg;base64,AAAA" }] });
+  expect(html).toContain('<img src="data:image/jpeg;base64,AAAA">');
+  expect(html).toContain("Front facade");
+  expect(buildSessionReportHtml({ session, zones, elements, openings })).toContain("None taken.");
+});

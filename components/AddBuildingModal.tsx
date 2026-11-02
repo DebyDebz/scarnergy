@@ -8,39 +8,41 @@ import { supabase } from "../lib/supabase";
 import { useAuthStore } from "../store/authStore";
 import { FieldSelect } from "./ui/FieldSelect";
 import { lookupAddress, normalizePostcode, LookedUpAddress } from "../lib/addressLookup";
+import {
+  USE_CLASSES, UseClass, BUILDING_TYPES_BY_CLASS, POSITIONS, Position, ORIENTATIONS,
+  orientationDeg, parseVisitDateTime, formatVisitDate, formatVisitTime, standardParts,
+} from "../lib/visitPlan";
 
 const PRIMARY = "#1E3A5F";
 const ACCENT = "#2E86C1";
 
-// building_type enum values with the labels an inspector recognises.
-const BUILDING_TYPES = [
-  { value: "residential_single", label: "House (single-family)" },
-  { value: "residential_multi",  label: "Multi-family building" },
-  { value: "apartment",          label: "Apartment" },
-  { value: "office",             label: "Office" },
-  { value: "retail",             label: "Shop / retail" },
-  { value: "industrial",         label: "Industrial" },
-  { value: "mixed_use",          label: "Mixed use" },
-  { value: "other",              label: "Other" },
-];
-
 interface Props {
   visible: boolean;
   onClose: () => void;
-  /** Called with the new building's id after it's saved. */
-  onCreated: (buildingId: string, startInspection: boolean) => void;
+  /** Called after the building and its planned visit (inspection session) are saved. */
+  onCreated: (buildingId: string, startInspection: boolean, sessionId: string | null) => void;
 }
 
-// Add a building on site: postcode + house number are checked against the
-// official address register (PDOK), which fills in street and city — the same
-// flow as the client's current tool. Manual entry stays possible for new-builds
-// or when the lookup service is unreachable.
+// "Before the visit": enter a new object. Postcode + house number are checked
+// against the official address register (PDOK), which fills in street and city
+// — the same flow as the client's current tool. Manual entry stays possible for
+// new-builds or when the lookup service is unreachable. Saving also plans the
+// visit (an inspection session with planned_at) and, if asked, creates the
+// standard parts (exterior walls, floor, roof) so on site only measuring is left.
 export function AddBuildingModal({ visible, onClose, onCreated }: Props) {
   const profile = useAuthStore(s => s.profile);
   const [postcode, setPostcode] = useState("");
   const [number, setNumber] = useState("");
   const [addition, setAddition] = useState("");
+  const [useClass, setUseClass] = useState<UseClass>("woning");
   const [buildingType, setBuildingType] = useState("residential_single");
+  const [position, setPosition] = useState<Position | null>(null);
+  const [orientation, setOrientation] = useState<string | null>(null);
+  const [contactName, setContactName] = useState("");
+  const [contactPhone, setContactPhone] = useState("");
+  const [visitDate, setVisitDate] = useState(() => formatVisitDate(new Date()));
+  const [visitTime, setVisitTime] = useState(() => formatVisitTime(new Date()));
+  const [createStandard, setCreateStandard] = useState(true);
   const [year, setYear] = useState("");
   const [notes, setNotes] = useState("");
   const [found, setFound] = useState<LookedUpAddress | null>(null);
@@ -53,7 +55,10 @@ export function AddBuildingModal({ visible, onClose, onCreated }: Props) {
   const [saving, setSaving] = useState(false);
 
   const reset = () => {
-    setPostcode(""); setNumber(""); setAddition(""); setBuildingType("residential_single");
+    setPostcode(""); setNumber(""); setAddition(""); setUseClass("woning"); setBuildingType("residential_single");
+    setPosition(null); setOrientation(null); setContactName(""); setContactPhone("");
+    const now = new Date(); setVisitDate(formatVisitDate(now)); setVisitTime(formatVisitTime(now));
+    setCreateStandard(true);
     setYear(""); setNotes(""); setFound(null); setLookupMsg(null); setChoices([]);
     setManual(false); setStreet(""); setCity("");
   };
@@ -79,11 +84,44 @@ export function AddBuildingModal({ visible, onClose, onCreated }: Props) {
   };
 
   const pc = normalizePostcode(postcode);
-  const canSave = !!profile && !saving && (
-    manual
-      ? !!pc && /^\d{1,5}$/.test(number.trim()) && street.trim() !== "" && city.trim() !== ""
-      : !!found
-  );
+  const visitAt = parseVisitDateTime(visitDate, visitTime);
+  const addressOk = manual
+    ? !!pc && /^\d{1,5}$/.test(number.trim()) && street.trim() !== "" && city.trim() !== ""
+    : !!found;
+  const canSave = !!profile && !saving && addressOk && !!visitAt;
+
+  const pickUseClass = (c: UseClass) => {
+    setUseClass(c);
+    setBuildingType(BUILDING_TYPES_BY_CLASS[c][0].value);
+    if (c === "utiliteit") setPosition(null);
+  };
+
+  const setVisitNow = (dayOffset: number) => {
+    const d = new Date();
+    d.setDate(d.getDate() + dayOffset);
+    if (dayOffset !== 0) d.setHours(9, 0, 0, 0);
+    setVisitDate(formatVisitDate(d));
+    setVisitTime(formatVisitTime(d));
+  };
+
+  // Floor + standard parts in one go; failures here never undo the building.
+  const createStandardParts = async (buildingId: string) => {
+    if (!profile) return;
+    const { data: zone, error: zErr } = await supabase.from("zones")
+      .insert({ org_id: profile.org_id, building_id: buildingId, zone_code: "Z01", name: "Begane grond", floor_level: 0 })
+      .select("id").single();
+    if (zErr || !zone) throw zErr ?? new Error("No zone returned");
+    const parts = standardParts(position, orientationDeg(orientation));
+    const { error } = await supabase.from("building_elements").insert(parts.map((p, i) => ({
+      org_id: profile.org_id,
+      zone_id: (zone as { id: string }).id,
+      element_type: p.element_type,
+      name: p.name,
+      orientation_deg: p.orientation_deg,
+      sort_order: i,
+    })));
+    if (error) throw error;
+  };
 
   const save = async () => {
     if (!profile || !canSave) return;
@@ -119,15 +157,43 @@ export function AddBuildingModal({ visible, onClose, onCreated }: Props) {
         building_type: buildingType,
         construction_year: Number.isFinite(year4) && year4 > 1000 && year4 < 2100 ? year4 : null,
         notes: notes.trim() || null,
-        metadata: { source: manual ? "mobile_manual" : "mobile_pdok" },
+        metadata: {
+          source: manual ? "mobile_manual" : "mobile_pdok",
+          use_class: useClass,
+          ...(position ? { position } : {}),
+          ...(orientation ? { orientation } : {}),
+          ...(contactName.trim() || contactPhone.trim()
+            ? { contact: { name: contactName.trim() || null, phone: contactPhone.trim() || null } }
+            : {}),
+        },
       }).select("id").single();
       if (error || !data) throw error ?? new Error("No building returned");
-
       const id = (data as { id: string }).id;
+
+      // The planned visit. RLS only lets an inspector create their own
+      // sessions, so the inspector is whoever enters the object.
+      const warnings: string[] = [];
+      let sessionId: string | null = null;
+      const { data: ses, error: sErr } = await supabase.from("inspection_sessions").insert({
+        org_id: profile.org_id,
+        building_id: id,
+        inspector_id: profile.id,
+        planned_at: visitAt!.toISOString(),
+      }).select("id").single();
+      if (sErr || !ses) warnings.push(`The visit couldn't be planned (${sErr?.message ?? "unknown error"}). Start an inspection from the building instead.`);
+      else sessionId = (ses as { id: string }).id;
+
+      if (createStandard) {
+        try { await createStandardParts(id); }
+        catch (e: any) { warnings.push(`Standard parts weren't created (${e?.message ?? "unknown error"}).`); }
+      }
+
       setSaving(false);
-      Alert.alert("Building added", `${addr.street} ${addr.house_number}${addr.house_number_addition ?? ""}, ${addr.city}`, [
-        { text: "Later", style: "cancel", onPress: () => { reset(); onCreated(id, false); } },
-        { text: "Start inspection", onPress: () => { reset(); onCreated(id, true); } },
+      const title = `${addr.street} ${addr.house_number}${addr.house_number_addition ?? ""}, ${addr.city}`;
+      const body = [`Visit planned ${visitDate} ${visitTime}.`, ...warnings].join("\n\n");
+      Alert.alert("Building added", `${title}\n\n${body}`, [
+        { text: "Later", style: "cancel", onPress: () => { reset(); onCreated(id, false, sessionId); } },
+        { text: "Start inspection", onPress: () => { reset(); onCreated(id, true, sessionId); } },
       ]);
     } catch (e: any) {
       setSaving(false);
@@ -219,8 +285,34 @@ export function AddBuildingModal({ visible, onClose, onCreated }: Props) {
             )}
 
             <Text style={[styles.section, { marginTop: 18 }]}>BUILDING</Text>
+            <View style={styles.segment}>
+              {USE_CLASSES.map(c => (
+                <TouchableOpacity
+                  key={c.value}
+                  style={[styles.segmentBtn, useClass === c.value && styles.segmentBtnActive]}
+                  onPress={() => pickUseClass(c.value)}
+                >
+                  <Text style={[styles.segmentText, useClass === c.value && styles.segmentTextActive]}>{c.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
             <View style={styles.selectWrap}>
-              <FieldSelect label="Building type" value={buildingType} options={BUILDING_TYPES} onSelect={setBuildingType} />
+              <FieldSelect label="Building type" value={buildingType} options={BUILDING_TYPES_BY_CLASS[useClass]} onSelect={setBuildingType} />
+            </View>
+            {useClass === "woning" && (
+              <View style={styles.selectWrap}>
+                <FieldSelect
+                  label="Type and position (optional)" value={position} options={POSITIONS}
+                  onSelect={v => setPosition(v as Position)} placeholder="Not set"
+                />
+              </View>
+            )}
+            <View style={styles.selectWrap}>
+              <FieldSelect
+                label="Front facade faces (optional)" value={orientation}
+                options={ORIENTATIONS.map(o => ({ value: o.value, label: o.label }))}
+                onSelect={setOrientation} placeholder="Not set"
+              />
             </View>
             <View style={styles.field}>
               <Text style={styles.label}>Construction year (optional)</Text>
@@ -230,9 +322,58 @@ export function AddBuildingModal({ visible, onClose, onCreated }: Props) {
               <Text style={styles.label}>Notes (optional)</Text>
               <TextInput
                 style={[styles.input, styles.notes]} value={notes} onChangeText={setNotes} multiline
-                placeholder="Contact, access, anything for the office" placeholderTextColor="#9ca3af"
+                placeholder="Access, anything for the office" placeholderTextColor="#9ca3af"
               />
             </View>
+
+            <Text style={[styles.section, { marginTop: 18 }]}>CONTACT PERSON (OPTIONAL)</Text>
+            <View style={styles.row}>
+              <View style={[styles.field, { flex: 1.3 }]}>
+                <Text style={styles.label}>Name</Text>
+                <TextInput style={styles.input} value={contactName} onChangeText={setContactName} placeholder="Name" placeholderTextColor="#9ca3af" />
+              </View>
+              <View style={[styles.field, { flex: 1 }]}>
+                <Text style={styles.label}>Phone</Text>
+                <TextInput style={styles.input} value={contactPhone} onChangeText={setContactPhone} placeholder="06…" placeholderTextColor="#9ca3af" keyboardType="phone-pad" />
+              </View>
+            </View>
+
+            <Text style={[styles.section, { marginTop: 18 }]}>VISIT</Text>
+            <Text style={styles.label}>Inspector: {profile?.full_name ?? "you"}</Text>
+            <View style={styles.row}>
+              <View style={[styles.field, { flex: 1.3 }]}>
+                <Text style={styles.label}>Date</Text>
+                <TextInput style={styles.input} value={visitDate} onChangeText={setVisitDate} placeholder="31-10-2026" placeholderTextColor="#9ca3af" keyboardType="numbers-and-punctuation" maxLength={10} />
+              </View>
+              <View style={[styles.field, { flex: 1 }]}>
+                <Text style={styles.label}>Time</Text>
+                <TextInput style={styles.input} value={visitTime} onChangeText={setVisitTime} placeholder="09:00" placeholderTextColor="#9ca3af" keyboardType="numbers-and-punctuation" maxLength={5} />
+              </View>
+            </View>
+            <View style={styles.choices}>
+              <TouchableOpacity style={styles.choice} onPress={() => setVisitNow(0)}><Text style={styles.choiceText}>Now</Text></TouchableOpacity>
+              <TouchableOpacity style={styles.choice} onPress={() => setVisitNow(1)}><Text style={styles.choiceText}>Tomorrow 09:00</Text></TouchableOpacity>
+            </View>
+            {!visitAt && <Text style={styles.msg}>Enter the date as DD-MM-YYYY and the time as HH:MM.</Text>}
+
+            <Text style={[styles.section, { marginTop: 18 }]}>STANDARD PARTS</Text>
+            <Text style={styles.label}>Create the standard parts now? (exterior walls, ground floor, roof — ready to measure on site)</Text>
+            <View style={styles.segment}>
+              {[true, false].map(v => (
+                <TouchableOpacity
+                  key={String(v)}
+                  style={[styles.segmentBtn, createStandard === v && styles.segmentBtnActive]}
+                  onPress={() => setCreateStandard(v)}
+                >
+                  <Text style={[styles.segmentText, createStandard === v && styles.segmentTextActive]}>{v ? "Yes" : "No"}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            {createStandard && (
+              <Text style={styles.hint}>
+                {standardParts(position, orientationDeg(orientation)).map(p => p.name).join(", ")}
+              </Text>
+            )}
           </ScrollView>
 
           <View style={styles.footer}>
@@ -240,7 +381,11 @@ export function AddBuildingModal({ visible, onClose, onCreated }: Props) {
               {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveBtnText}>Add building</Text>}
             </TouchableOpacity>
             {!canSave && !saving && (
-              <Text style={styles.footerHint}>{manual ? "Fill in postcode, number, street and city." : "Look up the address first."}</Text>
+              <Text style={styles.footerHint}>
+                {!addressOk
+                  ? (manual ? "Fill in postcode, number, street and city." : "Look up the address first.")
+                  : "Enter the visit date and time."}
+              </Text>
             )}
           </View>
         </KeyboardAvoidingView>
@@ -280,6 +425,12 @@ const styles = StyleSheet.create({
   choiceText: { color: PRIMARY, fontWeight: "700" },
   link: { fontSize: 13, color: ACCENT, fontWeight: "600", paddingVertical: 4 },
   selectWrap: { borderRadius: 10, overflow: "hidden", borderWidth: 1, borderColor: "#d1d5db" },
+  segment: { flexDirection: "row", gap: 8 },
+  segmentBtn: { flex: 1, borderWidth: 1, borderColor: "#d1d5db", borderRadius: 10, paddingVertical: 10, alignItems: "center", backgroundColor: "#fff" },
+  segmentBtnActive: { backgroundColor: PRIMARY, borderColor: PRIMARY },
+  segmentText: { fontSize: 14, fontWeight: "600", color: "#374151" },
+  segmentTextActive: { color: "#fff" },
+  hint: { fontSize: 12, color: "#6b7280" },
   footer: { padding: 16, gap: 6, backgroundColor: "#fff", borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e7eb" },
   saveBtn: { backgroundColor: "#1E8449", borderRadius: 12, paddingVertical: 14, alignItems: "center" },
   saveBtnText: { color: "#fff", fontWeight: "700", fontSize: 16 },

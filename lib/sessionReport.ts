@@ -3,8 +3,14 @@ import { elementTypeLabel } from "./elementTypes";
 
 // HTML for the one-tap PDF report (expo-print renders it). Mirrors the web
 // print page's sections in a form that fits a phone-generated A4: header,
-// zones, elements per zone, openings, installations, completeness. Photos are
-// not embedded (they'd need signed URLs fetched and inlined; follow-up).
+// zones, elements per zone, openings, installations, completeness, and the
+// facade photos (inlined by lib/reportPhotos.ts; element photos stay in storage).
+
+export interface ReportPhoto {
+  label: string;
+  /** data: URI (or any URL the print view can load) */
+  src: string;
+}
 
 export interface SessionReportInput {
   session: SessionSummary;
@@ -13,6 +19,7 @@ export interface SessionReportInput {
   openings: Opening[];
   orgName?: string;
   generatedAt?: Date;
+  photos?: ReportPhoto[];
 }
 
 export function esc(s: unknown): string {
@@ -26,13 +33,15 @@ const m2 = (w: number | null | undefined, h: number | null | undefined) =>
   w != null && h != null ? ((w / 1000) * (h / 1000)).toFixed(2) : "—";
 
 export function buildSessionReportHtml(input: SessionReportInput): string {
-  const { session, zones, elements, openings, orgName = "", generatedAt = new Date() } = input;
+  const { session, zones, elements, openings, orgName = "", generatedAt = new Date(), photos = [] } = input;
   const byZone = new Map<string, BuildingElement[]>();
   for (const e of elements) (byZone.get(e.zone_id) ?? byZone.set(e.zone_id, []).get(e.zone_id)!).push(e);
   const elementName = new Map(elements.map(e => [e.id, e.name]));
   const complete = elements.filter(e => e.is_complete).length;
   const installations = elements.filter(e => e.element_type === "installatie");
   const started = session.started_at ? new Date(session.started_at).toLocaleDateString("nl-NL") : "—";
+  const plannedAt = (session as { planned_at?: string | null }).planned_at;
+  const planned = plannedAt ? new Date(plannedAt).toLocaleString("nl-NL", { dateStyle: "short", timeStyle: "short" }) : null;
 
   const zoneSections = zones.map(z => {
     const els = (byZone.get(z.id) ?? []).filter(e => e.element_type !== "installatie");
@@ -93,12 +102,17 @@ export function buildSessionReportHtml(input: SessionReportInput): string {
   td.r, th.r { text-align: right; } td.c, th.c { text-align: center; }
   .kv td { border: none; padding: 1pt 8pt 1pt 0; }
   .foot { margin-top: 14pt; color: #777; font-size: 8pt; }
+  .photos { display: flex; flex-wrap: wrap; gap: 8pt; }
+  .photo { width: 48%; page-break-inside: avoid; }
+  .photo img { width: 100%; height: 150pt; object-fit: cover; border: 1px solid #D5DBE3; }
+  .photo p { margin: 2pt 0 0; font-size: 9pt; color: #555; }
 </style></head><body>
   <h1>Inspection report</h1>
   <p class="sub">${esc(session.building_address)}, ${esc(session.building_city)}</p>
   <table class="kv"><tbody>
     <tr><td>Session</td><td>${esc(session.session_code)}</td></tr>
     <tr><td>Inspector</td><td>${esc(session.inspector_name)}</td></tr>
+    ${planned ? `<tr><td>Planned visit</td><td>${esc(planned)}</td></tr>` : ""}
     <tr><td>Started</td><td>${esc(started)}</td></tr>
     <tr><td>Status</td><td>${esc(session.status)}</td></tr>
     ${orgName ? `<tr><td>Organisation</td><td>${esc(orgName)}</td></tr>` : ""}
@@ -120,6 +134,12 @@ export function buildSessionReportHtml(input: SessionReportInput): string {
     <thead><tr><th>Type</th><th>Name</th><th>Brand / model</th><th>Fuel</th><th class="r">kW</th><th class="r">η</th><th class="r">Year</th><th>Location</th></tr></thead>
     <tbody>${installRows}</tbody>
   </table>`}
+
+  <h2>Facade photos</h2>
+  ${photos.length === 0 ? `<p class="muted">None taken.</p>` : `
+  <div class="photos">${photos.map(p => `
+    <div class="photo"><img src="${esc(p.src)}"><p>${esc(p.label)}</p></div>`).join("")}
+  </div>`}
 
   <p class="foot">Generated ${esc(generatedAt.toLocaleString("nl-NL"))} by Scarnergy. Data-completeness overview — not an energy label.</p>
 </body></html>`;

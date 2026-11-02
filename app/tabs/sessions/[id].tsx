@@ -20,6 +20,9 @@ import { buildSessionReportHtml } from "../../../lib/sessionReport";
 import { useArMeasure } from "../../../hooks/useArMeasure";
 import { useIsTablet } from "../../../hooks/useResponsive";
 import { CONTENT_MAX_WIDTH } from "../../../constants/layout";
+import { FlowSteps, FlowStepItem } from "../../../components/inspection/FlowSteps";
+import { onsiteSteps, OnsiteStepKey } from "../../../lib/onsiteProgress";
+import { loadFacadePhotosForReport } from "../../../lib/reportPhotos";
 
 export default function SessionDetailScreen() {
   const isTablet = useIsTablet();
@@ -46,6 +49,10 @@ export default function SessionDetailScreen() {
   const [pausing,         setPausing]         = useState(false);
   const [appsheetLinked,  setAppsheetLinked]  = useState(false);
   const [retryingSync,    setRetryingSync]    = useState(false);
+  // Building-wide data for the on-site checklist (the element list above is per zone).
+  const [allElements,     setAllElements]     = useState<BuildingElement[]>([]);
+  const [facadeCount,     setFacadeCount]     = useState(0);
+  const [rekenzoneCount,  setRekenzoneCount]  = useState(0);
 
 // ── Data loading ───────────────────────────────────────────────────────────
 
@@ -95,6 +102,7 @@ export default function SessionDetailScreen() {
           ]
         : list;
       setRekenzones(hasAssigned ? rzList : []);
+      setRekenzoneCount(rzList.length);
       setZones(grouped);
       if (grouped.length > 0) setSelectedZoneId(grouped[0].id);
     });
@@ -139,14 +147,33 @@ export default function SessionDetailScreen() {
 
   useEffect(() => { loadElements(); }, [loadElements]);
 
+  const loadProgress = useCallback(() => {
+    if (!session?.building_id) return;
+    const zoneIds = zones.map(z => z.id);
+    Promise.all([
+      zoneIds.length
+        ? supabase.from("building_elements").select("*").in("zone_id", zoneIds).eq("is_active", true).order("sort_order")
+        : Promise.resolve({ data: [] as BuildingElement[] }),
+      (supabase.from("building_facade_photos") as any)
+        .select("id", { count: "exact", head: true })
+        .eq("building_id", session.building_id),
+    ]).then(([elRes, fRes]: any[]) => {
+      setAllElements((elRes.data ?? []) as BuildingElement[]);
+      setFacadeCount(fRes.count ?? 0);
+    });
+  }, [session?.building_id, zones]);
+
+  useEffect(() => { loadProgress(); }, [loadProgress]);
+
   // Reload elements (and session summary) when returning from inspect screen
   useEffect(() => {
     const unsub = navigation.addListener("focus", () => {
       loadElements();
       loadSession();
+      loadProgress();
     });
     return unsub;
-  }, [navigation, loadElements, loadSession]);
+  }, [navigation, loadElements, loadSession, loadProgress]);
 
   // Installations (boiler, heat pump, PV…) aren't drawn on the floor plan, so
   // they get a direct add path instead of the element placer. The inspect
@@ -338,9 +365,11 @@ export default function SessionDetailScreen() {
     try {
       const data = await loadExportData();
       if (!data) return;
+      // "Store photos + generate report": the facade photos are embedded.
+      const photos = await loadFacadePhotosForReport(session.building_id);
       const html = buildSessionReportHtml({
         session, zones: data.allZones, elements: data.allElements, openings: data.allOpenings,
-        orgName: data.orgRes.data?.name ?? "",
+        orgName: data.orgRes.data?.name ?? "", photos,
       });
       const { uri } = await Print.printToFileAsync({ html });
       if (await Sharing.isAvailableAsync()) {
@@ -384,6 +413,61 @@ export default function SessionDetailScreen() {
   const selectedZone   = zones.find(z => z.id === selectedZoneId) ?? null;
   const zoneHasPlan    = !!selectedZone &&
     ((selectedZone.floor_plan_points?.length ?? 0) >= 3 || !!selectedZone.floor_plan_image_url);
+
+  // ── Client flow (2026-10-31): on site, then after the visit ──
+  const isOpen = session.status === "active" || session.status === "paused";
+  const flowUrl = (extra = "") => `/tabs/sessions/flow?id=${sessionId}&buildingId=${session.building_id}${extra}`;
+  const inspectEl = (id: string) => router.push({ pathname: "/tabs/sessions/inspect", params: { elementId: id, sessionId: sessionId ?? "" } });
+  const firstWhere = (pred: (e: BuildingElement) => boolean) => allElements.find(pred);
+
+  const onsiteActions: Record<OnsiteStepKey, () => void> = {
+    facades: () => router.push({
+      pathname: "/tabs/sessions/facade-photos",
+      params: { sessionId: sessionId!, buildingId: session.building_id },
+    }),
+    plan: () => router.push(zones.length === 0 ? flowUrl() : flowUrl("&forceStage=3")),
+    dimensions: () => {
+      const e = firstWhere(x =>
+        (x.element_type === "gevel" && x.height_mm == null) ||
+        (x.element_type === "dak" && x.tilt_deg == null && x.nokhoogte_m == null) ||
+        (x.element_type === "vloer" && (x.length_mm == null || x.width_mm == null)));
+      if (e) inspectEl(e.id);
+      else if (zones.length === 0) router.push(flowUrl());
+      else Alert.alert("All measured", "Every wall, roof and floor has its height, angle or size. Tap an element below to change it.");
+    },
+    openings: () => {
+      const e = firstWhere(x =>
+        (x.element_type === "gevel" || x.element_type === "transparant_deel") &&
+        (!x.is_complete || (x.photo_urls?.length ?? 0) === 0));
+      if (e) inspectEl(e.id);
+      else if (zones.length === 0) router.push(flowUrl());
+      else router.push(flowUrl("&forceStage=5"));
+    },
+    installations: () => {
+      const e = firstWhere(x => x.element_type === "installatie" && !x.is_complete);
+      if (e) inspectEl(e.id);
+      else void addInstallation();
+    },
+  };
+  const onsite: FlowStepItem[] = onsiteSteps({
+    facadePhotoCount: facadeCount, zones, rekenzoneCount, elements: allElements,
+  }).map(st => ({
+    ...st,
+    onPress: isOpen && (st.key !== "installations" || !!selectedZoneId) ? onsiteActions[st.key] : undefined,
+    cta: st.key === "installations" && !allElements.some(x => x.element_type === "installatie" && !x.is_complete) ? "Add" : undefined,
+  }));
+
+  const afterVisit: FlowStepItem[] = [
+    session.status === "completed"
+      ? { key: "finalise", title: "Finalise calculations", status: "Session completed · check data completeness",
+          done: true, onPress: () => router.push({ pathname: "/tabs/sessions/results", params: { id: sessionId ?? "" } }) }
+      : { key: "finalise", title: "Finalise calculations", status: "Validates measurements and closes the session",
+          busy: closing, onPress: session.status === "active" ? closeSession : undefined, cta: "Complete" },
+    { key: "vabi", title: "Export to VABI", status: "XML file for VABI Assets", onPress: exportXML, cta: "Export" },
+    { key: "label", title: "Create the label in VABI", status: "Done in VABI with the exported file" },
+    { key: "report", title: "Store photos + generate report", status: "Photos are stored with the building · PDF includes the facade photos",
+      busy: exportingPdf, onPress: exportPDF, cta: "PDF" },
+  ];
 
   return (
     <View style={styles.container}>
@@ -557,16 +641,21 @@ export default function SessionDetailScreen() {
             keyExtractor={e => e.id}
             contentContainerStyle={[styles.list, isTablet && { maxWidth: CONTENT_MAX_WIDTH, alignSelf: "center", width: "100%" }]}
             ListHeaderComponent={
-              zoneHasPlan && selectedZone && elements.length > 0 ? (
-                <FloorPlanReview
-                  zone={selectedZone}
-                  elements={elements}
-                  onMeasure={(elementId) => router.push({
-                    pathname: "/tabs/sessions/inspect",
-                    params: { elementId, sessionId: sessionId ?? "" },
-                  })}
-                />
-              ) : null
+              <View style={{ gap: 12 }}>
+                {isOpen && (
+                  <FlowSteps title="On site" subtitle="Any order works — this shows what's still open." steps={onsite} collapsible />
+                )}
+                {zoneHasPlan && selectedZone && elements.length > 0 ? (
+                  <FloorPlanReview
+                    zone={selectedZone}
+                    elements={elements}
+                    onMeasure={(elementId) => router.push({
+                      pathname: "/tabs/sessions/inspect",
+                      params: { elementId, sessionId: sessionId ?? "" },
+                    })}
+                  />
+                ) : null}
+              </View>
             }
             ListEmptyComponent={
               <View style={styles.emptyWrap}>
@@ -638,12 +727,6 @@ export default function SessionDetailScreen() {
                     <View style={styles.completedBanner}>
                       <Text style={styles.completedBannerText}>✓  Session Completed</Text>
                     </View>
-                    <TouchableOpacity
-                      style={styles.resultsBtn}
-                      onPress={() => router.push({ pathname: "/tabs/sessions/results", params: { id: sessionId ?? "" } })}
-                    >
-                      <Text style={styles.resultsBtnText}>📊  Data Completeness</Text>
-                    </TouchableOpacity>
                     {appsheetLinked && (
                       <TouchableOpacity
                         style={[styles.resumeBtn, retryingSync && styles.btnDisabled]}
@@ -658,18 +741,7 @@ export default function SessionDetailScreen() {
                   </>
                 )}
 
-                <View style={styles.exportRow}>
-                  <TouchableOpacity style={[styles.exportBtn, { flex: 1 }]} onPress={exportXML}>
-                    <Text style={styles.exportBtnText}>↓  Export XML</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.exportBtn, { flex: 1 }, exportingPdf && styles.btnDisabled]}
-                    onPress={exportPDF}
-                    disabled={exportingPdf}
-                  >
-                    <Text style={styles.exportBtnText}>{exportingPdf ? "Building…" : "📄  PDF report"}</Text>
-                  </TouchableOpacity>
-                </View>
+                <FlowSteps title="After the visit" steps={afterVisit} />
 
                 {session.status === "paused" && (
                   <TouchableOpacity
@@ -683,16 +755,18 @@ export default function SessionDetailScreen() {
                   </TouchableOpacity>
                 )}
 
-                {/* Building-level facade photos (4 directions) — always accessible */}
-                <TouchableOpacity
-                  style={styles.facadeBtn}
-                  onPress={() => router.push({
-                    pathname: '/tabs/sessions/facade-photos',
-                    params: { sessionId: sessionId!, buildingId: session.building_id },
-                  })}
-                >
-                  <Text style={styles.facadeBtnText}>📷  Facade Photos (building)</Text>
-                </TouchableOpacity>
+                {/* Building-level facade photos — always accessible (also step 1 on site) */}
+                {!isOpen && (
+                  <TouchableOpacity
+                    style={styles.facadeBtn}
+                    onPress={() => router.push({
+                      pathname: '/tabs/sessions/facade-photos',
+                      params: { sessionId: sessionId!, buildingId: session.building_id },
+                    })}
+                  >
+                    <Text style={styles.facadeBtnText}>📷  Facade Photos (building)</Text>
+                  </TouchableOpacity>
+                )}
 
                 {session.status === "active" && (
                   <View style={styles.activeActions}>
@@ -703,15 +777,6 @@ export default function SessionDetailScreen() {
                     >
                       <Text style={styles.pauseBtnText}>
                         {pausing ? "Saving…" : "💾  Save & leave"}
-                      </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.completeBtn, closing && styles.btnDisabled]}
-                      onPress={closeSession}
-                      disabled={closing}
-                    >
-                      <Text style={styles.completeBtnText}>
-                        {closing ? "Closing…" : "✓  Complete Session"}
                       </Text>
                     </TouchableOpacity>
                   </View>
@@ -810,11 +875,6 @@ const styles = StyleSheet.create({
 
   completedBanner:     { backgroundColor: "#D5F0E3", borderRadius: 12, padding: 18, alignItems: "center" },
   completedBannerText: { color: "#1E8449", fontSize: 15, fontWeight: "700" },
-  resultsBtn:          { backgroundColor: "#1E8449", borderRadius: 12, padding: 16, alignItems: "center" },
-  resultsBtnText:      { color: "#fff", fontSize: 15, fontWeight: "700" },
-  exportBtn:           { backgroundColor: "#2E86C1", borderRadius: 12, padding: 16, alignItems: "center" },
-  exportBtnText:       { color: "#fff", fontSize: 15, fontWeight: "700" },
-  exportRow:           { flexDirection: "row", gap: 10 },
   demoCard:            { marginHorizontal: 16, marginTop: 10, padding: 12, borderRadius: 12,
                          backgroundColor: "#EBF5FB", borderWidth: 1, borderColor: "#AED6F1" },
   demoCardTitle:       { fontSize: 15, fontWeight: "700", color: "#1E3A5F" },
@@ -835,8 +895,6 @@ const styles = StyleSheet.create({
   pauseBtnText:        { color: "#E67E22", fontSize: 15, fontWeight: "700" },
   resumeBtn:           { backgroundColor: "#2E86C1", borderRadius: 12, padding: 18, alignItems: "center" },
   resumeBtnText:       { color: "#fff", fontSize: 16, fontWeight: "700" },
-  completeBtn:         { backgroundColor: "#1E3A5F", borderRadius: 12, padding: 18, alignItems: "center" },
-  completeBtnText:     { color: "#fff", fontSize: 16, fontWeight: "700" },
   btnDisabled:         { opacity: 0.5 },
 
   measurePanel:        { backgroundColor: "#fff", borderRadius: 12, padding: 14,

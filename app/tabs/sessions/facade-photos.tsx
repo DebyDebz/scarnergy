@@ -25,7 +25,9 @@ const DIRECTIONS: { key: Direction; label: string; labelNL: string }[] = [
 ];
 
 export default function FacadePhotosScreen() {
-  const { sessionId, buildingId } = useLocalSearchParams<{ sessionId: string; buildingId: string }>();
+  // next=flow: opened as step 1 of the on-site flow, so the footer moves on to
+  // the floor plan instead of going back.
+  const { sessionId, buildingId, next } = useLocalSearchParams<{ sessionId: string; buildingId: string; next?: string }>();
   const { profile } = useAuthStore();
   const router = useRouter();
 
@@ -174,6 +176,8 @@ export default function FacadePhotosScreen() {
   if (loading) return <ActivityIndicator style={styles.loader} color="#1E3A5F" />;
 
   const capturedCount = Object.values(photos).filter(Boolean).length;
+  const total = DIRECTIONS.length;
+  const goNext = () => router.replace(`/tabs/sessions/flow?id=${sessionId}&buildingId=${buildingId}`);
 
   return (
     <View style={styles.container}>
@@ -183,7 +187,9 @@ export default function FacadePhotosScreen() {
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={styles.title}>Gevel Foto's</Text>
-          <Text style={styles.sub}>Maak 1 foto per gevel richting ({capturedCount}/4)</Text>
+          <Text style={styles.sub}>
+            {next === 'flow' ? 'Step 1 on site · ' : ''}Maak 1 foto per gevel richting + entree ({capturedCount}/{total})
+          </Text>
         </View>
       </View>
 
@@ -228,11 +234,19 @@ export default function FacadePhotosScreen() {
       </ScrollView>
 
       <View style={styles.footer}>
-        <TouchableOpacity style={styles.doneBtn} onPress={() => router.back()}>
-          <Text style={styles.doneBtnText}>
-            {capturedCount === 4 ? '✓  Klaar' : `Opslaan (${capturedCount}/4)`}
-          </Text>
-        </TouchableOpacity>
+        {next === 'flow' ? (
+          <TouchableOpacity style={styles.doneBtn} onPress={goNext}>
+            <Text style={styles.doneBtnText}>
+              {capturedCount === total ? 'Next: floor plan  →' : `Continue to floor plan (${capturedCount}/${total})  →`}
+            </Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity style={styles.doneBtn} onPress={() => router.back()}>
+            <Text style={styles.doneBtnText}>
+              {capturedCount === total ? '✓  Klaar' : `Opslaan (${capturedCount}/${total})`}
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );

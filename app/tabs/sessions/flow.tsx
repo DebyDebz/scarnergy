@@ -22,8 +22,8 @@ type Stage = 1 | 2 | 3 | 4 | 5 | 6;
 
 const STAGE_LABELS: Record<Stage, string> = {
   1: 'Checking…',
-  2: 'Draw Floor Plan',
-  3: 'Define Zones',
+  2: 'Draw Outline',
+  3: 'Zones + Rekenzones',
   4: 'Grid Analysis',
   5: 'Place Elements',
   6: 'View Floor Plan',
@@ -68,9 +68,11 @@ export default function InspectionFlowScreen() {
       return;
     }
 
+    // forceStage=3 opens the zone / rekenzone manager directly — the session
+    // detail's on-site checklist ("Floor plan + rekenzones") uses it once floors exist.
     // forceStage=5 lets session detail bypass runCheck and land directly on
     // ElementPlacer — used when some zones have elements but others don't.
-    if (forceStage === '5') {
+    if (forceStage === '3' || forceStage === '5') {
       // Still need to load zones so ElementPlacer has zone data
       const { data: zData } = await supabase
         .from('zones')
@@ -78,7 +80,7 @@ export default function InspectionFlowScreen() {
         .eq('building_id', buildingId)
         .eq('is_active', true);
       setZones((zData ?? []) as Zone[]);
-      setStage(5);
+      setStage(forceStage === '3' ? 3 : 5);
       setLoading(false);
       return;
     }

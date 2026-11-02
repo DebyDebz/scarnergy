@@ -168,7 +168,8 @@ export default function SessionsScreen() {
         .single();
       if (error) throw error;
       setShowModal(false);
-      if (data?.id) router.push(`/tabs/sessions/flow?id=${data.id}&buildingId=${buildingId}`);
+      // On site the client's flow starts with the facade photos, then the floor plan.
+      if (data?.id) router.push(`/tabs/sessions/facade-photos?sessionId=${data.id}&buildingId=${buildingId}&next=flow`);
     } catch (e: any) {
       Alert.alert("Could not create session", e instanceof AppsheetProxyError ? e.message : (e.message ?? "Unknown error"));
     } finally {

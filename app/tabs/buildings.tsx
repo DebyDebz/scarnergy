@@ -93,6 +93,15 @@ export default function BuildingsScreen() {
     const buildingMeta = (building as { metadata?: Record<string, unknown> | null }).metadata ?? null;
     const guided = source !== "appsheet" && isBlankDemoBuilding(buildingMeta);
 
+    // A visit planned before going on site (Add building) is picked up instead
+    // of starting a second session for the same address.
+    const planned = guided ? null : await findPlannedVisit(buildingId, profile.id);
+    if (planned) {
+      setStarting(null);
+      openOnsite(planned, buildingId);
+      return;
+    }
+
     const { data, error } = await supabase
       .from("inspection_sessions")
       .insert({
@@ -106,19 +115,29 @@ export default function BuildingsScreen() {
 
     setStarting(null);
     if (error) { Alert.alert("Could not start inspection", error.message || "Server error — please try again."); return; }
-    router.push(`/tabs/sessions/flow?id=${data.id}&buildingId=${buildingId}`);
-    if (guided) useDemoTour.getState().start(data.id, buildingId, false, "scratch");
+    if (guided) {
+      router.push(`/tabs/sessions/flow?id=${data.id}&buildingId=${buildingId}`);
+      useDemoTour.getState().start(data.id, buildingId, false, "scratch");
+    } else {
+      openOnsite(data.id, buildingId);
+    }
   }, [profile, router, source]);
 
+  // On site the client's flow starts with the facade photos, then the floor plan.
+  const openOnsite = useCallback((sessionId: string, buildingId: string) => {
+    router.push(`/tabs/sessions/facade-photos?sessionId=${sessionId}&buildingId=${buildingId}&next=flow`);
+  }, [router]);
+
   // A new building from the app: reload the list, then optionally go straight
-  // into an inspection — the inspector is usually standing at the address.
-  const onBuildingCreated = useCallback(async (buildingId: string, startNow: boolean) => {
+  // into the planned visit — the inspector is usually standing at the address.
+  const onBuildingCreated = useCallback(async (buildingId: string, startNow: boolean, sessionId: string | null) => {
     setAdding(false);
     load();
     if (!startNow) return;
+    if (sessionId) { openOnsite(sessionId, buildingId); return; }
     const { data } = await supabase.from("building_summary").select("*").eq("id", buildingId).single();
     if (data) startInspection(data as BuildingSummary);
-  }, [load, startInspection]);
+  }, [load, startInspection, openOnsite]);
 
   if (loading && buildings.length === 0) return <ActivityIndicator style={styles.loader} color="#1E3A5F" />;
   if (error)   return (
@@ -236,6 +255,25 @@ export default function BuildingsScreen() {
       />
     </View>
   );
+}
+
+// The inspector's own open, planned (not yet worked on) visit for a building;
+// reactivated if it was paused.
+async function findPlannedVisit(buildingId: string, inspectorId: string): Promise<string | null> {
+  const { data } = await supabase
+    .from("inspection_sessions")
+    .select("id, status")
+    .eq("building_id", buildingId)
+    .eq("inspector_id", inspectorId)
+    .eq("is_active", true)
+    .in("status", ["active", "paused"])
+    .not("planned_at", "is", null)
+    .order("planned_at", { ascending: false })
+    .limit(1);
+  const row = (data ?? [])[0] as { id: string; status: string } | undefined;
+  if (!row) return null;
+  if (row.status === "paused") await supabase.from("inspection_sessions").update({ status: "active" }).eq("id", row.id);
+  return row.id;
 }
 
 function buildingTypeColor(type: string): string {

@@ -515,6 +515,29 @@ existing functionality and design intact, all gates green.
         should be checked against "top-down or bottom-up, not set in stone".
       · Nils to share the AppSheet reference video before the data-model pass.
       mobile `tsc` clean · calc `tsc` clean · 146 tests green · not device-verified.
+- [ ] **Proposed flow (client diagram, 2026-10-31)** — before the visit → on site →
+      after, built 2026-11-02, no migration:
+      · **Before the visit** (Add building): woning/utility + building type, type and
+        position, front-facade orientation, contact person (`buildings.metadata`; the
+        `contacts` table from 029 is not applied on dev), inspector (= the person
+        entering it; RLS only allows own sessions), visit date + time (required →
+        session with `planned_at`), "create standard parts?" → zone *Begane grond* +
+        exterior walls (oriented from the front facade, party walls dropped for
+        mid-terrace) + ground floor + roof (`lib/visitPlan.ts`). "Start inspection"
+        picks up the planned visit instead of creating a second session.
+      · **On site**: starting an inspection opens facade photos first ("Continue to
+        floor plan →"), then the wizard (*Draw Outline → Zones + Rekenzones → Grid →
+        Place*). Session detail shows a 5-step checklist (facades · plan + rekenzones ·
+        heights/roof angles/floors · windows + walls with photos · installations),
+        each step jumping to the next open item; order not enforced
+        (`lib/onsiteProgress.ts`, `components/inspection/FlowSteps.tsx`).
+      · **After the visit**: Finalise calculations (complete → data completeness) ·
+        Export to VABI · Create label in VABI (outside the app) · Store photos +
+        report (PDF now embeds the facade photos, `lib/reportPhotos.ts`).
+      Inserts RLS-verified as an inspector (rolled back) · mobile + web `tsc` clean ·
+      166 tests green (golden VABI byte-identical) · **not device-verified**.
+      **Open:** assigning a visit to another inspector needs an RLS change on
+      `inspection_sessions` insert; native date/time picker (typed DD-MM-YYYY HH:MM now).
 - [ ] **On-device verification pass** (only human-executable): forgot-password
       flow end-to-end on the phone, profile edits, role-gated tabs, results
       screen render, VABI export **share** — the last unticked Phase 1 gate line.
