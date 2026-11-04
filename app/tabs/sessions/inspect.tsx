@@ -9,16 +9,19 @@ try { ImagePicker = require("expo-image-picker"); } catch { ImagePicker = null; 
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { supabase, BuildingElement, Opening } from "../../../lib/supabase";
 import { uploadImageToStorage } from "../../../lib/uploadImage";
+import { syncToAppsheetIfLinked } from "../../../lib/appsheetSync";
 import { useBLE } from "../../../lib/BLEContext";
 import { useAuthStore } from "../../../store/authStore";
 import { GLMMeasurement } from "../../../hooks/useBLEDevice";
-import { FieldSelect } from "../../../components/ui/FieldSelect";
-import { FieldToggle } from "../../../components/ui/FieldToggle";
 import { elementTypeLabel } from "../../../lib/elementTypes";
 import {
   EMPTY_SWEEP, SweepState, addSweepSample,
   thicknessFromFaces, thicknessFromSweep, isUsableThickness,
-} from "../../../lib/thickness";
+} from "@scarnergy/opname-calc";
+import { gridLengthMeters } from "../../../lib/floorplanGeometry";
+import { parseTapwaterSegments, formatTapwaterSegments } from "../../../lib/tapwater";
+import { FieldSelect } from "../../../components/ui/FieldSelect";
+import { FieldToggle } from "../../../components/ui/FieldToggle";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -27,7 +30,7 @@ type SlotKey = "length_mm" | "height_mm" | "width_mm";
 // distance-to-surface, so these are captured from TWO readings (front + back →
 // |Δ| in point mode, or a min/max sweep in continuous mode) rather than one shot.
 type SlotDef = { key: SlotKey; label: string; thickness?: boolean };
-type ElementWithZone = BuildingElement & { zone_name?: string };
+type ElementWithZone = BuildingElement & { zone_name?: string; zone_scale_m?: number | null };
 
 // ── Slot definitions — keys match the Dutch enum values stored in the DB ──────
 
@@ -98,6 +101,19 @@ const DETAIL_FIELDS: Record<string, DetailField[]> = {
     { key: 'dikte_vloer_onder_mm', label: 'Floor thickness below (mm)', type: 'number' },
     { key: 'dikte_muren_mm',       label: 'Adjacent wall thickness (mm)', type: 'number' },
     { key: 'perimeter_m',          label: 'Perimeter (m)',             type: 'number' },
+    // Migration 024 NTA fields (GAP M / §2.1 + §6)
+    { key: 'dikte_vloerconstructie_mm', label: 'Floor construction thickness (mm)', type: 'number' },
+    { key: 'isolatie_dikte_mm',    label: 'Insulation thickness (mm)', type: 'number' },
+    { key: 'isolatie_lambda',      label: 'Insulation λ (W/mK)',       type: 'number' },
+    { key: 'na_isolatie',          label: 'Retrofit insulation',       type: 'toggle' },
+    { key: 'na_isolatie_jaar',     label: 'Retrofit year',             type: 'number',
+      dependsOn: { key: 'na_isolatie', value: true } },
+    { key: 'rc_source',            label: 'Rc source',                 type: 'select',
+      options: [
+        { value: 'documented',        label: 'Documented' },
+        { value: 'observed',          label: 'Observed' },
+        { value: 'buildyear_forfait', label: 'Build-year forfait' },
+      ] },
   ],
   transparant_deel: [
     { key: 'opening_type',          label: 'Type',                 type: 'select', target: 'opening',
@@ -148,6 +164,37 @@ const DETAIL_FIELDS: Record<string, DetailField[]> = {
       ] },
     { key: 'bodemisolatie', label: 'Ground insulation', type: 'toggle' },
     { key: 'perimeter_m',   label: 'Perimeter (m)',   type: 'number' },
+    // Migration 024 NTA fields (§5.2 + §6 + §1.3 — the storey's vloer element
+    // carries the plafond/warmtecapaciteit classes, same as the web zone form)
+    { key: 'kruipruimte_hoogte_m', label: 'Crawl space height (m)', type: 'number',
+      dependsOn: { key: 'description', value: 'Kruipruimte' } },
+    { key: 'isolatie_dikte_mm',    label: 'Insulation thickness (mm)', type: 'number' },
+    { key: 'isolatie_lambda',      label: 'Insulation λ (W/mK)',       type: 'number' },
+    { key: 'na_isolatie',          label: 'Retrofit insulation',       type: 'toggle' },
+    { key: 'na_isolatie_jaar',     label: 'Retrofit year',             type: 'number',
+      dependsOn: { key: 'na_isolatie', value: true } },
+    { key: 'rc_source',            label: 'Rc source',                 type: 'select',
+      options: [
+        { value: 'documented',        label: 'Documented' },
+        { value: 'observed',          label: 'Observed' },
+        { value: 'buildyear_forfait', label: 'Build-year forfait' },
+      ] },
+    { key: 'plafond_type',         label: 'Ceiling type (storey)',     type: 'select',
+      options: [
+        { value: 'gesloten', label: 'Closed' },
+        { value: 'open',     label: 'Open' },
+        { value: 'overig',   label: 'Other' },
+      ] },
+    { key: 'warmtecap_vloer_klasse', label: 'Heat capacity — floor',   type: 'select',
+      options: [
+        { value: 'licht', label: 'Light' },
+        { value: 'zwaar', label: 'Heavy' },
+      ] },
+    { key: 'warmtecap_gevel_klasse', label: 'Heat capacity — facade',  type: 'select',
+      options: [
+        { value: 'licht', label: 'Light' },
+        { value: 'zwaar', label: 'Heavy' },
+      ] },
   ],
   dakkapel: [
     { key: 'description', label: 'Name / description', type: 'text' },
@@ -167,6 +214,18 @@ const DETAIL_FIELDS: Record<string, DetailField[]> = {
         { value: 'PUR',     label: 'PUR' },
         { value: 'EPS',     label: 'EPS' },
         { value: 'Geen',    label: 'None' },
+      ] },
+    // Migration 024 NTA fields (§6)
+    { key: 'isolatie_dikte_mm',    label: 'Insulation thickness (mm)', type: 'number' },
+    { key: 'isolatie_lambda',      label: 'Insulation λ (W/mK)',       type: 'number' },
+    { key: 'na_isolatie',          label: 'Retrofit insulation',       type: 'toggle' },
+    { key: 'na_isolatie_jaar',     label: 'Retrofit year',             type: 'number',
+      dependsOn: { key: 'na_isolatie', value: true } },
+    { key: 'rc_source',            label: 'Rc source',                 type: 'select',
+      options: [
+        { value: 'documented',        label: 'Documented' },
+        { value: 'observed',          label: 'Observed' },
+        { value: 'buildyear_forfait', label: 'Build-year forfait' },
       ] },
   ],
   installatie: [
@@ -192,6 +251,20 @@ const DETAIL_FIELDS: Record<string, DetailField[]> = {
         { value: 'Stadsverwarming',label: 'District heating' },
         { value: 'Biomassa',       label: 'Biomass' },
       ] },
+    // Migration 024 NTA fields — PV params (§7.3), only for solar panels
+    { key: 'pv_aantal_panelen',   label: 'Number of PV panels', type: 'number',
+      dependsOn: { key: 'installation_type', value: 'ZonnePanelen' } },
+    { key: 'pv_wp_per_paneel',    label: 'Wp per panel',        type: 'number',
+      dependsOn: { key: 'installation_type', value: 'ZonnePanelen' } },
+    { key: 'pv_orientatie_deg',   label: 'PV orientation (°)',  type: 'number',
+      dependsOn: { key: 'installation_type', value: 'ZonnePanelen' } },
+    { key: 'pv_hellingshoek_deg', label: 'PV tilt (°)',         type: 'number',
+      dependsOn: { key: 'installation_type', value: 'ZonnePanelen' } },
+    { key: 'pv_beschaduwing_klasse', label: 'PV shading class', type: 'text',
+      dependsOn: { key: 'installation_type', value: 'ZonnePanelen' } },
+    // Tapwater pipe segments (§7.1) — parsed to JSONB via lib/tapwater
+    { key: 'tapwater_segments',   label: 'Pipe segments per room', type: 'text',
+      dependsOn: { key: 'installation_type', value: 'Tapwater' } },
   ],
 };
 
@@ -240,6 +313,8 @@ export default function InspectScreen() {
   const [details,       setDetails]       = useState<Record<string, string | boolean | number>>({});
   // Opening record for transparant_deel elements
   const [openingId,     setOpeningId]     = useState<string | null>(null);
+  // NTA details accordion (collapsed by default — measurement flow first)
+  const [showDetails,   setShowDetails]   = useState(false);
 
   const activeSlotRef = useRef<SlotKey | null>(null);
   // setActiveSlotSync keeps the ref in sync IMMEDIATELY so BLE callbacks that
@@ -337,13 +412,13 @@ export default function InspectScreen() {
     Promise.resolve(
       supabase
         .from("building_elements")
-        .select("*, zones(name)")
+        .select("*, zones(name, floor_plan_scale_m)")
         .eq("id", elementId)
         .single()
     ).then(({ data }) => {
         if (data) {
           const { zones: zoneData, ...rest } = data as any;
-          setElement({ ...rest, zone_name: zoneData?.name ?? null });
+          setElement({ ...rest, zone_name: zoneData?.name ?? null, zone_scale_m: zoneData?.floor_plan_scale_m ?? null });
           setValues({
             ...(rest.length_mm != null ? { length_mm: (rest.length_mm / 1000).toFixed(3) } : {}),
             ...(rest.height_mm != null ? { height_mm: (rest.height_mm / 1000).toFixed(3) } : {}),
@@ -354,7 +429,9 @@ export default function InspectScreen() {
           const initialDetails: Record<string, string | boolean | number> = {};
           for (const f of elementFields) {
             const v = rest[f.key];
-            if (v != null) initialDetails[f.key] = v;
+            if (v == null) continue;
+            // tapwater_segments is JSONB in the DB but edited as one text line
+            initialDetails[f.key] = f.key === 'tapwater_segments' ? formatTapwaterSegments(v) : v;
           }
           setDetails(initialDetails);
           // Load existing photos: generate signed URLs for storage paths
@@ -454,6 +531,11 @@ export default function InspectScreen() {
           .eq("id", element.id);
         // Update local element state so subsequent saves are correct
         setElement(prev => prev ? { ...prev, photo_urls: [...(prev.photo_urls ?? []), storagePath] } : prev);
+
+        // Best-effort push to AppSheet if this element's building is linked
+        // (no-op otherwise). Never blocks or reverts the save above on failure.
+        const { data: zoneRow } = await supabase.from("zones").select("building_id").eq("id", element.zone_id).maybeSingle();
+        if (zoneRow?.building_id) syncToAppsheetIfLinked(zoneRow.building_id);
       }
     } catch (e: any) {
       Alert.alert("Photo upload failed", e.message ?? "Unknown error");
@@ -569,7 +651,15 @@ export default function InspectScreen() {
       const elementDetailFields = (DETAIL_FIELDS[element.element_type] ?? []).filter(f => f.target !== 'opening');
       for (const f of elementDetailFields) {
         const v = details[f.key];
-        if (v != null && v !== '') update[f.key] = v;
+        if (v == null || v === '') continue;
+        if (f.key === 'tapwater_segments' && typeof v === 'string') {
+          update[f.key] = parseTapwaterSegments(v);   // JSONB column — parse the text line
+        } else if (f.type === 'number' && typeof v === 'string') {
+          const n = parseFloat(v.replace(',', '.'));
+          if (Number.isFinite(n)) update[f.key] = n;
+        } else {
+          update[f.key] = v;
+        }
       }
 
       const allSlotsFilled = slots.every(s => {
@@ -578,12 +668,9 @@ export default function InspectScreen() {
         const num = parseFloat(raw);
         return !isNaN(num) && num > 0;
       });
-      const requiredDetailFields = (DETAIL_FIELDS[element.element_type] ?? [])
-        .filter(f => f.target !== 'opening' && !f.dependsOn);
-      const allDetailsFilled = requiredDetailFields.every(f => details[f.key] != null && details[f.key] !== '');
-      if (allSlotsFilled && allDetailsFilled) update.is_complete = true;
-      // Legacy: if no detail fields defined for this type, just require slots
-      if (allSlotsFilled && requiredDetailFields.length === 0) update.is_complete = true;
+      // Completion is measurement-only: an element is complete once all of its
+      // required measurement slots are filled (the DETAILS section was removed).
+      if (allSlotsFilled) update.is_complete = true;
 
       if (Object.keys(update).length > 0) {
         const { error } = await supabase
@@ -675,13 +762,16 @@ export default function InspectScreen() {
   if (!element) return <Text style={styles.error}>Element not found.</Text>;
 
   const slots      = SLOT_MAP[element.element_type] ?? DEFAULT_SLOTS;
+  // Plan-derived in-plan length (metres) from the element's grid width × the zone
+  // scale. Offered as a one-tap suggestion on the matching slot — never auto-filled,
+  // so the measurement audit trail only records values the inspector accepts.
+  const planLengthSlot: SlotKey = element.element_type === 'transparant_deel' ? 'width_mm' : 'length_mm';
+  const planLengthM = gridLengthMeters(element.grid_w, element.zone_scale_m);
   const filledCount = slots.filter(s => {
     const v = parseFloat(values[s.key] ?? "");
     return !isNaN(v) && v > 0;
   }).length;
-  const requiredDetails = (DETAIL_FIELDS[element.element_type] ?? []).filter(f => !f.dependsOn);
-  const filledDetails   = requiredDetails.filter(f => details[f.key] != null && details[f.key] !== '').length;
-  const isFullyComplete = filledCount === slots.length && filledDetails === requiredDetails.length;
+  const isFullyComplete = filledCount === slots.length;
 
   return (
     <KeyboardAvoidingView
@@ -710,7 +800,7 @@ export default function InspectScreen() {
           <Text style={styles.glmBannerText}>
             {isConnected
               ? cmdEnabled
-                ? "GLM ready — press trigger to auto-fill"
+                ? "GLM ready — press trigger, or tap Capture below"
                 : "GLM streaming — tap Capture or enter manually"
               : "No GLM — scan from the session screen, or enter manually"}
           </Text>
@@ -720,6 +810,27 @@ export default function InspectScreen() {
             </Text>
           )}
         </View>
+        {/* Bridge from a live decoded reading into the active/next slot. Shown
+            regardless of cmdEnabled: even when CMD_ENABLE gets a GATT ACK, some
+            GLM 50C units only ever emit 4-byte continuous packets and never a
+            real trigger-press indication (PATH A in useBLEDevice never fires),
+            so relying on cmdEnabled alone silently strands the reading in the
+            console log and never fills a slot. Capture always works. */}
+        {isConnected && lastMeasurement && (() => {
+          const targetSlot = activeSlotRef.current ?? (slots.find(s => {
+            const v = parseFloat(values[s.key] ?? "");
+            return isNaN(v) || v <= 0;
+          })?.key ?? null);
+          if (!targetSlot) return null;
+          const targetLabel = slots.find(s => s.key === targetSlot)?.label ?? targetSlot.replace("_mm", "");
+          return (
+            <TouchableOpacity style={styles.captureBtn} onPress={() => captureNow(lastMeasurement.value_mm)}>
+              <Text style={styles.captureBtnText}>
+                ⊙ Capture {lastMeasurement.value_mm.toFixed(0)} mm → {targetLabel}
+              </Text>
+            </TouchableOpacity>
+          );
+        })()}
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
@@ -777,6 +888,19 @@ export default function InspectScreen() {
                   <Text style={styles.glmBtnText} allowFontScaling={false}>{isActive ? "⏸" : "▶ GLM"}</Text>
                 </TouchableOpacity>
               </View>
+
+              {/* Plan-derived suggestion — one tap to use, then editable */}
+              {slot.key === planLengthSlot && planLengthM != null && !isFilled && (
+                <TouchableOpacity
+                  style={styles.planHint}
+                  onPress={() => {
+                    setValues(prev => ({ ...prev, [slot.key]: planLengthM.toFixed(3) }));
+                    setActiveSlotSync(null);
+                  }}
+                >
+                  <Text style={styles.planHintText}>📐 From plan ≈ {planLengthM.toFixed(2)} m — tap to use</Text>
+                </TouchableOpacity>
+              )}
 
               {/* Live GLM preview while this slot is active */}
               {isActive && isConnected && lastMeasurement && (
@@ -872,55 +996,6 @@ export default function InspectScreen() {
           );
         })}
 
-        {/* ── Qualitative Details ── */}
-        {(DETAIL_FIELDS[element.element_type] ?? []).length > 0 && (
-          <View style={styles.detailSection}>
-            <Text style={styles.detailSectionLabel}>DETAILS</Text>
-            {(DETAIL_FIELDS[element.element_type] ?? []).map(field => {
-              // Conditional visibility: hide fields that depend on another field's value
-              if (field.dependsOn) {
-                const depVal = details[field.dependsOn.key];
-                if (depVal !== field.dependsOn.value) return null;
-              }
-              if (field.type === 'toggle') {
-                return (
-                  <FieldToggle
-                    key={field.key}
-                    label={field.label}
-                    value={!!details[field.key]}
-                    onChange={v => setDetails(prev => ({ ...prev, [field.key]: v }))}
-                  />
-                );
-              }
-              if (field.type === 'select' && field.options) {
-                return (
-                  <FieldSelect
-                    key={field.key}
-                    label={field.label}
-                    value={(details[field.key] as string) ?? null}
-                    options={field.options}
-                    onSelect={v => setDetails(prev => ({ ...prev, [field.key]: v }))}
-                  />
-                );
-              }
-              // number or text: inline TextInput row
-              return (
-                <View key={field.key} style={styles.detailInputRow}>
-                  <Text style={styles.detailInputLabel}>{field.label}</Text>
-                  <TextInput
-                    style={styles.detailInput}
-                    value={details[field.key] != null ? String(details[field.key]) : ''}
-                    onChangeText={v => setDetails(prev => ({ ...prev, [field.key]: field.type === 'number' ? parseFloat(v) || v : v }))}
-                    keyboardType={field.type === 'number' ? 'decimal-pad' : 'default'}
-                    placeholder={field.type === 'number' ? '0.00' : '…'}
-                    placeholderTextColor="#ccc"
-                  />
-                </View>
-              );
-            })}
-          </View>
-        )}
-
         {/* ── Photos ── */}
         <View style={styles.photoSection}>
           <Text style={styles.photoLabel}>PHOTOS</Text>
@@ -945,6 +1020,60 @@ export default function InspectScreen() {
             </TouchableOpacity>
           </ScrollView>
         </View>
+
+        {/* ── NTA details (collapsed by default — measurement-first flow stays primary;
+               fields persist through the existing saveElement paths) ── */}
+        {(DETAIL_FIELDS[element.element_type] ?? []).length > 0 && (
+          <View style={styles.detailsSection}>
+            <TouchableOpacity
+              style={styles.detailsToggle}
+              onPress={() => setShowDetails(v => !v)}
+            >
+              <Text style={styles.photoLabel}>DETAILS</Text>
+              <Text style={styles.detailsToggleHint}>
+                {showDetails ? "hide ▲" : "show ▼"}
+              </Text>
+            </TouchableOpacity>
+
+            {showDetails && (DETAIL_FIELDS[element.element_type] ?? []).map(f => {
+              if (f.dependsOn && details[f.dependsOn.key] !== f.dependsOn.value) return null;
+              if (f.type === 'toggle') {
+                return (
+                  <FieldToggle
+                    key={f.key}
+                    label={f.label}
+                    value={!!details[f.key]}
+                    onChange={v => setDetails(prev => ({ ...prev, [f.key]: v }))}
+                  />
+                );
+              }
+              if (f.type === 'select') {
+                return (
+                  <FieldSelect
+                    key={f.key}
+                    label={f.label}
+                    value={details[f.key] != null ? String(details[f.key]) : null}
+                    options={f.options ?? []}
+                    onSelect={v => setDetails(prev => ({ ...prev, [f.key]: v }))}
+                  />
+                );
+              }
+              return (
+                <View key={f.key} style={styles.detailInputRow}>
+                  <Text style={styles.detailInputLabel}>{f.label}</Text>
+                  <TextInput
+                    style={styles.detailInput}
+                    value={details[f.key] != null ? String(details[f.key]) : ''}
+                    onChangeText={v => setDetails(prev => ({ ...prev, [f.key]: v }))}
+                    keyboardType={f.type === 'number' ? 'decimal-pad' : 'default'}
+                    placeholder={f.key === 'tapwater_segments' ? 'badkamer: 4.77, 2.39; keuken: 0.2' : f.type === 'number' ? '0' : '…'}
+                    placeholderTextColor="#CCC"
+                  />
+                </View>
+              );
+            })}
+          </View>
+        )}
 
         {/* ── Save ── */}
         <TouchableOpacity
@@ -1025,6 +1154,10 @@ const styles = StyleSheet.create({
   glmBtnActive:   { backgroundColor: "#2E86C1" },
   glmBtnText:     { color: "#fff", fontWeight: "700", fontSize: 13 },
 
+  planHint:       { marginTop: 8, alignSelf: "flex-start", backgroundColor: "#EEF2F7",
+                    borderRadius: 6, paddingHorizontal: 10, paddingVertical: 6 },
+  planHintText:   { fontSize: 12, color: "#1E3A5F", fontWeight: "600" },
+
   hint:           { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: "#AED6F1" },
   hintText:       { fontSize: 12, color: "#2E86C1", fontStyle: "italic" },
   hintSub:        { fontSize: 11, color: "#7FB3D3", marginTop: 3 },
@@ -1060,21 +1193,18 @@ const styles = StyleSheet.create({
   flashLabel:     { fontSize: 12, color: "#1E8449", fontWeight: "700", marginTop: 6,
                     textAlign: "center" },
 
-  detailSection:        { backgroundColor: "#fff", borderRadius: 12, overflow: 'hidden',
-                          elevation: 1, shadowColor: "#000", shadowOpacity: 0.04, shadowRadius: 3 },
-  detailSectionLabel:   { fontSize: 11, fontWeight: "700", color: "#888",
-                          letterSpacing: 0.8, textTransform: "uppercase",
-                          paddingHorizontal: 16, paddingTop: 14, paddingBottom: 6 },
-  detailInputRow:       { flexDirection: 'row', alignItems: 'center',
-                          paddingVertical: 10, paddingHorizontal: 16,
-                          backgroundColor: '#fff',
-                          borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#e5e7eb' },
-  detailInputLabel:     { flex: 1, fontSize: 14, color: '#374151', fontWeight: '500' },
-  detailInput:          { fontSize: 14, fontWeight: '600', color: '#1E3A5F',
-                          borderWidth: 1, borderColor: '#dde', borderRadius: 6,
-                          paddingHorizontal: 10, paddingVertical: 6,
-                          minWidth: 100, textAlign: 'right' },
-
+  detailsSection: { backgroundColor: "#fff", borderRadius: 12, paddingVertical: 6,
+                    marginTop: 12, borderWidth: 1, borderColor: "#EBEBEB", overflow: "hidden" },
+  detailsToggle:  { flexDirection: "row", justifyContent: "space-between", alignItems: "center",
+                    paddingHorizontal: 14, paddingVertical: 8 },
+  detailsToggleHint: { fontSize: 11, color: "#2E86C1", fontWeight: "600" },
+  detailInputRow: { flexDirection: "row", alignItems: "center", gap: 10,
+                    paddingHorizontal: 16, paddingVertical: 8,
+                    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e7eb" },
+  detailInputLabel: { flex: 1, fontSize: 14, color: "#374151", fontWeight: "500" },
+  detailInput:    { minWidth: 120, maxWidth: 180, borderWidth: 1, borderColor: "#D1D5DB",
+                    borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6,
+                    fontSize: 14, color: "#111827", textAlign: "right" },
   photoSection:   { backgroundColor: "#fff", borderRadius: 12, padding: 14,
                     elevation: 1, shadowColor: "#000", shadowOpacity: 0.04, shadowRadius: 3 },
   photoLabel:     { fontSize: 11, fontWeight: "700", color: "#888",

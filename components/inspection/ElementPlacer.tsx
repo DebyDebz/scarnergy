@@ -2,18 +2,20 @@ import { useEffect, useRef, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, Modal,
   TextInput, StyleSheet, Alert, ActivityIndicator,
-  PanResponder, PanResponderGestureState,
+  PanResponder, PanResponderGestureState, Image,
 } from 'react-native';
 import { supabase, Zone } from '../../lib/supabase';
 import { useAuthStore } from '../../store/authStore';
 import { isPointInPolygon } from '../../lib/geometry';
+import {
+  projectPointsOnImage, fitPointsToInner, imageOffsets, unprojectPoint, Offsets,
+} from '../../lib/floorplanGeometry';
 import { ClippedGrid } from './ClippedGrid';
 
 const PRIMARY  = '#1E3A5F';
 const CANVAS   = 300;
 const CELL_PX  = 20;
 const PADDING  = 12;
-const INNER    = CANVAS - PADDING * 2;
 
 type ElementType = 'gevel' | 'transparant_deel_door' | 'transparant_deel_window' | 'dak' | 'dakkapel' | 'vloer' | 'installatie';
 
@@ -75,19 +77,6 @@ function paletteSize(type: ElementType): { w: number; h: number } {
 
 const snap = (v: number) => Math.round(v / CELL_PX) * CELL_PX;
 const uid  = () => Math.random().toString(36).slice(2);
-
-function fitLines(raw: Zone['floor_plan_points']): { x1:number; y1:number; x2:number; y2:number }[] {
-  if (!raw || raw.length < 3) return [];
-  const xs = raw.map(p => p.x), ys = raw.map(p => p.y);
-  const minX = Math.min(...xs), maxX = Math.max(...xs);
-  const minY = Math.min(...ys), maxY = Math.max(...ys);
-  const rangeX = maxX - minX || 1, rangeY = maxY - minY || 1;
-  const scale  = Math.min(INNER / rangeX, INNER / rangeY);
-  const offX   = PADDING + (INNER - rangeX * scale) / 2;
-  const offY   = PADDING + (INNER - rangeY * scale) / 2;
-  const mapped = raw.map(p => ({ x: offX + (p.x - minX) * scale, y: offY + (p.y - minY) * scale }));
-  return mapped.map((p, i) => { const n = mapped[(i + 1) % mapped.length]; return { x1: p.x, y1: p.y, x2: n.x, y2: n.y }; });
-}
 
 function DoorSwingArc({ size }: { size: number }) {
   // Render a quarter-circle "swing" arc using a bordered corner
@@ -157,6 +146,9 @@ export function ElementPlacer({ zones, sessionId, onSaved }: Props) {
   const [renameText, setRenameText] = useState('');
   const [saving, setSaving] = useState(false);
   const [loadingElements, setLoadingElements] = useState(true);
+  // Intrinsic image dims per zone (from Image.getSize) → contain-fit offsets, so
+  // image-relative grid_* project onto the photo exactly where the outline does.
+  const [dimsByZone, setDimsByZone] = useState<Record<string, { w: number; h: number }>>({});
   const [ghostPos, setGhostPos]       = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [canUndo, setCanUndo]         = useState(false);
   const countersRef  = useRef<Record<string, number>>({});
@@ -172,52 +164,83 @@ export function ElementPlacer({ zones, sessionId, onSaved }: Props) {
   };
 
   // ─── Load existing elements from DB on mount ────────────────────────────
+  // Resolve each image zone's intrinsic dims first (so grid_* can be projected
+  // into the image's contain-fit frame), then fetch and place the elements.
   useEffect(() => {
     if (zones.length === 0) { setLoadingElements(false); return; }
-    supabase
-      .from('building_elements')
-      .select('id, element_type, name, grid_x, grid_y, grid_w, grid_h, grid_rotation, sort_order, zone_id')
-      .in('zone_id', zones.map(z => z.id))
-      .eq('is_active', true)
-      .order('sort_order')
-      .then(({ data }) => {
-        if (!data || data.length === 0) { setLoadingElements(false); return; }
+    let cancelled = false;
 
-        const byZone: Record<string, PlacedElement[]> = {};
-        const counters: Record<string, number> = {};
-
-        for (const row of data) {
-          const type = dbRowToElementType(row.element_type, row.name);
-          const fallback = paletteSize(type);
-          const w = row.grid_w != null ? Math.round(row.grid_w * CANVAS) : fallback.w;
-          const h = row.grid_h != null ? Math.round(row.grid_h * CANVAS) : fallback.h;
-          const el: PlacedElement = {
-            id:       uid(),
-            dbId:     row.id,
-            type,
-            label:    row.name,
-            x:        row.grid_x != null ? Math.round(row.grid_x * CANVAS) : 0,
-            y:        row.grid_y != null ? Math.round(row.grid_y * CANVAS) : 0,
-            w,
-            h,
-            rotation: row.grid_rotation ?? 0,
-          };
-          if (!byZone[row.zone_id]) byZone[row.zone_id] = [];
-          byZone[row.zone_id].push(el);
-
-          // Seed counters so new elements continue from the right number
-          // e.g. "Wall-03" → counters.gevel = max(3, current)
-          const match = row.name.match(/-(\d+)$/);
-          if (match) {
-            const n = parseInt(match[1], 10);
-            counters[row.element_type] = Math.max(counters[row.element_type] ?? 0, n);
-          }
-        }
-
-        countersRef.current = counters;
-        setElementsByZone(byZone);
-        setLoadingElements(false);
+    const resolveDims = (): Promise<Record<string, { w: number; h: number }>> =>
+      Promise.all(
+        zones.map(z => new Promise<[string, { w: number; h: number } | null]>(resolve => {
+          if (!z.floor_plan_image_url) { resolve([z.id, null]); return; }
+          Image.getSize(
+            z.floor_plan_image_url,
+            (w, h) => resolve([z.id, { w, h }]),
+            () => resolve([z.id, null]),  // unreachable image → blank-frame fallback
+          );
+        })),
+      ).then(pairs => {
+        const out: Record<string, { w: number; h: number }> = {};
+        for (const [id, dims] of pairs) if (dims) out[id] = dims;
+        return out;
       });
+
+    (async () => {
+      const dims = await resolveDims();
+      if (cancelled) return;
+      setDimsByZone(dims);
+
+      const { data } = await supabase
+        .from('building_elements')
+        .select('id, element_type, name, grid_x, grid_y, grid_w, grid_h, grid_rotation, sort_order, zone_id')
+        .in('zone_id', zones.map(z => z.id))
+        .eq('is_active', true)
+        .order('sort_order');
+      if (cancelled) return;
+      if (!data || data.length === 0) { setLoadingElements(false); return; }
+
+      const offsetsFor = (zoneId: string): Offsets =>
+        dims[zoneId] ? imageOffsets(dims[zoneId], CANVAS) : { offX: 0, offY: 0 };
+
+      const byZone: Record<string, PlacedElement[]> = {};
+      const counters: Record<string, number> = {};
+
+      for (const row of data) {
+        const type = dbRowToElementType(row.element_type, row.name);
+        const fallback = paletteSize(type);
+        const off = offsetsFor(row.zone_id);
+        const w = row.grid_w != null ? Math.round(row.grid_w * CANVAS) : fallback.w;
+        const h = row.grid_h != null ? Math.round(row.grid_h * CANVAS) : fallback.h;
+        const el: PlacedElement = {
+          id:       uid(),
+          dbId:     row.id,
+          type,
+          label:    row.name,
+          x:        row.grid_x != null ? Math.round(off.offX + row.grid_x * CANVAS) : 0,
+          y:        row.grid_y != null ? Math.round(off.offY + row.grid_y * CANVAS) : 0,
+          w,
+          h,
+          rotation: row.grid_rotation ?? 0,
+        };
+        if (!byZone[row.zone_id]) byZone[row.zone_id] = [];
+        byZone[row.zone_id].push(el);
+
+        // Seed counters so new elements continue from the right number
+        // e.g. "Wall-03" → counters.gevel = max(3, current)
+        const match = row.name.match(/-(\d+)$/);
+        if (match) {
+          const n = parseInt(match[1], 10);
+          counters[row.element_type] = Math.max(counters[row.element_type] ?? 0, n);
+        }
+      }
+
+      countersRef.current = counters;
+      setElementsByZone(byZone);
+      setLoadingElements(false);
+    })();
+
+    return () => { cancelled = true; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps — zones identity is stable on mount
 
   if (zones.length === 0) {
@@ -240,16 +263,39 @@ export function ElementPlacer({ zones, sessionId, onSaved }: Props) {
 
   const activeZone = zones[activeZoneIdx];
   const elements   = elementsByZone[activeZone.id] ?? [];
-  // Floor plan outline is optional — shown when available, skipped otherwise
-  const floorLines = fitLines(activeZone.floor_plan_points ?? null);
 
-  // Pixel-space polygon for the active zone (used for boundary checks)
-  const polygonPixelPts = (activeZone.floor_plan_points ?? []).length >= 3
-    ? fitLines(activeZone.floor_plan_points!).reduce<{ x: number; y: number }[]>((pts, seg, i, arr) => {
-        if (i === 0) pts.push({ x: seg.x1, y: seg.y1 });
-        pts.push({ x: seg.x2, y: seg.y2 });
-        return pts;
-      }, [])
+  // Outline + element frame for the active zone. Image-anchored (projected onto
+  // the photo) when the zone has an image and its dims are resolved; bbox-fit
+  // otherwise. Both the boundary polygon and placed elements use this frame, so
+  // dragging, the grid clip and the photo all stay aligned.
+  const activeDims = dimsByZone[activeZone.id];
+  // A hand-drawn sketch still shows its own drawing as the background image, same
+  // as GridCanvas — the outline/clip is skipped for it below (its stored "outline"
+  // is just a placeholder rectangle, not a real trace), but the picture itself
+  // is the only visual reference the inspector has for where to place elements.
+  // The sketch capture is always square (PaintCanvas CAPTURE_SIZE x CAPTURE_SIZE),
+  // so its contain-fit offsets are {0,0} — placed elements don't drift.
+  const isSketchZone = !!(activeZone.metadata as any)?.is_sketch;
+  const hasImage   = !!activeZone.floor_plan_image_url && !!activeDims;
+  const activeOff: Offsets = hasImage ? imageOffsets(activeDims!, CANVAS) : { offX: 0, offY: 0 };
+
+  // Pixel-space polygon for the active zone (outline render + boundary checks).
+  // A hand-traced sketch outline is wobbly by construction — clipping the grid
+  // to it just makes the freehand line show through in a different form — so
+  // sketch zones get a plain full-canvas grid instead (no clip, no outline,
+  // no drag-boundary enforcement), same as a never-traced blank zone.
+  const polygonPixelPts = isSketchZone
+    ? []
+    : hasImage
+    ? projectPointsOnImage(activeZone.floor_plan_points ?? null, activeDims!, CANVAS)
+    : fitPointsToInner(activeZone.floor_plan_points ?? null, CANVAS, PADDING);
+
+  // Floor plan outline is optional — shown when available, skipped otherwise.
+  const floorLines = polygonPixelPts.length >= 3
+    ? polygonPixelPts.map((p, i) => {
+        const n = polygonPixelPts[(i + 1) % polygonPixelPts.length];
+        return { x1: p.x, y1: p.y, x2: n.x, y2: n.y };
+      })
     : [];
 
   const addElement = (p: PaletteItem) => {
@@ -394,22 +440,30 @@ export function ElementPlacer({ zones, sessionId, onSaved }: Props) {
       .in('zone_id', dirtyZoneIds);
     if (delErr) { setSaving(false); Alert.alert('Could not update elements', delErr.message); return; }
 
-    // Step 2: bulk-insert the current canvas state for all zones.
-    const rows = zones.flatMap(zone =>
-      (elementsByZone[zone.id] ?? []).map((el, idx) => ({
-        org_id:          profile.org_id,
-        zone_id:         zone.id,
-        element_type:    DB_TYPE[el.type],
-        name:            el.label,
-        orientation_deg: el.rotation,
-        grid_x:          parseFloat((el.x / CANVAS).toFixed(4)),
-        grid_y:          parseFloat((el.y / CANVAS).toFixed(4)),
-        grid_w:          parseFloat((el.w / CANVAS).toFixed(4)),
-        grid_h:          parseFloat((el.h / CANVAS).toFixed(4)),
-        grid_rotation:   el.rotation,
-        sort_order:      idx,
-      }))
-    );
+    // Step 2: bulk-insert the current canvas state for all zones. Element px are
+    // stored back in the zone's frame: image-relative (de-offset by the same
+    // contain-fit letterbox) for image zones, raw fraction for blank zones.
+    const rows = zones.flatMap(zone => {
+      const off: Offsets = dimsByZone[zone.id]
+        ? imageOffsets(dimsByZone[zone.id], CANVAS)
+        : { offX: 0, offY: 0 };
+      return (elementsByZone[zone.id] ?? []).map((el, idx) => {
+        const g = unprojectPoint({ x: el.x, y: el.y }, CANVAS, off);
+        return {
+          org_id:          profile.org_id,
+          zone_id:         zone.id,
+          element_type:    DB_TYPE[el.type],
+          name:            el.label,
+          orientation_deg: el.rotation,
+          grid_x:          parseFloat(g.x.toFixed(4)),
+          grid_y:          parseFloat(g.y.toFixed(4)),
+          grid_w:          parseFloat((el.w / CANVAS).toFixed(4)),
+          grid_h:          parseFloat((el.h / CANVAS).toFixed(4)),
+          grid_rotation:   el.rotation,
+          sort_order:      idx,
+        };
+      });
+    });
 
     const { error: insErr } = await supabase.from('building_elements').insert(rows);
     if (insErr) { setSaving(false); Alert.alert('Could not save elements', insErr.message); return; }
@@ -445,6 +499,14 @@ export function ElementPlacer({ zones, sessionId, onSaved }: Props) {
 
   return (
     <View style={styles.wrap}>
+      {/* Scrollable region: header, sub, zone tabs and canvas. Keeps the title
+          and instructions above the canvas (never overlapped) and lets the
+          canvas scroll into view on shorter screens instead of covering them. */}
+      <ScrollView
+        style={styles.scrollArea}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
       <Text style={styles.header}>Place Elements</Text>
       <Text style={styles.sub}>Tap a type below to add it, then drag to position.</Text>
 
@@ -469,6 +531,14 @@ export function ElementPlacer({ zones, sessionId, onSaved }: Props) {
         onStartShouldSetResponder={() => true}
         onResponderGrant={() => setSelectedId(null)}
       >
+        {/* The original photo/sketch is intentionally NOT drawn here — by this stage
+            (Place Elements, right after Grid Analysis) the scale is already
+            calibrated, so only the grid + zone outline + elements are shown from
+            here on. `activeDims` (resolved via Image.getSize above, independent of
+            rendering) still drives the image's contain-fit frame so the grid clip
+            and placed elements land exactly where they did against the photo —
+            the image itself just stays stored, not displayed. */}
+
         {/* Grid clipped to the footprint (full grid when no plan). Outline kept
             separate below to preserve the existing subtle look. */}
         <ClippedGrid size={CANVAS} cellPx={CELL_PX} points={polygonPixelPts} gridColor="#e5e7eb" showOutline={false} />
@@ -527,6 +597,7 @@ export function ElementPlacer({ zones, sessionId, onSaved }: Props) {
         })}
       </View>
       </View>
+      </ScrollView>
 
       {/* ── Bottom controls — always visible ── */}
       <View style={styles.bottomControls}>
@@ -616,13 +687,19 @@ const styles = StyleSheet.create({
   wrap:           { flex: 1, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 0 },
   header:         { fontSize: 18, fontWeight: '700', color: PRIMARY, marginBottom: 2 },
   sub:            { fontSize: 12, color: '#6B7280', marginBottom: 8 },
+  scrollArea:     { flex: 1 },
+  // flexGrow keeps the canvas vertically centered when there's spare room;
+  // when space is tight the region scrolls instead of overflowing the header.
+  scrollContent:  { flexGrow: 1 },
   tabs:           { flexDirection: 'row', marginBottom: 8 },
   tab:            { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, backgroundColor: '#F3F4F6', marginRight: 8 },
   tabActive:      { backgroundColor: PRIMARY },
   tabTxt:         { fontSize: 13, color: '#374151' },
   tabTxtActive:   { color: '#fff', fontWeight: '600' },
-  // canvasWrap: fills remaining flex space, centers the canvas inside
-  canvasWrap:     { flex: 1, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
+  // canvasWrap: grows to centre the canvas when there's room, but keeps a
+  // minHeight so the fixed-size canvas is never compressed or clipped.
+  canvasWrap:     { flexGrow: 1, minHeight: CANVAS + 16,
+                    alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
   canvas:         { width: CANVAS, height: CANVAS,
                     backgroundColor: '#fafafa', borderRadius: 8, overflow: 'hidden',
                     borderWidth: 1, borderColor: '#E5E7EB' },

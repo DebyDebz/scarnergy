@@ -8,6 +8,7 @@ import { supabase, Zone } from '../../../lib/supabase';
 import { useAuthStore } from '../../../store/authStore';
 import { FloorPlanDetection, elementsToDrafts } from '../../../lib/floorplanDetect';
 import { uploadImageToStorage } from '../../../lib/uploadImage';
+import { syncToAppsheetIfLinked } from '../../../lib/appsheetSync';
 import { FloorPlanImageUpload } from '../../../components/inspection/FloorPlanImageUpload';
 import { ZoneManager } from '../../../components/inspection/ZoneManager';
 import { GridCanvas } from '../../../components/inspection/GridCanvas';
@@ -28,7 +29,8 @@ const STAGE_LABELS: Record<Stage, string> = {
 };
 
 export default function InspectionFlowScreen() {
-  const { id: sessionId, buildingId, forceStage } = useLocalSearchParams<{ id: string; buildingId: string; forceStage?: string }>();
+  const { id: sessionId, buildingId, forceStage, zoneId: forceZoneId, zoneName: forceZoneName } =
+    useLocalSearchParams<{ id: string; buildingId: string; forceStage?: string; zoneId?: string; zoneName?: string }>();
   const router = useRouter();
   const { profile } = useAuthStore();
 
@@ -41,6 +43,29 @@ export default function InspectionFlowScreen() {
   // ─── Stage 1: determine starting point ────────────────────────────────────
   const runCheck = useCallback(async () => {
     setLoading(true);
+
+    // forceStage=2 (+ zoneId/zoneName) lets appsheet-detail.tsx jump directly
+    // into tracing a floor plan for one specific already-materialized zone
+    // (e.g. one that came from a "Retake Measurement" element and has no
+    // floor plan at all yet) — reuses the exact same stage-2 rendering path
+    // ZoneManager's "Draw"/"Redraw" already uses (handleDrawZone below),
+    // just entered from outside the wizard instead of from stage 3. After
+    // save, handlePlanSaved's normal advance-to-stage-3 behavior is
+    // unchanged — same as the zero-zone "+ Draw Floor Plan" entry already
+    // behaves.
+    if (forceStage === '2' && forceZoneId) {
+      const { data: zData } = await supabase
+        .from('zones')
+        .select('*')
+        .eq('building_id', buildingId)
+        .eq('is_active', true);
+      setZones((zData ?? []) as Zone[]);
+      setDrawingZoneId(forceZoneId);
+      setDrawingZoneName(forceZoneName ?? '');
+      setStage(2);
+      setLoading(false);
+      return;
+    }
 
     // forceStage=5 lets session detail bypass runCheck and land directly on
     // ElementPlacer — used when some zones have elements but others don't.
@@ -110,7 +135,17 @@ export default function InspectionFlowScreen() {
     // ── Resume in-progress session at the saved stage ────────────────────────
     // Only restore stages 3-5 (stages that have saved state worth resuming).
     // Stage 2 (draw) is not restored because drawn points are in-memory only.
-    if (savedStage && savedStage >= 3 && savedStage <= 5 && cleanZones.length > 0) {
+    // Stage 4 (Grid Analysis) additionally needs at least one CURRENTLY loaded
+    // zone with a real traced floor plan — GridCanvas has nothing to show
+    // otherwise (see its own zonesWithPlan/activeZone check) and would render
+    // fully blank under a header that still says "Grid Analysis". This can
+    // drift out of sync with a stale saved flow_stage=4 when zones for the
+    // same building later include bare, plan-less zones added a different
+    // way (e.g. AppSheet's "Retake Measurement", which materializes a zone
+    // with no floor_plan_points) — re-derive reachability from current zone
+    // state instead of trusting the persisted column blindly.
+    if (savedStage && savedStage >= 3 && savedStage <= 5 && cleanZones.length > 0
+        && (savedStage !== 4 || zonesWithPlan.length > 0)) {
       setStage(savedStage);
       setLoading(false);
       return;
@@ -125,7 +160,7 @@ export default function InspectionFlowScreen() {
       await advanceTo(3);
     }
     setLoading(false);
-  }, [buildingId, sessionId, forceStage, router]);
+  }, [buildingId, sessionId, forceStage, forceZoneId, forceZoneName, router]);
 
   useEffect(() => { runCheck(); }, [runCheck]);
 
@@ -158,7 +193,7 @@ export default function InspectionFlowScreen() {
   // scale) and ElementPlacer, which loads the inserted elements automatically.
   const handleDetected = async (
     det: FloorPlanDetection,
-    image: { uri: string; mime: string; ext: string },
+    image: { uri: string; mime: string; ext: string; isSketch: boolean },
   ) => {
     if (!profile) return;
     const usableRooms = det.rooms.filter(r => r.polygon && r.polygon.length >= 3);
@@ -212,7 +247,7 @@ export default function InspectionFlowScreen() {
 
         const { data: zoneRow, error: zErr } = await supabase
           .from('zones')
-          .insert({ org_id: profile.org_id, building_id: buildingId, zone_code: zoneCode, name, floor_level: 0, metadata: { auto_detected: true } })
+          .insert({ org_id: profile.org_id, building_id: buildingId, zone_code: zoneCode, name, floor_level: 0, metadata: { auto_detected: true, ...(image.isSketch ? { is_sketch: true } : {}) } })
           .select()
           .single();
         if (zErr || !zoneRow) continue;
@@ -241,6 +276,11 @@ export default function InspectionFlowScreen() {
       setZones((data ?? []) as Zone[]);
       setDrawingZoneId(null);
       setDrawingZoneName('');
+
+      // Best-effort push to AppSheet if this building is linked (no-op
+      // otherwise). Never blocks or reverts the zones/elements saved above.
+      syncToAppsheetIfLinked(buildingId);
+
       await advanceTo(3);
     } catch (e: any) {
       Alert.alert('Auto-detect failed', e?.message ?? 'Could not apply the detection.');

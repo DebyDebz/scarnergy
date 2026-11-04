@@ -33,7 +33,8 @@ export function FloorPlanViewer({ zones, onContinue }: Props) {
     ? projectPointsOnImage(activeZone.floor_plan_points ?? null, imgDims, CANVAS)
     : fitPointsToInner(activeZone.floor_plan_points ?? null, CANVAS, PADDING);
   const scaleM  = activeZone.floor_plan_scale_m ?? 5;
-  const cellM   = scaleM / (INNER / CELL_PX);
+  // floor_plan_scale_m = metres across the full canvas width.
+  const cellM   = (CELL_PX / CANVAS) * scaleM;
 
   return (
     <View style={styles.wrap}>

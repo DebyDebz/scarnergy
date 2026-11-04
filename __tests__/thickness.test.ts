@@ -18,7 +18,7 @@ import {
   MIN_SWEEP_SAMPLES,
   MIN_SWEEP_SPREAD_MM,
   MIN_THICKNESS_MM,
-} from "../lib/thickness";
+} from "../packages/opname-calc/src/thickness";
 
 // Fold a list of samples into a sweep, marked active so it mirrors a live sweep.
 const sweepOf = (...samples: number[]) =>

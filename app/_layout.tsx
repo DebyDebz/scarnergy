@@ -1,10 +1,18 @@
 import { useEffect, useState, Component, ReactNode } from "react";
 import { Slot, useRouter, useSegments } from "expo-router";
 import { Platform, Text, View, LogBox } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 LogBox.ignoreLogs([
   '"shadow*" style props are deprecated',
   "props.pointerEvents is deprecated",
+  // Benign auth noise: supabase-js console.error's an expired refresh token on
+  // cold start, then clears the session itself — the user just signs in again.
+  // Same patterns as IGNORED_ERROR_PATTERNS in lib/errorLog.ts.
+  /invalid refresh token/i,
+  /refresh token not found/i,
+  /auth session missing/i,
+  /auto refresh tick failed/i,
 ]);
 
 // LogBox only covers native; filter the same noisy warnings from the web console.
@@ -17,11 +25,22 @@ if (Platform.OS === "web") {
   };
 }
 import { useAuthStore } from "../store/authStore";
+import { supabaseConfigError } from "../lib/supabase";
 import { BLEProvider } from "../lib/BLEContext";
+import { installErrorHandlers, reportError } from "../lib/errorLog";
+import { ErrorOverlay } from "../components/ui/ErrorOverlay";
+import { initSentry, captureException, wrapWithSentry } from "../lib/sentry";
+
+// Initialize the native crash reporter first (it installs its own global
+// handlers), then chain our in-app JS handlers on top. Both run at module load,
+// before any component mounts, so startup failures are captured too.
+initSentry();
+installErrorHandlers();
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
   state = { error: null };
   static getDerivedStateFromError(e: Error) { return { error: e.message }; }
+  componentDidCatch(e: Error) { reportError(e, "error"); captureException(e); }
   render() {
     if (this.state.error) {
       return (
@@ -45,7 +64,7 @@ const DEV_PROFILE = {
   is_active: true,
 };
 
-export default function RootLayout() {
+function RootLayout() {
   const { session, loading, loadProfile } = useAuthStore();
   const router   = useRouter();
   const segments = useSegments();
@@ -53,6 +72,7 @@ export default function RootLayout() {
 
   useEffect(() => {
     setMounted(true);
+    if (supabaseConfigError) return; // config screen is shown; don't hit the backend
     if (DEV_BYPASS_AUTH) {
       useAuthStore.setState({ profile: DEV_PROFILE, loading: false });
       return;
@@ -69,6 +89,7 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (!mounted) return;
+    if (supabaseConfigError) return;
     if (loading) return;
     if (DEV_BYPASS_AUTH) {
       if (segments[0] !== "tabs") router.replace("/tabs");
@@ -84,11 +105,27 @@ export default function RootLayout() {
     else if (session && !inTabs) router.replace("/tabs");
   }, [mounted, session, loading, segments]);
 
+  if (supabaseConfigError) {
+    return (
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: 24, backgroundColor: "#fff" }}>
+        <Text style={{ color: "#b91c1c", fontSize: 16, fontWeight: "700", marginBottom: 8 }}>Configuration error</Text>
+        <Text style={{ color: "#333", fontSize: 13, textAlign: "center" }}>{supabaseConfigError}</Text>
+      </View>
+    );
+  }
+
   return (
-    <ErrorBoundary>
-      <BLEProvider>
-        <Slot />
-      </BLEProvider>
-    </ErrorBoundary>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <ErrorBoundary>
+        <BLEProvider>
+          <Slot />
+        </BLEProvider>
+        <ErrorOverlay />
+      </ErrorBoundary>
+    </GestureHandlerRootView>
   );
 }
+
+// Wrap the root with Sentry so it can hook the app's lifecycle and touch events
+// onto crash reports. No-op if Sentry init was skipped (no DSN / Expo Go).
+export default wrapWithSentry(RootLayout);

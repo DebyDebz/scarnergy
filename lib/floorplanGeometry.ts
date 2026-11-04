@@ -12,6 +12,66 @@
 
 export interface Pt { x: number; y: number }
 export interface Seg { x1: number; y1: number; x2: number; y2: number }
+export interface GridRect { x: number; y: number; w: number; h: number }
+export interface Offsets { offX: number; offY: number }
+
+/**
+ * Contain-fit letterbox offsets for an image of intrinsic `dims` shown
+ * `resizeMode="contain"` inside a square canvas. This is the single source of
+ * the px offset that both the outline projection and the element projection use,
+ * so geometry authored against the image (outline, placed elements, grid clip)
+ * all share one coordinate frame and stays aligned on the photo.
+ */
+export function imageOffsets(dims: { w: number; h: number }, canvas: number): Offsets {
+  if (!dims.w || !dims.h) return { offX: 0, offY: 0 };
+  const cs = canvas / Math.max(dims.w, dims.h);
+  return { offX: (canvas - dims.w * cs) / 2, offY: (canvas - dims.h * cs) / 2 };
+}
+
+/**
+ * Project an element's stored grid rect into canvas-space px. Element grid_*
+ * live in the SAME normalised frame as floor_plan_points — image-relative when
+ * the zone has an image (so they land on the photo), or a raw canvas fraction
+ * for blank zones (offsets {0,0}). Width/height scale by `canvas`; position is
+ * shifted by the contain-fit letterbox so an element sits exactly where its
+ * outline does. With {0,0} offsets this reduces to the previous `grid_* * canvas`.
+ */
+export function projectGridRect(
+  rect: GridRect,
+  canvas: number,
+  offsets: Offsets = { offX: 0, offY: 0 },
+): { x: number; y: number; w: number; h: number } {
+  return {
+    x: offsets.offX + rect.x * canvas,
+    y: offsets.offY + rect.y * canvas,
+    w: rect.w * canvas,
+    h: rect.h * canvas,
+  };
+}
+
+/**
+ * Real-world length (metres) of an element from its stored grid extent and the
+ * zone's scale. `floor_plan_scale_m` is metres across the full canvas width and
+ * `grid_w`/`grid_h` are fractions of that width, so length = extent * scaleM.
+ * Returns null when either input is missing. Used to pre-fill / suggest element
+ * measurements derived from the calibrated plan.
+ */
+export function gridLengthMeters(
+  gridExtent: number | null | undefined,
+  scaleM: number | null | undefined,
+): number | null {
+  if (gridExtent == null || scaleM == null || !isFinite(gridExtent) || !isFinite(scaleM)) return null;
+  return gridExtent * scaleM;
+}
+
+/** Inverse of the position half of projectGridRect (canvas px → stored fraction). */
+export function unprojectPoint(
+  pt: Pt,
+  canvas: number,
+  offsets: Offsets = { offX: 0, offY: 0 },
+): Pt {
+  return { x: (pt.x - offsets.offX) / canvas, y: (pt.y - offsets.offY) / canvas };
+}
 
 /** Close a ring of points into edge segments (last point connects back to first). */
 function toSegments(mapped: Pt[]): Seg[] {
@@ -33,9 +93,7 @@ export function projectPointsOnImage(
   canvas: number,
 ): Pt[] {
   if (!points || points.length < 3 || !dims.w || !dims.h) return [];
-  const cs = canvas / Math.max(dims.w, dims.h);
-  const offX = (canvas - dims.w * cs) / 2;
-  const offY = (canvas - dims.h * cs) / 2;
+  const { offX, offY } = imageOffsets(dims, canvas);
   return points.map(p => ({ x: offX + p.x * canvas, y: offY + p.y * canvas }));
 }
 

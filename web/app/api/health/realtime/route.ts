@@ -4,7 +4,12 @@ export async function GET() {
   try {
     const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/realtime/v1/api/tenants/realtime-dev/health`;
     const res = await fetch(url, {
-      headers: { apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY! },
+      // Realtime's tenant health endpoint requires a Bearer token; apikey
+      // alone gets a 403 (which mis-reported realtime as down).
+      headers: {
+        apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+        Authorization: `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!}`,
+      },
       signal: AbortSignal.timeout(3000),
     });
     return NextResponse.json({ ok: res.ok }, { status: res.ok ? 200 : 502 });

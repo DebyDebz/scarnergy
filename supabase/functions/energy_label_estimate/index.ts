@@ -44,14 +44,21 @@ serve(async (req) => {
       results[zid] = data;
     }
 
-    // If building_id provided, also compute building-level label (worst zone)
+    // If building_id provided, also compute building-level label (worst zone).
+    // compute_zone_energy_label now returns null for a zone with no Rc data
+    // at all (see 036_fix_energy_label_no_data.sql) rather than fabricating
+    // 'G' — those nulls must be filtered out here too, otherwise a building
+    // with zero measured zones would fall back to the reduce seed and wrongly
+    // report the *best* possible label ("A++++") instead of no label.
     let buildingLabel = null;
     if (building_id && zoneIds.length > 0) {
       const labelOrder = ["A++++","A+++","A++","A+","A","B","C","D","E","F","G"];
-      const labels = Object.values(results);
-      buildingLabel = labels.reduce((worst, label) => {
-        return labelOrder.indexOf(label) > labelOrder.indexOf(worst) ? label : worst;
-      }, "A++++");
+      const knownLabels = Object.values(results).filter((l): l is string => !!l && labelOrder.includes(l));
+      if (knownLabels.length > 0) {
+        buildingLabel = knownLabels.reduce((worst, label) =>
+          labelOrder.indexOf(label) > labelOrder.indexOf(worst) ? label : worst
+        );
+      }
     }
 
     return new Response(

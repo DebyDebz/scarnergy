@@ -10,12 +10,14 @@ export interface Organisation {
   longitude: number | null;
   settings: Record<string, unknown>;
 }
+export type UserStatus = 'pending' | 'approved' | 'rejected';
 export interface UserProfile {
   id: string;
   org_id: string;
   role: Role;
   full_name: string;
   is_active: boolean;
+  status: UserStatus;
 }
 export interface BleDevice {
   id: string;
@@ -37,6 +39,44 @@ export interface Building {
   building_type: string;
   construction_year: number;
   gross_floor_area_m2: number;
+  latitude: number | null;
+  longitude: number | null;
+  // BAG / 3DBAG cache (migration 026) — raw registry values, distinct from
+  // the manual construction_year / gross_floor_area_m2 above.
+  bag_pand_id: string | null;
+  bag_vbo_id: string | null;
+  bag_bouwjaar: number | null;
+  bag_oppervlakte_m2: number | null;
+  bag_gebruiksdoel: string | null;
+  dbag_hoogte_m: number | null;
+  bag_fetched_at: string | null;
+  // AppSheet-only: set when the source Objecten row's Adres column is that
+  // workbook's own live automation's error string ("...niet gevonden, pas
+  // regel aan...") rather than a real address — see
+  // lib/appsheet/mappers.ts isUnresolvedAdres(). Native/Supabase buildings
+  // never set this (always undefined there).
+  address_unresolved?: boolean;
+}
+export interface Rekenzone {
+  id: string;
+  org_id: string;
+  building_id: string;
+  name: string;
+  description: string | null;
+  notes: string | null;
+  sort_order: number;
+  is_active: boolean;
+  // AppSheet-only: this rekenzone's correlated Rekenzone ID once a
+  // dak/vloer/installatie under it has synced to/from AppSheet (migration
+  // 031) — mirrors zones/building_elements/openings' appsheet_row_key (030).
+  appsheet_row_key?: string | null;
+}
+export interface ElementDefault {
+  id: string;
+  org_id: string;
+  element_kind: string;
+  payload: Record<string, unknown>;
+  updated_at: string;
 }
 export interface Zone {
   id: string;
@@ -45,7 +85,10 @@ export interface Zone {
   name: string;
   floor_level: number;
   gross_area_m2: number;
+  ceiling_height_m: number | null;
+  description: string | null;
   energy_label: string | null;
+  rekenzone_id: string | null;
   floor_plan_image_url: string | null;
   floor_plan_points: Array<{ x: number; y: number }> | null;
   floor_plan_scale_m: number | null;
@@ -89,6 +132,24 @@ export interface BuildingElement {
   is_active: boolean;
   sort_order: number;
   notes: string | null;
+  // Migration 024 — Phase 2 calc fields (all nullable/defaulted, additive)
+  dikte_vloerconstructie_mm: number | null;
+  rekenhoogte_m_override: number | null;
+  warmtecap_vloer_klasse: string | null;
+  warmtecap_gevel_klasse: string | null;
+  plafond_type: string | null;
+  rc_source: string | null;
+  isolatie_dikte_mm: number | null;
+  isolatie_lambda: number | null;
+  na_isolatie: boolean;
+  na_isolatie_jaar: number | null;
+  kruipruimte_hoogte_m: number | null;
+  pv_aantal_panelen: number | null;
+  pv_wp_per_paneel: number | null;
+  pv_orientatie_deg: number | null;
+  pv_hellingshoek_deg: number | null;
+  pv_beschaduwing_klasse: string | null;
+  tapwater_segments: Record<string, number[]> | null;
 }
 export interface Opening {
   id: string;
@@ -111,6 +172,10 @@ export interface Opening {
   overstek_m: number;
   belemmering: string | null;
   notes: string | null;
+  // Migration 024 — Phase 2 calc fields (§4.2/4.3)
+  u_glas: number | null;
+  g_waarde: number | null;
+  f_sh: number | null;
 }
 export interface InspectionSession {
   id: string;
@@ -145,6 +210,30 @@ export interface BuildingFacadePhoto {
   photo_url: string;
   captured_at: string;
   created_at: string;
+}
+
+export type ContactRole = 'eigenaar' | 'huurder' | 'beheerder' | 'opdrachtgever';
+export interface Contact {
+  id: string;
+  org_id: string;
+  building_id: string | null;
+  legacy_id: string | null;
+  full_name: string;
+  phone: string | null;
+  email: string | null;
+  role: ContactRole | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EnergyLabelSnapshot {
+  id: string;
+  org_id: string;
+  building_id: string;
+  session_id: string;
+  energy_label: string;
+  computed_at: string;
 }
 
 export interface BuildingSummary extends Building {
@@ -187,11 +276,14 @@ export type Database = {
       user_profiles:       TableDef<UserProfile>;
       ble_devices:         TableDef<BleDevice, Omit<BleDevice, 'id'>>;
       buildings:           TableDef<Building>;
+      element_defaults:    TableDef<ElementDefault>;
+      rekenzones:          TableDef<Rekenzone>;
       zones:               TableDef<Zone>;
       building_elements:   TableDef<BuildingElement>;
       openings:            TableDef<Opening>;
       inspection_sessions: TableDef<InspectionSession>;
       measurements:        TableDef<Measurement>;
+      contacts:            TableDef<Contact>;
     };
     Views: {
       building_summary:    ViewDef<BuildingSummary>;

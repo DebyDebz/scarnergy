@@ -1,16 +1,21 @@
 import { createClient } from "@supabase/supabase-js";
 import { Platform } from "react-native";
-import * as SecureStore from "expo-secure-store";
+import { getItemChunked, setItemChunked, removeItemChunked } from "./secureStore";
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
-if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-  throw new Error(
-    '[Supabase] EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY must be set.\n' +
-    'Run: cd scarnergy-app && npm start  (the prestart hook auto-detects the backend IP)'
-  );
-}
+// Missing config must NOT throw here: this module is imported during app
+// bootstrap, and a module-scope throw kills the app before the first frame
+// (builds 13/14 SIGSEGV'd at launch while native marshaled exactly this
+// error). Export the problem instead; the root layout renders a readable
+// configuration-error screen.
+export const supabaseConfigError: string | null =
+  !SUPABASE_URL || !SUPABASE_ANON_KEY
+    ? '[Supabase] EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY must be set.\n' +
+      'Dev: npm start (the prestart hook auto-detects the backend IP).\n' +
+      'Release: set them in the eas.json build profile env.'
+    : null;
 
 const supabaseStorage =
   Platform.OS === "web"
@@ -20,9 +25,12 @@ const supabaseStorage =
         removeItem: (key: string) => { localStorage.removeItem(key); return Promise.resolve(); },
       }
     : {
-        getItem:    (key: string) => SecureStore.getItemAsync(key),
-        setItem:    (key: string, value: string) => SecureStore.setItemAsync(key, value),
-        removeItem: (key: string) => SecureStore.deleteItemAsync(key),
+        // Chunked adapter: the Supabase session exceeds SecureStore's ~2048-byte
+        // single-value limit, so we split it across keychain entries. See
+        // lib/secureStore.ts. Legacy single-value sessions are read as a fallback.
+        getItem:    (key: string) => getItemChunked(key),
+        setItem:    (key: string, value: string) => setItemChunked(key, value),
+        removeItem: (key: string) => removeItemChunked(key),
       };
 
 const DEV_JWT = process.env.EXPO_PUBLIC_DEV_JWT;
@@ -34,8 +42,10 @@ function devFetch(input: RequestInfo | URL, init?: RequestInit) {
 }
 
 export const supabase = createClient(
-  SUPABASE_URL,
-  SUPABASE_ANON_KEY,
+  // Fallbacks keep createClient from throwing when config is missing; the
+  // config-error screen prevents any real request from being made.
+  SUPABASE_URL ?? "http://supabase-config-missing.invalid",
+  SUPABASE_ANON_KEY ?? "supabase-config-missing",
   {
     auth: {
       storage: supabaseStorage,
@@ -64,6 +74,7 @@ export type Database = {
       user_profiles:       { Row: UserProfile };
       ble_devices:         { Row: BleDevice };
       buildings:           { Row: Building };
+      rekenzones:          { Row: Rekenzone };
       zones:               { Row: Zone };
       building_elements:   { Row: BuildingElement };
       openings:            { Row: Opening };
@@ -83,6 +94,7 @@ export interface Organisation {
 }
 export interface UserProfile {
   id: string; org_id: string; role: string; full_name: string; is_active: boolean;
+  status?: 'pending' | 'approved' | 'rejected';
 }
 export interface BleDevice {
   id: string; org_id: string; mac_address: string; nickname: string; device_type: string;
@@ -93,14 +105,36 @@ export interface Building {
   house_number: string; postal_code: string; city: string;
   building_type: string; construction_year: number; gross_floor_area_m2: number;
   is_active: boolean;
+  latitude: number | null; longitude: number | null;
+  // BAG / 3DBAG cache (migration 026) — written by the web API route,
+  // display-only on mobile via the normal buildings/building_summary reads.
+  bag_pand_id: string | null; bag_vbo_id: string | null;
+  bag_bouwjaar: number | null; bag_oppervlakte_m2: number | null;
+  bag_gebruiksdoel: string | null; dbag_hoogte_m: number | null;
+  bag_fetched_at: string | null;
+  // Set when this row is a "shadow" building materialized from an AppSheet
+  // Objecten row (see web/app/api/appsheet/mobile/buildings/route.ts POST) —
+  // null for buildings created natively.
+  appsheet_object_id: string | null;
+  created_at: string;
+}
+export interface Rekenzone {
+  id: string; org_id: string; building_id: string; name: string;
+  description: string | null; notes: string | null;
+  sort_order: number; is_active: boolean;
+  // AppSheet-only correlation (migration 031) — mirrors Zone/appsheet_row_key.
+  appsheet_row_key?: string | null;
 }
 export interface Zone {
   id: string; building_id: string; zone_code: string; name: string;
   floor_level: number; gross_area_m2: number; energy_label: string | null;
+  ceiling_height_m: number | null; description: string | null;
+  rekenzone_id: string | null;
   is_active: boolean;
   floor_plan_points: Array<{ x: number; y: number }> | null;
   floor_plan_scale_m: number | null;
   floor_plan_image_url: string | null;
+  metadata?: Record<string, unknown> | null;
 }
 export interface BuildingElement {
   id: string; zone_id: string; element_type: string; name: string;
@@ -132,6 +166,24 @@ export interface BuildingElement {
   grid_x: number | null; grid_y: number | null;
   grid_w: number | null; grid_h: number | null;
   grid_rotation: number | null;
+  // Migration 024 — Phase 2 calc fields (all nullable/defaulted, additive)
+  dikte_vloerconstructie_mm: number | null;
+  rekenhoogte_m_override: number | null;
+  warmtecap_vloer_klasse: string | null;
+  warmtecap_gevel_klasse: string | null;
+  plafond_type: string | null;
+  rc_source: string | null;
+  isolatie_dikte_mm: number | null;
+  isolatie_lambda: number | null;
+  na_isolatie: boolean;
+  na_isolatie_jaar: number | null;
+  kruipruimte_hoogte_m: number | null;
+  pv_aantal_panelen: number | null;
+  pv_wp_per_paneel: number | null;
+  pv_orientatie_deg: number | null;
+  pv_hellingshoek_deg: number | null;
+  pv_beschaduwing_klasse: string | null;
+  tapwater_segments: Record<string, number[]> | null;
 }
 export interface Opening {
   id: string; org_id: string; element_id: string; opening_type: string;
@@ -145,6 +197,10 @@ export interface Opening {
   overstek_m: number;
   belemmering: string | null;
   notes: string | null;
+  // Migration 024 — Phase 2 calc fields (§4.2/4.3)
+  u_glas: number | null;
+  g_waarde: number | null;
+  f_sh: number | null;
 }
 export interface InspectionSession {
   id: string; org_id: string; building_id: string; inspector_id: string;

@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase-server';
+import { requireAdmin } from '@/lib/requireAdmin';
 
 export async function POST(req: NextRequest) {
+  // Previously reachable by anyone — web/middleware.ts's ADMIN_ONLY check
+  // only protects the /organizations page, not this API route (matcher
+  // excludes api/ entirely). Admin-gated same as the AppSheet mobile routes.
+  const auth = await requireAdmin();
+  if ('error' in auth) return auth.error;
+
   const { name, address, city, postal_code, latitude, longitude, user_ids, building_ids } = await req.json();
 
   if (!name?.trim()) {

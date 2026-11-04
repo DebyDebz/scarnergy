@@ -1,0 +1,15 @@
+{
+  "name": "@scarnergy/opname-calc",
+  "version": "0.0.0",
+  "description": "Shared, dependency-free NTA 8800 opname primitives used by both the mobile inspector app and the web admin app. Single source of truth for the geometry/unit math that previously lived duplicated in lib/vabiExport.ts (mobile) and web/lib/{calc,vabiXml}.ts (web).",
+  "private": true,
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "files": [
+    "src"
+  ]
+}

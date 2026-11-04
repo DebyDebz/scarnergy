@@ -53,9 +53,11 @@ serve(async (req) => {
     const updates = measurements.map((m, i) => {
       const ai = aiResults[i] ?? {};
       const ruleResult = validateByRules(m);
+      const isAnomaly = ai.is_anomaly || ruleResult.is_anomaly ? true : false;
       return {
         id: m.id,
-        validation_result: ai.is_anomaly || ruleResult.is_anomaly ? "anomaly" : "pass",
+        is_anomaly: isAnomaly,
+        validation_result: isAnomaly ? "anomaly" : "pass",
         validation_message: ruleResult.message ?? ai.message ?? null,
         anomaly_score: ai.anomaly_score ?? null,
         classifier_label: ai.classifier_label ?? m.measurement_type ?? null,
@@ -68,6 +70,7 @@ serve(async (req) => {
       await supabase
         .from("measurements")
         .update({
+          is_anomaly: update.is_anomaly,
           validation_result: update.validation_result,
           validation_message: update.validation_message,
           anomaly_score: update.anomaly_score,
